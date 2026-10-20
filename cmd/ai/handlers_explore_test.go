@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai/loop"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/validation"
 	"tellurion/pkg/domain"
 	"tellurion/pkg/storage"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // fakeExploreRunner 顶替真实 pipeline。block 非 nil 时会卡住每次尝试，

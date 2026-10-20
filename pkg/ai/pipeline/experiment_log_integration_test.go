@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
 	"tellurion/pkg/domain"
 	"tellurion/pkg/storage"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // 真库取证：1a 的存储层与 1b 的生产者必须真的能串起来。

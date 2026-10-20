@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/agents"
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
 	"tellurion/pkg/domain"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // mockBacktestRunner is a test double for BacktestRunner

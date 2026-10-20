@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai/intent"
 	"tellurion/pkg/domain"
 	"tellurion/pkg/expression"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // P0-5 的第二层根因：意图 → 可执行配置之间缺一层映射。

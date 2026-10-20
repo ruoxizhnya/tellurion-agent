@@ -6,9 +6,9 @@ import (
 	"sync"
 	"testing"
 
-	"tellurion-agent/pkg/ai/gene_pool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tellurion-agent/pkg/ai/gene_pool"
 )
 
 // MockStrategyPool is a mock implementation for testing

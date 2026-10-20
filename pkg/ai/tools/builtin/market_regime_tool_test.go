@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tellurion-agent/pkg/ai/tools"
+	"tellurion/pkg/domain"
 )
 
 // ═══════════════════════════════════════════════════════════════════════

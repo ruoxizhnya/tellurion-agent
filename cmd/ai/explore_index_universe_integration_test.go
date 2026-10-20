@@ -22,8 +22,8 @@ import (
 	"os"
 	"testing"
 
-	"tellurion/pkg/bootstrap"
 	"github.com/stretchr/testify/require"
+	"tellurion/pkg/bootstrap"
 )
 
 func TestData01_IndexUniverse_EndToEndBacktest(t *testing.T) {

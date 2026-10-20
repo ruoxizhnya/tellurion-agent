@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
 	"tellurion/pkg/domain"
 	"tellurion/pkg/strategy"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // P0-5：Execute 此前有两条平行的路 —— Stage 2 产出可执行的 YAML，

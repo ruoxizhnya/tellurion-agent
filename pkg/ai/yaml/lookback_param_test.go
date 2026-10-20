@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"tellurion-agent/pkg/ai/intent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tellurion-agent/pkg/ai/intent"
 )
 
 // P1-2b：默认表达式的回看窗口必须跟着意图参数走。

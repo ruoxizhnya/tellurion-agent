@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/intent"
 	"tellurion-agent/pkg/ai/pipeline"
@@ -11,8 +13,6 @@ import (
 	yamlgen "tellurion-agent/pkg/ai/yaml"
 	"tellurion/pkg/domain"
 	"tellurion/pkg/storage"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // stubBacktest 顶替真实回测引擎：真回测要查行情、跑撮合，一轮几十次下来太慢，

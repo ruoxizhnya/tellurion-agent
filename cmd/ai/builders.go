@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/spf13/viper"
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/tools"
@@ -27,7 +28,6 @@ import (
 	"tellurion/pkg/sandbox/runner"
 	"tellurion/pkg/sandbox/staticcheck"
 	"tellurion/pkg/storage"
-	"github.com/spf13/viper"
 )
 
 // ── 来自 core pkg/bootstrap/copilot.go（AI 拆仓阶段 2 随迁，逐字搬运）──

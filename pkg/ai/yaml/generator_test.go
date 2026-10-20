@@ -3,9 +3,9 @@ package yaml
 import (
 	"testing"
 
-	"tellurion-agent/pkg/ai/intent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tellurion-agent/pkg/ai/intent"
 )
 
 func TestNewGenerator(t *testing.T) {

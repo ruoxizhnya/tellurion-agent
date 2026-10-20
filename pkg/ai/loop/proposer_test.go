@@ -3,9 +3,9 @@ package loop
 import (
 	"testing"
 
-	"tellurion-agent/pkg/ai/search"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tellurion-agent/pkg/ai/search"
 )
 
 func testSpace() *search.SearchSpace {

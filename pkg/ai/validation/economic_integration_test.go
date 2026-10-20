@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/spf13/viper"
 	"tellurion/pkg/backtest"
 	"tellurion/pkg/domain"
 	"tellurion/pkg/fees"
@@ -30,7 +31,6 @@ import (
 	"tellurion/pkg/risk"
 	"tellurion/pkg/strategy"
 	"tellurion/pkg/strategy/examples"
-	"github.com/spf13/viper"
 )
 
 func synthBars(symbols []string, days int, start time.Time, seed int64) map[string][]domain.OHLCV {

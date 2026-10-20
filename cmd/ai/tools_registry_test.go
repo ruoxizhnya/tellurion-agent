@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
-	"tellurion-agent/pkg/ai/gene_pool"
-	"tellurion/pkg/domain"
-	"tellurion/pkg/storage"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tellurion-agent/pkg/ai/gene_pool"
+	"tellurion/pkg/domain"
+	"tellurion/pkg/storage"
 )
 
 // ──────────────────────────────────────────────────────────────────────
@@ -137,4 +137,3 @@ func newTestViper(t *testing.T) *viper.Viper {
 	v.Set("data_service.url", "http://test-data:8081")
 	return v
 }
-

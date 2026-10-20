@@ -21,13 +21,13 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"tellurion/pkg/bootstrap"
+	"github.com/spf13/viper"
 	"tellurion-agent/pkg/ai/gene_pool"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion/pkg/backtest"
+	"tellurion/pkg/bootstrap"
 	"tellurion/pkg/marketdata"
 	"tellurion/pkg/observability"
-	"github.com/spf13/viper"
 )
 
 func main() {

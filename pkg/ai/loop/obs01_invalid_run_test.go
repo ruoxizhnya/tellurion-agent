@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"tellurion-agent/pkg/ai/pipeline"
-	"tellurion/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tellurion-agent/pkg/ai/pipeline"
+	"tellurion/pkg/domain"
 )
 
 // OBS-01：无效运行（空票池 / 0 成交）**不得**被控制器当作成功观测。

@@ -14,10 +14,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
-	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tellurion-agent/pkg/ai/tools"
+	"tellurion/pkg/auth"
 )
 
 // ── tools: per-tool RBAC ─────────────────────────────────────────────

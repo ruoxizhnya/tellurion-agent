@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"tellurion/pkg/httpserver"
 	"log"
 	"net/http"
 	"sync"
+	"tellurion/pkg/httpserver"
 	"time"
 
 	"github.com/gin-gonic/gin"
