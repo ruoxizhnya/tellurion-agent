@@ -1,3 +1,9 @@
+---
+status: active
+last-verified: 2026-10-20
+verified-by: 补 frontmatter 与文档导航（QT-08 十二仓自治三件套）
+---
+
 # TASKS — tellurion-agent 未完成项
 
 > 本仓（AI 实验员层）的任务台账。**六字段规范同 core 仓 `AGENTS.md` §8.5**（quant-trading 仓）：目标 / 上下文 / 要求 / 约束与非目标 / 验收 / 边界，且须满足「独立 agent 拿着本单 + 它显式引用的冻结契约，不需读其他实现、不需问人，就能完成并自证」。

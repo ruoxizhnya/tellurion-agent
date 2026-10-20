@@ -5,7 +5,7 @@ Quant Lab 的 **AI 实验员层**。从 monorepo `tellurion` 拆出（2026-10-09
 ## 定位与边界
 
 本仓含 **AI 实验员**领域的全部代码与文档。后端内核（回测引擎、策略运行时、表达式 DSL、
-数据供给）在 [`tellurion`](https://tellurion)（core，
+数据供给）在 [`tellurion`](https://github.com/ruoxizhnya/tellurion)（core，
 本仓**单向依赖**它），前端在 [`tellurion-ui`](https://github.com/ruoxizhnya/tellurion-ui)，
 跨领域文档在 [`tellurion-docs`](https://github.com/ruoxizhnya/tellurion-docs)。
 
@@ -54,3 +54,10 @@ docker build -t ai-service --build-context core=../tellurion .
 core 仓的 `docker-compose.yml` 已配置 `additional_contexts: core=.`（同效）。
 ai-service 在 compose 里发布 `127.0.0.1:8086`，analysis-service 对
 `/api/{copilot,pipeline,explore,tools}` 做纯反代 —— 前端与 openapi 契约不感知拆仓。
+
+## 文档入口
+
+- 文档导航：`docs/README.md`
+- 本仓入口（构建/边界/禁止）：`AGENTS.md`
+- 本仓台账（唯一）：`docs/TASKS.md`
+- 边界与依赖方向：`docs/ARCHITECTURE.md`

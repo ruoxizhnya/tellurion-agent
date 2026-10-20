@@ -2,3 +2,15 @@ bin/
 *.exe
 *.test
 coverage.out
+
+# go.work 是开发机产物（ADR-D31）：多仓联调时才建，不入库。
+go.work
+go.work.sum
+
+# 本地环境
+.env
+.env.local
+
+# 编辑器 / 系统
+.idea/
+.DS_Store

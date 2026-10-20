@@ -21,7 +21,7 @@ verified-by: 从 pkg/tools/builtin/ 的实现与注释反推（P2-11）
 
 | 文档 | 回答什么 |
 |---|---|
-| [ODR-046](../archive/odr/odr-046-hermes-agent-integration-decision.md) | **决策**：选 Hermes Agent 而不是自研前端 AI 组件，为什么 |
+| ODR-046 `odr-046-hermes-agent-integration-decision.md`（原 monorepo 的 `docs/archive/odr/`，未迁入本仓） | **决策**：选 Hermes Agent 而不是自研前端 AI 组件，为什么 |
 | 本文档 | **设计**：工具契约是什么，实现相对设计偏离了什么 |
 
 决策记录在 ODR，设计细节在这里。两者冲突时以 ODR 为准（它是决策，本文是描述）。
