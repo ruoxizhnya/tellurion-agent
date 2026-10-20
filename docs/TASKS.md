@@ -12,6 +12,16 @@ verified-by: 补 frontmatter 与文档导航（QT-08 十二仓自治三件套）
 
 ---
 
+## 施工序（候选单，开工前必须展开成六字段）
+
+> 这张表是**施工顺序**，不是任务台账：每条在执行前要展开成六字段单（目标/上下文/要求/约束/验收/边界），并写明冻结契约的路径与节号。
+> 顺序有依赖，不要跳级。
+
+| 阶段 | 内容 | 上游单号 | 前置 |
+|---|---|---|---|
+| QT-17 | `ai.*` schema 自持 + 双写对拍 + 切读 + 停写 | `QT-17` | D24 补第 7 类动作 |
+| S3 | 删 `replace ../tellurion`，改 HTTP 粗粒度 | `QT-07 / QT-50` | QT-17 + QT-50 |
+
 ## OPS-01-A · 观察页 run 状态 SSE 推送端点 ✅ 完成（2026-10-15）
 
 > **收口记录（2026-10-15，实现 + 自证）**：新增 `cmd/ai/handlers_explore.go` 的 `Stream`（路由 `GET /explore/runs/:runID/stream`）+ 抽出可测的 `pumpStream(ctx, interval, snapshot, emit)`；把 `Status` 与 `Stream` 共用 `statusOf` 保证两条路 JSON 一字不差。硬约束守住：断线只停推、`Stream`/`pumpStream` 结构上拿不到 run 的 cancel，绝不取消探索；未动 core 限流器；轮询端点 `GET /runs/:runID` 行为不变。**验证**（本机无 Go SDK，在 `golang:1.25-alpine` 容器内跑，离线用宿主 module 缓存）：`gofmt -l` 空、`go build ./...` 过、`go vet ./cmd/ai/...` 过、`go test ./cmd/ai/... -run 'Explore|PumpStream' -race -count=1` **绿**（含全部既有 explore 测试回归）；新增测试 `handlers_explore_stream_test.go`：3 个 pumpStream 逻辑测（完成→progress+complete、running 每 tick progress、ctx 取消停在 progress 不发 complete）+ 2 个 HTTP 测（未知 run 404、已完成 run 真实 SSE 帧）。**破坏验证**：把 `emit("progress"` 改 `emit("process"` → HTTP 测当场红（帧变 `event:process` 不含 `event:progress`）→ 还原绿。注：gin v1.10 SSE 帧冒号后无空格（`event:progress`）。
