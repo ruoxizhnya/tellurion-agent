@@ -7,7 +7,7 @@ package validation
 //（稀疏 / 停牌 / 复权 / 退市 / 上市日期参差）不会把它打崩」。合成数据太干净，
 // 证明不了后者 —— 它每一只票都整齐地有 252 根 K 线。
 //
-// 数据来源：docker compose 的 postgres（库 `quant_trading`），由 cmd/data 的
+// 数据来源：docker compose 的 postgres（库 `tellurion`），由 cmd/data 的
 // `/sync/ohlcv/all` 从 Tushare `daily` + `adj_factor` 落进 `ohlcv_daily_qfq`。
 // 库里没数据就 skip —— 那不是代码缺陷，是环境没就绪。
 //
@@ -66,8 +66,8 @@ func envOr(key, fallback string) string {
 
 // liveDSN 按**生产同一套** env 命名取连接串。
 //
-// 不用 testutil.DefaultTestDBConfig：那个的默认库是 `quant_trading_test`，
-// 而真同步下来的行情在 `quant_trading` 里 —— 连过去只会得到一个空库，
+// 不用 testutil.DefaultTestDBConfig：那个的默认库是 `tellurion_test`，
+// 而真同步下来的行情在 `tellurion` 里 —— 连过去只会得到一个空库，
 // 然后测试以「库里没数据」为由 skip，永远绿。这正是「断言落在了不是生产
 // 消费的那一层」的另一种形态：连的库不对，测的东西就不是同一份。
 func liveDSN(t *testing.T) string {
@@ -82,7 +82,7 @@ func liveDSN(t *testing.T) string {
 		Port:     port,
 		User:     envOr("DATABASE_USER", "postgres"),
 		Password: envOr("DATABASE_PASSWORD", "postgres"),
-		Name:     envOr("DATABASE_NAME", "quant_trading"),
+		Name:     envOr("DATABASE_NAME", "tellurion"),
 		SSLMode:  "disable",
 	})
 	if err != nil {

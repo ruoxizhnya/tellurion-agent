@@ -288,7 +288,7 @@ func TestCopilotService_WithWorkingDir(t *testing.T) {
 	assert.Equal(t, "", svc.WorkingDir(),
 		"freshly-constructed service must have an empty WorkingDir (fail-closed)")
 
-	const want = "/opt/quant-trading"
+	const want = "/opt/tellurion"
 	svc.WithWorkingDir(want)
 	assert.Equal(t, want, svc.WorkingDir())
 

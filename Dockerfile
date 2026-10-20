@@ -1,14 +1,14 @@
-# ai-service（quant-trading-agent 仓）的镜像构建。
+# ai-service（tellurion-agent 仓）的镜像构建。
 #
-# 关键点：agent 的 go.mod 用 `replace ... => ../quant-trading` 指向 core 仓，
+# 关键点：agent 的 go.mod 用 `replace ... => ../tellurion` 指向 core 仓，
 # Docker 构建里这个相对路径由**命名构建上下文 `core`** 提供（compose 的
-# additional_contexts: core=../quant-trading）。core 源码必须落在
-# /build/quant-trading，replace 才能解析。
+# additional_contexts: core=../tellurion）。core 源码必须落在
+# /build/tellurion，replace 才能解析。
 #
 # 本地 compose（docker-compose.yml in core 仓）已配置；独立构建示例：
 #   docker build -t ai-service \
-#     --build-context core=../quant-trading \
-#     ../quant-trading-agent
+#     --build-context core=../tellurion \
+#     ../tellurion-agent
 
 # Build stage
 FROM golang:1.25-alpine AS builder
@@ -19,7 +19,7 @@ WORKDIR /build/agent
 COPY go.mod go.sum* ./
 
 # core 仓源码（命名上下文）—— replace 目标
-COPY --from=core . /build/quant-trading
+COPY --from=core . /build/tellurion
 
 # agent 源码
 COPY . .

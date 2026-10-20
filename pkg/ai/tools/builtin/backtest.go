@@ -1,5 +1,5 @@
 // Package builtin contains the default set of Tool implementations
-// shipped with quant-trading. Each Tool wraps an existing capability
+// shipped with tellurion. Each Tool wraps an existing capability
 // (backtest runner, factor client, data-service HTTP client, strategy
 // registry) into the tools.Tool interface so it can be discovered and
 // invoked via the /api/tools HTTP API.

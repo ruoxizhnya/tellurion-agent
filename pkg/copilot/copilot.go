@@ -95,7 +95,7 @@ type CopilotService struct {
 	jobs sync.Map // jobID string -> *JobResult
 
 	// Sprint 6 P0-4 (ODR-013): WorkingDir replaces the previously
-	// hard-coded `buildCmd.Dir = "/Users/ruoxi/longshaosWorld/quant-trading"`.
+	// hard-coded `buildCmd.Dir = "/Users/ruoxi/longshaosWorld/tellurion"`.
 	//
 	// WorkingDir is the directory `go build` runs in when compiling
 	// the LLM-generated strategy. It must contain a `go.mod` so that
@@ -351,7 +351,7 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 
 	// Sprint 6 P0-4 (ODR-013): fail-closed if WorkingDir is not set.
 	// The previous hard-coded path
-	// "/Users/ruoxi/longshaosWorld/quant-trading" was the only reason
+	// "/Users/ruoxi/longshaosWorld/tellurion" was the only reason
 	// this code worked on a single developer's machine; in any other
 	// environment (CI, Docker, a different developer's laptop) the
 	// `go build` would have failed silently with a non-obvious

@@ -251,7 +251,7 @@ func main() {}
 // TestFindProjectRoot_ReturnsDirWithGoMod verifies that findProjectRoot
 // dynamically locates the project root by walking up from the current
 // working directory until it finds a go.mod file. This replaces the
-// hardcoded "/Users/ruoxi/longshaosWorld/quant-trading" path that made
+// hardcoded "/Users/ruoxi/longshaosWorld/tellurion" path that made
 // the pipeline non-portable across developer machines and deployments.
 func TestFindProjectRoot_ReturnsDirWithGoMod(t *testing.T) {
 	root, err := findProjectRoot()
@@ -280,7 +280,7 @@ func TestPipeline_SourceHasNoHardcodedDeveloperPath(t *testing.T) {
 	source, err := os.ReadFile("pipeline.go")
 	require.NoError(t, err, "must be able to read pipeline.go from the test working dir")
 
-	const hardcodedDeveloperPath = "/Users/ruoxi/longshaosWorld/quant-trading"
+	const hardcodedDeveloperPath = "/Users/ruoxi/longshaosWorld/tellurion"
 	assert.NotContains(t, string(source), hardcodedDeveloperPath,
 		"pipeline.go must not contain the hardcoded developer path; use p.buildDir instead")
 }

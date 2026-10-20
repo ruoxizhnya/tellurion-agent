@@ -23,7 +23,7 @@ import (
 func TestExperimentLog_RealDB_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	store, err := storage.NewPostgresStore(ctx,
-		"postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable")
+		"postgres://postgres:postgres@localhost:5432/tellurion?sslmode=disable")
 	if err != nil {
 		t.Skipf("skipping: cannot connect to DB: %v", err)
 	}

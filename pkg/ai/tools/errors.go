@@ -1,7 +1,7 @@
 // Package tools provides a registry of capabilities (Tools) that can be
 // discovered and invoked by external agents via HTTP API.
 //
-// Design (S7-P3-3, ODR-043): this package turns quant-trading into a
+// Design (S7-P3-3, ODR-043): this package turns tellurion into a
 // "tool provider" — backtest/factor/data/strategy capabilities are
 // exposed as Tools with explicit schemas, so an external agent service
 // can list them (GET /api/tools) and invoke them (POST /api/tools/:name)
