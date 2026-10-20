@@ -6,7 +6,7 @@ verified-by: 补 frontmatter 与文档导航（QT-08 十二仓自治三件套）
 
 # TASKS — tellurion-agent 未完成项
 
-> 本仓（AI 实验员层）的任务台账。**六字段规范同 core 仓 `AGENTS.md` §8.5**（quant-trading 仓）：目标 / 上下文 / 要求 / 约束与非目标 / 验收 / 边界，且须满足「独立 agent 拿着本单 + 它显式引用的冻结契约，不需读其他实现、不需问人，就能完成并自证」。
+> 本仓（AI 实验员层）的任务台账。**六字段规范同 core 仓 `AGENTS.md` §8.5**（`tellurion` 仓）：目标 / 上下文 / 要求 / 约束与非目标 / 验收 / 边界，且须满足「独立 agent 拿着本单 + 它显式引用的冻结契约，不需读其他实现、不需问人，就能完成并自证」。
 > 状态：`⬜ 待做` / `🔶 进行中` / `⛔ 阻塞` / `✅ 完成（附日期）`。
 > 本文件自 core 台账 OPS-01 改判（2026-10-14）派生——原单前提（core 侧做 explore SSE）因 AI 拆仓失效，实现落此仓。
 
@@ -72,7 +72,7 @@ verified-by: 补 frontmatter 与文档导航（QT-08 十二仓自治三件套）
 - **① 目标**：AI 侧消费者（Copilot 播报、实验日志、`pkg/ai/loop` 候选评估）能读到 `completed` / `invalid` / `failed` 三值状态，不再只靠 `InvalidReasons` 反推。
 - **② 上下文**（本仓 + core 冻结契约锚点，开工前逐一读）：
   - 缺陷点：`pkg/ai/client/backtest_client.go:47` 的 `RunBacktest` 返回 `(*domain.BacktestResult, error)`，而响应类型 `BacktestResponse`（`:39`）已解出 `Status string json:"status"`（`:43`）——`btResp.Status` 在 `:78` 被丢掉。`GetBacktestResult`（`:82`）同病（`:103` 解出、返回只 `*domain.BacktestResult`）。
-  - 冻结契约（core 仓 `quant-trading`，照此对齐、勿改、勿加第四值）：`pkg/backtest/contracts/contracts.go:247-264` 的 `StatusCompleted` / `StatusInvalid`（InvalidReasons 必填、Error 必空）/ `StatusFailed`（Error 必填、InvalidReasons 必空）；护栏 `resultspec_test.go`。
+  - 冻结契约（core 仓 `tellurion`，照此对齐、勿改、勿加第四值）：`pkg/backtest/contracts/contracts.go:247-264` 的 `StatusCompleted` / `StatusInvalid`（InvalidReasons 必填、Error 必空）/ `StatusFailed`（Error 必填、InvalidReasons 必空）；护栏 `resultspec_test.go`。
   - core `pkg/domain/backtest.go:5-39` 的 `BacktestResult` **没有也不该有** `Status`（裁决 (a) 已排除）；`InvalidReasons`（`:38`）由引擎挂，客户端只读不重算。
   - `RunBacktest` 的 3 处调用点：`pkg/ai/agents/validate.go:345`、`pkg/ai/pipeline/strategy.go:99`、`pkg/ai/agents/validate_l4.go:104`（后者经 `httpBacktestRunner` 转 `BacktestMetrics`）。
   - 前端不动：ui 仓 A-07 已按三值接住并自救，7 条单测钉住；本单登记的是**契约残缺**，不是用户可见假成功。
@@ -88,3 +88,26 @@ verified-by: 补 frontmatter 与文档导航（QT-08 十二仓自治三件套）
   3. **破坏验证**：把 `Status` 重新丢掉（只 `return btResp.Result, nil`）→ 三值区分用例当场红 → 还原绿。
   4. `go build ./...`、`go vet ./...`、`gofmt -l`（本单文件）干净；`go test ./pkg/ai/client/... ./pkg/ai/agents/... ./pkg/ai/pipeline/... -race -count=1` 全绿。
 - **⑥ 边界**：只补三值透传与调用点解包；前端接线、pipeline 结构重构、`BacktestMetrics` 口径变更另立。
+
+---
+
+## REV-01-A · 消费侧对齐 refactor 修复传播（wire 契约 + 三值口径）⬜ 待做（2026-10-20 登记，refactor-plan-review H2/C1 传播）
+
+> **来源**：`tellurion:docs/design/qt-decoupling/refactor-plan-review-2026-10-20.md` 的 H2（agent↔core wire 契约）与 C1（三值 status 映射）修复传播。规则口径冻结在 `tellurion:docs/TASKS.md` QT-50 ③-④ 与 QT-10 ③-④/QT-15 ⑤（**以彼处为准，本单只落本仓消费侧**）。与 OBS-01-R2-A 联动（那单解决三值透传结构，本单补 wire 契约与新增 invalid_reasons 码的消费口径）。
+
+- **① 目标**：本仓对 core 的 HTTP 消费面按冻结 wire 契约对齐，且能正确判读 C1 修复后新增的 `invalid_reasons` code（`data_gap_skipped` / `session_terminated`），不把 `invalid` 误当成功、不把 `failed` 误当可重试。
+- **② 上下文**（开工前逐一读）：
+  - wire 契约真相源：core 仓 `tellurion:docs/openapi.yaml`（QT-50 ③-③ 落定后存在；落定前以 QT-50 ③-③ 的 DTO 清单为准）；生成物 `tellurion-contracts:dto/`（**禁手改**，见 `tellurion-contracts:docs/TASKS.md` CT-01）。
+  - 三值映射口径（C1）：`completed` / `invalid` / `failed`（冻结于 `tellurion:docs/SPEC.md`）；`invalid` 必带 `invalid_reasons`（code 列表），新增 code `data_gap_skipped`（数据缺口跳天）与 `session_terminated`（session 终止）；`ErrStrategyFault` / `ErrContractBreach` → `failed` + `error`。下游判据：**只接受 `completed` 为成功**。
+  - 本仓消费面：`pkg/ai/client/backtest_client.go`（`RunBacktest`/`GetBacktestResult`，见 OBS-01-R2-A ②）、`pkg/ai/loop` 候选评估、Copilot 播报。
+- **③ 要求**：
+  1. **wire 契约消费**：本仓调 core 的 HTTP 客户端以 `tellurion:docs/openapi.yaml` 为契约源（或经 `tellurion-contracts:dto/` 生成物类型），**禁止手写与 openapi 漂移的私有 DTO**；若发现现有手写 DTO 与契约不一致，按契约改本仓侧，不改契约。
+  2. **鉴权消费端 fail-closed**：对 core 的请求按 QT-50 ④ 的 JWT+RBAC 面消费（本仓作为调用方持有/转发 token）；loopback-only insecure 模式仅限显式配置的本地开发，默认 fail-closed（无凭证即拒绝，不静默降级）。
+  3. **三值消费口径**：`invalid_reasons` 出现 `data_gap_skipped` / `session_terminated` 时按 **invalid 语义**处理（结果可解释、不可当成功，也不当故障重试）；`failed` + `error`（`ErrStrategyFault`/`ErrContractBreach`）按**故障语义**处理（不重试当成功）；不新增第四值、不自行改判 status。
+  4. 与 OBS-01-R2-A 共用 `BacktestOutcome` 小结构透传（若该单先行落地则直接在其上补 code 判读；若本单先行则预留字段，两单合流后无返工）。
+- **④ 约束与非目标**：不改 core 侧契约与映射逻辑（C1 修复在 core，本单只消费）；不改前端（ui 仓另立 UI-02）；不借机重构 pipeline；不新增第三方依赖。
+- **⑤ 验收**：
+  1. 单测（`httptest` 假服务端）：对含 `data_gap_skipped` / `session_terminated` 的 `invalid` 响应判读为非成功非故障；对 `failed` 响应判读为故障；对 `completed` 判读为成功——三者可区分。
+  2. **破坏验证**：把 `data_gap_skipped` 误判为成功（或误判为 failed）→ 对应用例红 → 还原绿；把手写 DTO 字段名改错 → 与 openapi 对拍（或类型编译）红 → 还原绿。
+  3. `go build ./...`、`go vet ./...`、`go test ./pkg/ai/... -race -count=1` 全绿。
+- **⑥ 边界**：只做本仓消费侧对齐与判读口径；wire 契约的制定与 openapi.yaml 落定在 `tellurion:docs/TASKS.md` QT-50；三值映射实现在 core QT-10/QT-15；前端展示口径在 `tellurion-ui:docs/TASKS.md` UI-02。
