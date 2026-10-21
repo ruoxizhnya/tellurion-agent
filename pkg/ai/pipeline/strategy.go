@@ -96,9 +96,15 @@ func (p *StrategyPipeline) Run(ctx context.Context, config StrategyPipelineConfi
 			EndDate:      config.EndDate,
 		}
 
-		btResult, err := p.btClient.RunBacktest(ctx, btReq)
+		outcome, err := p.btClient.RunBacktest(ctx, btReq)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("backtest failed: %v", err))
+		} else if !outcome.Succeeded() {
+			// OBS-01-R2-A：只有 completed 能进基因池。以前这条腿是 `err == nil` 就写
+			// Status:"validated" —— 引擎判 invalid 的结果会被当 validated 存进基因池，
+			// 而 invalid 恰恰是「跑完了但结果不可信」。
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"backtest 未通过（status=%s，invalid_reasons=%v）", outcome.Status, outcome.InvalidReasons()))
 		} else {
 			result.Backtested = 1
 			// Save to strategy pool with backtest results
@@ -109,8 +115,8 @@ func (p *StrategyPipeline) Run(ctx context.Context, config StrategyPipelineConfi
 					Description:  template.Description,
 					StrategyType: template.Type,
 					Code:         template.Code,
-					TotalReturn:  btResult.TotalReturn,
-					Sharpe:       btResult.SharpeRatio,
+					TotalReturn:  outcome.Result.TotalReturn,
+					Sharpe:       outcome.Result.SharpeRatio,
 					Status:       "validated",
 				}
 				if err := p.strategyPool.Save(ctx, gene); err != nil {

@@ -66,7 +66,7 @@ verified-by: 任务台账批量重分布（QT-17 自 core 迁入）
 
 ---
 
-## OBS-01-R2-A · AI 客户端把 K9 三值丢在边界上 ⬜ 待做（2026-10-16 自 core 台账 OBS-01-R2 迁入，裁决 (b)）
+## OBS-01-R2-A · AI 客户端把 K9 三值丢在边界上 ✅ 完成（2026-10-22）
 
 > **来源与裁决**：本单自 core 仓 `docs/TASKS.md` 的 `OBS-01-R2` 改判迁出（core 侧已关闭、保留可追溯指针，见其改判记录与 §三 跨仓指针区）。core 侧裁决 **(b)**：`RunBacktest` 返回带 `Status`/`Error` 的小结构，**不给 core `domain.BacktestResult` 加 `Status`**——core `pkg/backtest/contracts/contracts.go:247-264`「ResultSpec 冻结（K9）」明写 `status` 是调用方唯一判据、三值属**响应层**，下沉进 domain 指标集合会造成同一概念两处真相。**core 零改动**，故本单非跨仓原子提交。
 
@@ -90,9 +90,62 @@ verified-by: 任务台账批量重分布（QT-17 自 core 迁入）
   4. `go build ./...`、`go vet ./...`、`gofmt -l`（本单文件）干净；`go test ./pkg/ai/client/... ./pkg/ai/agents/... ./pkg/ai/pipeline/... -race -count=1` 全绿。
 - **⑥ 边界**：只补三值透传与调用点解包；前端接线、pipeline 结构重构、`BacktestMetrics` 口径变更另立。
 
+> **✅ 完成记录（2026-10-22）**
+>
+> **交付**：`pkg/ai/client/backtest_client.go` 新增 `BacktestOutcome{Result,Status,Error,JobID}` + `StatusCompleted/Invalid/Failed`
+> 与 `JobStatusPending/Running` 取值常量 + `Succeeded()`/`InvalidReasons()` 两个判据 + `classify()` 一条判读路径（两个方法共用，避免两处判据漂移）。
+> `RunBacktest`/`GetBacktestResult` 均改回 `(*BacktestOutcome, error)`；三处调用点跟进解包：
+> `agents/validate.go`（L2：非 completed → 记 warning + 分数不加成）、`pipeline/strategy.go`（**invalid 不再进基因池**：以前 `err == nil` 就写 `Status:"validated"`）、
+> `agents/validate_l4.go`（`httpBacktestRunner`：invalid → 报错中止本段 walk-forward，不交「成功 + 零指标」）。**core 仓零改动**，`domain.BacktestResult` 未碰（③-4 达成）。
+>
+> **⑤ 验收逐条（真退出码）**
+> 1. 单测：`pkg/ai/client/backtest_client_test.go` 13 条（主判据 `TestRunBacktest_ThreeStatusesAreDistinguishable` 三份响应三条子腿 +
+>    `InvalidReasons` 只读不重算 + failed 带出原话且 outcome 非 nil + 空 status / 第四值 `done` fail-closed +
+>    pending 不再 `(nil,nil)` + `completed` 无 `result` 不算成功 + 4xx 无 outcome + GET 同口径 + running 点名 status + nil receiver 安全 +
+>    夹具报文自我核对），`go test ./pkg/ai/client/ -count=1` → **ok**。
+>    调用点侧另加 4 条 `pkg/ai/agents/obs01r2a_three_value_test.go`（真客户端打 `httptest` 假 core，验 L4 那条通道的三种判读），`go test ./pkg/ai/agents/ -count=1` → **ok**。
+> 2. **真请求核对：未执行**。本机 `curl http://localhost:8085/api/health` → `000`（core 未起）；且见下面偏差 #2 ——
+>    这条腿在活 core 上今天**必然红**，红因是请求 DTO 漂移，不是三值。不假装跑过。
+> 3. **破坏验证（现场，真退出码）**：把 `classify` 上游的 `Status: r.Status` 改成 `Status: ""`（即「把三值重新丢在边界上」）→
+>    `go test ./pkg/ai/client/` 退出码 **1**，**8 条用例红**（三条子腿各报 `status 必须原样透传：want "completed" got ""`，
+>    另有 InvalidReasons/Failed/CompletedWithoutResult/SameThreeValueReading/RunningNamesTheStatus）→ 还原 → 退出码 **0**，`grep -c 破坏验证腿` = 0（无残留）。
+>       首次尝试时改坏脚本因 `Path.read_text(newline=...)` 抛异常而**没真的改到代码**，那次 `BROKEN_TEST_EXIT=0` 是无效证据，已重做（见 `feedback-test-verdicts-need-exit-codes` 同一类教训：动作没发生，退出码就没有意义）。
+> 4. `go build ./...` + `go vet ./...` 干净；`gofmt -l` 干净；`go test ./pkg/ai/client/... ./pkg/ai/agents/... ./pkg/ai/pipeline/... -count=1` 全绿（pipeline 4.2s）。
+>    ⚠️ **`-race` 这条腿未执行**：本机无 C 编译器（`CGO_ENABLED=1` → `cgo: C compiler "gcc" not found`），`-race` 直接 build failed。
+>    新增用例全是单 goroutine + `httptest`（无共享状态、无 `time.Sleep`），代价登记在此：并发面（SSE / 端点）仍按 AGENTS §2 的口径要求带 `-race`，本单没碰并发。
+>
+> **实测偏差（回源码核对，四条是 REV-01-A 的具体输入）**
+> 1. **同步 POST 是平铺响应，客户端 DTO 期待嵌套 `result`**：core `cmd/analysis/handlers_backtest.go:151` `c.JSON(http.StatusOK, result)` 里的
+>    `result` 是 `*contracts.BacktestResponse`（`pkg/backtest/contracts/contracts.go:211` 起，`status`/`error` 与 `total_return`/`sharpe_ratio`/`portfolio_values` **同层平铺**），
+>    没有 `result` 这个键 ⇒ 200 时 `btResp.Result` **恒为 nil**。旧代码 `return btResp.Result, nil` 于是交出 `(nil, nil)`，
+>    `pipeline/strategy.go:112` 的 `btResult.TotalReturn` 直接 nil-deref。**这就是「三值被丢掉」的真实后果链**，也是本单为什么把 `Succeeded()` 定义成
+>    `status == completed && Result != nil`：判据不能只信一个字段。按契约把平铺体映射进 Result 属 REV-01-A ③-1（禁手写漂移 DTO），不在本单。
+> 2. **请求字段名漂移，POST 走不到 200**：客户端发 `strategy_name`（`BacktestRequest` `json:"strategy_name"`），
+>    core 认 `contracts.BacktestRequest.Strategy` 的 `json:"strategy" binding:"required"`（`handlers_backtest.go:172`），
+>    两条分支都不命中 ⇒ 落到 `:157` 的 400「must provide strategy+stock_pool (old format) or strategy_id+universe (new format)」，
+>    且 `StrategyName: result.Formula`（把公式串当策略名）说明这条链的意图与端点语义也对不上。④ 明令「不动 HTTP 请求/超时行为」，本单**没改请求形状**；
+>    这条属 REV-01-A ③-1，且必须先于任何「AI 真跑一次回测」的验收。
+> 3. **GET 那条路是 job 表，status 取值不止三值**：`GET /api/backtest/:id` → `c.JSON(200, job)`（`pkg/backtest/job/job.go:209` 的 `Job`，
+>    `status` ∈ `pending|running|completed|failed`，标识字段是 `id` 不是 `job_id`，`result` 是 `json.RawMessage`）。
+>    `invalid` 不来自 job 表，而来自内存态 / `/:id/report` 的 `buildResponseFromState`（`handlers_backtest.go:176-180` 注记）。
+>    ⇒ 本单把 `pending/running` 与「三值之外」分开处理并都 fail-closed，`outcome.JobID` 由请求方问的那个 id 回填。
+> 4. **既有 OBS-01 那条判读没动**：`pipeline/obs01_invalid_run_test.go` 测的 `Pipeline.Execute` 走 `BacktestRunner` 接口（进程内 mock），
+>    它**拿不到 status**，只能继续从 `InvalidReasons` 反推 —— 与本单是两个通道，不冲突也不重复。把三值送进那条链接口要动 `BacktestRunner`，属 ⑥ 边界之外。
+>
+> **判据口径（本单做的技术决定，代价如实）**：`failed` 仍返回 `error`（既有三个调用点的中止语义逐字节不变，且「不把 failed 当成功」由它保证）；
+> `invalid` 返回 `nil error` + 三值（它是结果属性不是故障，K9 明写「无效不进 Error」）；
+> **三值之外的一切取值（含空串、`done`、`pending`）一律报错** —— 代价：core 若日后新增第四值，本仓会当场红而不是静默当成功，
+> 这正是 K9「不把没记的说成记了」要的形态，加值应走 contracts 的变更评审而不是在本仓补一个 `case`。
+
 ---
 
 ## REV-01-A · 消费侧对齐 refactor 修复传播（wire 契约 + 三值口径）⬜ 待做（2026-10-20 登记，refactor-plan-review H2/C1 传播）
+
+> **OBS-01-R2-A 结案后追加的输入（2026-10-22，开工前先读那单的「实测偏差」四条）**：本仓 `pkg/ai/client` 的请求与响应 DTO 与 core 线上形状**两处漂移**——
+> ① 客户端发 `strategy_name`，core 认 `strategy`（`binding:"required"`）⇒ POST 恒 400；
+> ② core 同步 POST 是 `contracts.BacktestResponse` 平铺体、无嵌套 `result` 键 ⇒ 200 时 `Result` 恒 nil。
+> 三值透传已由 OBS-01-R2-A 修好并用 `Succeeded()`（`status==completed && Result!=nil`）兜住 nil 结果，但**这两条要按契约改本仓侧**（③-1），
+> 且 ⑤-2「真请求核对」必须等这两条修完才能在活 core 上过。
 
 > **来源**：`tellurion:docs/design/qt-decoupling/refactor-plan-review-2026-10-20.md` 的 H2（agent↔core wire 契约）与 C1（三值 status 映射）修复传播。规则口径冻结在 `tellurion:docs/TASKS.md` QT-50 ③-④ 与 QT-10 ③-④/QT-15 ⑤（**以彼处为准，本单只落本仓消费侧**）。与 OBS-01-R2-A 联动（那单解决三值透传结构，本单补 wire 契约与新增 invalid_reasons 码的消费口径）。
 

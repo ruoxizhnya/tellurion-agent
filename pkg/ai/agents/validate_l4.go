@@ -101,7 +101,7 @@ func NewHTTPBacktestRunner(c *client.BacktestClient) BacktestRunner {
 }
 
 func (r *httpBacktestRunner) RunBacktest(ctx context.Context, formula string, stockPool []string, startDate, endDate string) (BacktestMetrics, error) {
-	res, err := r.c.RunBacktest(ctx, client.BacktestRequest{
+	outcome, err := r.c.RunBacktest(ctx, client.BacktestRequest{
 		StrategyName: formula,
 		StockPool:    stockPool,
 		StartDate:    startDate,
@@ -110,7 +110,16 @@ func (r *httpBacktestRunner) RunBacktest(ctx context.Context, formula string, st
 	if err != nil {
 		return BacktestMetrics{}, err
 	}
-	return toBacktestMetrics(res), nil
+	if !outcome.Succeeded() {
+		// invalid 不是故障，但 L4 这个通道只有 (metrics, error) 两个位置：
+		// 把它塞成「成功 + 零指标」会让 walk-forward 把一个无效窗口当成「夏普正好为 0 的正常窗口」打分。
+		// 所以这里报错中止（runErr 是粘性的，整段搜索停下来）。
+		// 代价如实登记：要做「逐窗口的 invalid 仍可解释地参与评分」得动 BacktestRunner 接口，
+		// 那超出本单 ④（BacktestMetrics 只做最小解包适配）。
+		return BacktestMetrics{}, fmt.Errorf(
+			"backtest 判为无效（status=%s, invalid_reasons=%v）", outcome.Status, outcome.InvalidReasons())
+	}
+	return toBacktestMetrics(outcome.Result), nil
 }
 
 func toBacktestMetrics(r *domain.BacktestResult) BacktestMetrics {

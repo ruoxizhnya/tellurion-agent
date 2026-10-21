@@ -342,17 +342,24 @@ func (a *ValidateAgent) validateL3(ctx context.Context, result *ValidationResult
 		EndDate:      "2024-01-01",
 	}
 
-	btResult, err := a.btClient.RunBacktest(ctx, req)
+	outcome, err := a.btClient.RunBacktest(ctx, req)
 	if err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("Backtest failed: %v", err))
 		result.Score = 3.0
 		return err
 	}
 
-	if btResult != nil {
-		result.Sharpe = btResult.SharpeRatio
-		result.Score = 3.0 + btResult.SharpeRatio
+	// OBS-01-R2-A：判据是 status，不是「Result 非 nil 就算成」。
+	// invalid 以前会走到下面那段——引擎已经判它无效，L2 却照抄 SharpeRatio 加分。
+	if !outcome.Succeeded() {
+		result.Warnings = append(result.Warnings, fmt.Sprintf(
+			"Backtest 未通过（status=%s，invalid_reasons=%v）", outcome.Status, outcome.InvalidReasons()))
+		result.Score = 3.0
+		return nil
 	}
+
+	result.Sharpe = outcome.Result.SharpeRatio
+	result.Score = 3.0 + outcome.Result.SharpeRatio
 
 	return nil
 }
