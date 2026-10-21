@@ -7,11 +7,11 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.3
 	github.com/rs/zerolog v1.33.0
-	tellurion v0.0.0
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
+	tellurion v0.1.0
 )
 
 require (
@@ -76,6 +76,9 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 )
 
+// 本地/CI 联调专用，S3（QT-07 收尾）删除 —— 见本仓 AGENTS.md §2「S3 判据」。
 // 本地开发：core 仓在工作区同级目录。CI 里由 workflow 用
 // `go mod edit -replace` 改写到 checkout 路径（见 .github/workflows/ci.yml）。
+// require 已指 v0.1.0（core 分仓起点 tag，QT-06），但 S0~S3 期间 agent 仍 import
+// core 实现包（20 包 / 37 文件），故 replace **保留**：删它之前本仓单仓编不过。
 replace tellurion => ../tellurion
