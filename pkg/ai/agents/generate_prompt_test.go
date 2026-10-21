@@ -52,9 +52,6 @@ func TestStrategyPromptIncludesDSLSyntax(t *testing.T) {
 		}
 	}
 	// 幻影字段不得出现（OBS-08：广告不存在的字段 = AI 必然产出过不了闸门的表达式）。
-	for _, phantom := range []string{"market_cap", "roe_ttm", "eps", "vwap", "turnover_rate"} {
-		if strings.Contains(got, phantom) {
-			t.Errorf("策略提示词广告了不存在的字段 %q", phantom)
-		}
-	}
+	// 清单单一来源 + 过时自检见 research_prompt_test.go 的 assertNoPhantomAdvertised。
+	assertNoPhantomAdvertised(t, got)
 }
