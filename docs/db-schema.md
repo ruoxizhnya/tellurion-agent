@@ -8,7 +8,7 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 
 > **所有权声明**：本仓**拥有 `ai` schema 的 DDL 与迁移**（目标态，QT-17）。
 
-**现状**：实验 / 研究 / 基因数据仍住在 core 的 `quant` schema（表由 core `pkg/storage/experiments.go`、`research.go` 的内联 DDL 定义，`factor_genes` / `strategy_genes` 见 core 的 `migrations/023_add_gene_pool_tables.sql`）。本仓当前通过 core 的 `*PostgresStore` 读写 —— 这是**要拆掉的耦合**。
+**现状**：实验 / 研究 / 基因数据仍住在 core，**不在 `quant` schema** —— `experiments` / `factor_genes` / `strategy_genes` 在 `public`，研究域三表在 `research` schema。DDL 唯一在 `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`（`experiments` :424、`factor_genes` :930、`strategy_genes` :954、研究域 :361-393），`experiments.go` / `research.go` 只有读写代码、没有建表语句。本仓当前通过 core 的 `*PostgresStore` 读写 —— 这是**要拆掉的耦合**。
 > 上级依据：`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §1 —— **DDL 只有一个 owner**，同一个 PG 实例、每服务一个 schema，将来拆库是"按 schema 搬走"而不是重写。
 > 本文件是本仓表结构的**唯一真相源**：代码里的建表语句与它不一致时，**改代码**；要改表结构，先改本文件（结构级变更还要立 ADR）。
 
@@ -18,10 +18,10 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 
 | 表 | 内容 | 现状 |
 |---|---|---|
-| `ai.experiments` | 实验记录 | 现住 core `quant.experiments`（`pkg/storage/postgres.go:424`） |
-| `ai.factor_genes` | 因子基因池 | 现住 core（`migrations/023_add_gene_pool_tables.sql`） |
-| `ai.strategy_genes` | 策略基因池 | 同上 |
-| `ai.research_*` | 研究域（profile / question / conclusion） | 现住 core `pkg/storage/research.go` —— **表名以 core 现有定义为唯一来源**，迁移时逐表核对，本文不预写 |
+| `ai.experiments` | 实验记录 | 现住 core `public.experiments`（`tellurion:pkg/storage/postgres.go:424`） |
+| `ai.factor_genes` | 因子基因池 | 现住 core `public.factor_genes`（`tellurion:pkg/storage/postgres.go:930`） |
+| `ai.strategy_genes` | 策略基因池 | 现住 core `public.strategy_genes`（`tellurion:pkg/storage/postgres.go:954`） |
+| `ai.research_*` | 研究域（profile / question / conclusion） | 现住 core `research` schema（DDL 在 `tellurion:pkg/storage/postgres.go:361-393`） —— **表名以 core 现有定义为唯一来源**，迁移时逐表核对，本文不预写 |
 
 > 迁入纪律（QT-17）：**以 core 现有 DDL 为准逐表搬**，不按类型名臆造表名；迁移后 core 侧定义标 `deprecated` 并登记删除期限。
 

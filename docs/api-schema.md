@@ -22,11 +22,12 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 | POST | `/api/explore/runs/{runID}/stop` | 停止（只停调度，不 cancel 已开跑的回测） |
 | POST | `/api/copilot/generate` | 自然语言 → 代码生成（异步 job） |
 | GET | `/api/copilot/generate/{job_id}` | 生成任务状态 |
+| GET | `/api/copilot/stats` | Copilot 生成统计（接受率） |
 | POST | `/api/pipeline/run` | 跑 pipeline |
 | GET | `/api/pipeline/jobs` · `/jobs/{id}` | pipeline 任务列表 / 详情 |
 | GET | `/api/tools` · `/api/tools/{name}` | 工具注册表 |
 | POST | `/api/tools/{name}` | 执行工具 |
-| GET | `/health` · `/metrics` · `/stats` | 运维面 |
+| GET | `/health` · `/metrics` | 运维面 |
 
 > 这四族（copilot / pipeline / explore / tools）是对外全部；**没有第五族**。加族要先改 openapi 与本文。
 
@@ -39,7 +40,7 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 | 生成任务失败 | job 状态 `failed` + 原因 | 不静默重试 |
 | 引擎不可用 | 5xx | 明确失败，不产出"部分结果"当成功 |
 
-**SSE 契约**：事件名 `progress` / `complete` / `close` / `error`；`progress` 的 payload 与 `GET /runs/{id}` **同 JSON 形状**（客户端复用类型）。
+**SSE 契约**：事件名 `progress` / `complete`；`progress` 的 payload 与 `GET /runs/{id}` **同 JSON 形状**（客户端复用类型）。
 
 ## 3. 幂等性与重试
 
