@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-20
-verified-by: 补 frontmatter 与文档导航（QT-08 十二仓自治三件套）
+last-verified: 2026-10-21
+verified-by: 任务台账批量重分布（QT-17 自 core 迁入）
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -16,6 +16,7 @@ verified-by: 补 frontmatter 与文档导航（QT-08 十二仓自治三件套）
 
 > 这张表是**施工顺序**，不是任务台账：每条在执行前要展开成六字段单（目标/上下文/要求/约束/验收/边界），并写明冻结契约的路径与节号。
 > 顺序有依赖，不要跳级。
+> 2026-10-21：QT-17 已展开为本文件末尾的正式六字段条目（「QT-17 · agent 数据自持（D10：`ai.*` schema 建表与迁移）」），表内一行仅存施工顺序索引。
 
 | 阶段 | 内容 | 上游单号 | 前置 |
 |---|---|---|---|
@@ -111,3 +112,31 @@ verified-by: 补 frontmatter 与文档导航（QT-08 十二仓自治三件套）
   2. **破坏验证**：把 `data_gap_skipped` 误判为成功（或误判为 failed）→ 对应用例红 → 还原绿；把手写 DTO 字段名改错 → 与 openapi 对拍（或类型编译）红 → 还原绿。
   3. `go build ./...`、`go vet ./...`、`go test ./pkg/ai/... -race -count=1` 全绿。
 - **⑥ 边界**：只做本仓消费侧对齐与判读口径；wire 契约的制定与 openapi.yaml 落定在 `tellurion:docs/TASKS.md` QT-50；三值映射实现在 core QT-10/QT-15；前端展示口径在 `tellurion-ui:docs/TASKS.md` UI-02。
+
+---
+
+## QT-17 · agent 数据自持（D10：`ai.*` schema 建表与迁移）⬜
+
+> **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「S2~S3 · 拆仓」迁入（任务台账批量重分布：实现整体落本仓的单迁入本仓台账）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
+
+- **① 目标**：agent 不再通过 core 的 `*PostgresStore` 读写实验域数据；`ai.*` 的 DDL 与 migrate 由 agent 仓持有——**这是 S3 删 replace 的数据前置**（storage 依赖没有别的出路）。
+- **② 上下文**：ADR-D10（实验域数据归 agent）；实测 agent 用到 storage 的 16 个符号 / 14 个文件：连接层 `PostgresStore`(12) `NewPostgresStore`(3) `BuildDSN` `DatabaseConfig`；实验域 `Experiment`(5) `ExperimentMetrics`(6) `ExperimentUpdate`(4) `ExperimentStatus*`；研究域 `ResearchProfile`(10) `ResearchQuestion` `ResearchConclusion`；**仪器域** `TradingCalendar` `ListingWindow`(4)。`kit/db` 由 QT-05 提供。
+- **③ 要求**：
+  ① agent 仓建 `ai` schema 的 DDL（表名以 core `pkg/storage/experiments.go` / `research.go` / `postgres.go` 的现有定义为准，逐表核对后迁移，**不凭类型名臆造表名**）与自己的 migrate 入口；
+  ② agent 用 `kit/db` 建自己的 store，替换 12 处 `PostgresStore` 用法；
+  ③ **仪器域不迁**：`TradingCalendar` / `ListingWindow` 属 core，agent 改走 core 的**只读 port**（D10 §87「只读视图」通道）——**本单需同时补进 D24 的合法动作清单**（现六类里没有「交易日历/上市窗口查询」）——这是对**已裁决文档的增补**，开工前需用户确认第 7 类动作；**获确认后该动作的 endpoint + DTO + 鉴权随 QT-50 ③-③/④ 统一落 `docs/openapi.yaml` 并纳入路由表对拍**（勿另起手写 DTO，refactor-plan-review H2）；
+  ④ 双写期：旧表与 `ai.*` 同时写 → 行数/校验和对拍 → 切读 → 停写；core 侧 `experiments.go` / `research.go` 定义标 deprecated 并登记删除期限；
+  ⑤ 护栏：agent 禁止 import `pkg/storage`（AST）。
+- **④ 约束与非目标**：**不删 core 旧表**（保留只读一个周期）；不迁行情/回测结果/因子定义（仪器域）；不改 core 的实验 handler；不在本单做 HTTP 化（QT-50）。
+- **⑤ 验收**：agent `grep -r "pkg/storage"` = 0；`ai.*` 行数与旧表对拍一致（报告归档）；停写后 core 旧表不再增长；core 侧 deprecated 标记存在；日历/上市窗口经 port 取到且值一致。
+- **⑥ 边界**：只做实验/研究域的数据归属；`ai.*` 之外的 schema 不动；X 线服务的数据归属按 QT-40。
+
+---
+
+## QT-61（agent 腿）· CI 基线归零——OBS-08 注册表/护栏测试漂移 ✅ 完成（2026-10-21）
+
+> 跨仓同号同单，完整四腿收口记录见 `tellurion:docs/TASKS.md` QT-61；此处只登记本仓腿。
+
+- **要点**：判定 `turnover_rate` **确可被 DSL 求值**（注册于 `pkg/expression/registry.go:222`，Source=activity、DependsOn=market_activity，有物理表 `market_activity`（Migration 056））⇒ **修测试不改注册表**：把 `turnover_rate` 从两项护栏的幻影清单移除。
+- **要点（根因与收敛）**：根因是清单在两个测试文件各抄一份、D5 加注册项后没同步删 → 收敛为单一来源 `dslPhantomFields` + `phantomViolations` 的「过时自检」，加 `TestPhantomGuard_DetectsStaleRegistry` 三腿破坏验证。
+- **要点（验证）**：本地复现红→绿；首跑 CI 实测（2026-10-21）`7f711e5` 后 agent main 全绿。
