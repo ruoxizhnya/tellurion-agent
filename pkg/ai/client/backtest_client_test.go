@@ -372,8 +372,8 @@ func TestRunBacktest_HTTPErrorHasNoOutcome(t *testing.T) {
 }
 
 // TestGetBacktestResult_JobResultStatusIsAuthoritative 是 C1 在 GET 通道上的主判据：
-// job 行 status 是**生命周期**（core 的 UpdateJobCompleted 对 invalid 也写 completed），
-// 真正的结论在 job.result.status 上。只信 job 行就会把 invalid 读成成功。
+// job 行 status 是**生命周期**（同步通道对 invalid 也写 completed），
+// 真正的结论在 job.result.status 上。只信 job 行就会把同步 invalid 读成成功。
 func TestGetBacktestResult_JobResultStatusIsAuthoritative(t *testing.T) {
 	jobBody := `{
 		"id":"job-9","status":"completed",
@@ -411,6 +411,30 @@ func TestGetBacktestResult_JobCompletedWithoutResultStatusFailsClosed(t *testing
 	}
 	if outcome == nil || outcome.Succeeded() {
 		t.Errorf("不许构造出「成功」的 outcome，got %+v", outcome)
+	}
+}
+
+// TestGetBacktestResult_CompletedWithoutResultFailsClosed：
+// job 行说 completed / invalid，但 `result` 是 null 或缺失 —— 缺结果不是「空结果」，
+// 更不许拿 job 生命周期当成功判据。三种残缺形状都要红。
+func TestGetBacktestResult_CompletedWithoutResultFailsClosed(t *testing.T) {
+	for _, body := range []string{
+		`{"id":"job-9","status":"completed"}`,
+		`{"id":"job-9","status":"completed","result":null}`,
+		`{"id":"job-9","status":"invalid"}`,
+	} {
+		_, c := newStub(t, body)
+		outcome, err := c.GetBacktestResult(context.Background(), "job-9")
+		if err == nil {
+			t.Errorf("body=%s：缺 result 必须 fail-closed，不许当成功", body)
+			continue
+		}
+		if !strings.Contains(err.Error(), "没有 result") {
+			t.Errorf("body=%s：错误要点名缺 result，got %v", body, err)
+		}
+		if outcome != nil && outcome.Succeeded() {
+			t.Errorf("body=%s：不许构造出「成功」的 outcome，got %+v", body, outcome)
+		}
 	}
 }
 

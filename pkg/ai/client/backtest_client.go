@@ -83,9 +83,11 @@ type BacktestRequest struct {
 //  2. POST /api/backtest 的 202 异步分支：`{"job_id","status"}`。
 //  3. GET /api/backtest/:id：job 表的一行（core `pkg/backtest/job.Job`），结果嵌在
 //     `result` 里，且 job 行的 status 是**生命周期**（pending/running/completed/failed），
-//     不是引擎裁定 —— 无效 run 落盘时 job 行仍写 completed（core
-//     `pkg/storage/backtest_jobs.go` 的 UpdateJobCompleted），真正的结论在
-//     `result.status` 上。
+//     不是引擎裁定。两条落盘路径对 invalid 的处理并不一致：**同步**通道
+//     `SaveSyncResult` 把带 status 的完整响应写进 result、job 行写 completed；
+//     **异步**通道的 invalid 走 `UpdateJobFailed`（job 行 failed、结果体丢弃，
+//     core `pkg/backtest/job/job.go:493`）。所以能读到嵌套 result 时，结论以
+//     `result.status` 为准；读不到 result 时不能拿 job 的 completed 冒充成功。
 //
 // 旧实现只认 `result` 嵌套形状，于是同步 POST 的 200 响应解出来 Result 恒 nil
 // （REV-01-A ① 的漂移），调用方再一读指标就是 nil-deref。
@@ -188,17 +190,22 @@ func (o *BacktestOutcome) HasInvalidReason(code string) bool {
 
 // classify 把「拿到了一份响应」这个事实变成 (outcome, error)。
 //
+// fromJob 区分 GET /api/backtest/:id（job 行，结果必须在嵌套 result 里）与
+// POST /api/backtest（平铺体）。两者形状相似，但「completed 却没有 result」
+// 在 job 通道是残缺响应，不能当成功；靠调用方传入来源，不靠字段猜。
+//
 // 错误语义只在这里收口：
 //   - Error 非空（K9：failed ⇒ Error 必填）→ 带 outcome 一起返回 ErrBacktestFailed，
 //     既有调用点的 `if err != nil` 语义逐字节不变；
 //   - status 不是三值也不是作业态 → fail-closed 报错，点名收到的值。
 //     空 status 尤其危险：旧落盘结果没记状态，把它当 completed 就是伪造判据；
 //   - job 行 completed 但结果没记 status → fail-closed（K9：不许用间接信号推断成功）；
+//   - job 行 completed / invalid 却没有 result → fail-closed（缺失不是空结果）；
 //   - job.result 解不动 / 日期读不懂 → 报错（契约违约，不落零值）。
 //
 // invalid / completed 都返回 nil error —— 无效是一个**结果属性**不是故障，
 // 调用方读 Succeeded()/Status 自己判。
-func (r *BacktestResponse) classify() (*BacktestOutcome, error) {
+func (r *BacktestResponse) classify(fromJob bool) (*BacktestOutcome, error) {
 	jobID := r.ID
 	if jobID == "" {
 		jobID = r.JobID // 202 异步分支只有 job_id
@@ -225,6 +232,9 @@ func (r *BacktestResponse) classify() (*BacktestOutcome, error) {
 			return outcome, fmt.Errorf(
 				"job %q 状态是 completed，但落盘结果没记 status（ResultSpec 要求 status 必填）：不能当成功", r.ID)
 		}
+	} else if fromJob && (r.Status == StatusCompleted || r.Status == StatusInvalid) {
+		return outcome, fmt.Errorf(
+			"job %q 状态是 %q，但没有 result：作业完成不等于结果存在，不能当成功", r.ID, r.Status)
 	}
 
 	switch outcome.Status {
@@ -352,7 +362,7 @@ func (c *BacktestClient) RunBacktest(ctx context.Context, req BacktestRequest) (
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return btResp.classify()
+	return btResp.classify(false)
 }
 
 // GetBacktestResult polls for a backtest result by job ID
@@ -384,7 +394,7 @@ func (c *BacktestClient) GetBacktestResult(ctx context.Context, jobID string) (*
 	if btResp.ID == "" {
 		btResp.ID = jobID
 	}
-	return btResp.classify()
+	return btResp.classify(true)
 }
 
 // Health checks if the backtest service is healthy.

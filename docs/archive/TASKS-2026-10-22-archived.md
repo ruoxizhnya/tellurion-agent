@@ -76,6 +76,7 @@
 - **GET 的 job 行 status 恒为 `completed`**：core `pkg/storage/backtest_jobs.go:39` 的 `UpdateJobCompleted` 对 invalid 结果也写 `completed`；真正的结论在落盘结果自带的 `status` 上。
   客户端因此定规则：**嵌套结果自带的 status 优先于 job 行状态**；job 行 completed 但结果没记 status → fail-closed（不许用间接信号推断成功）。
   core 侧是否要让 job 表状态反映 invalid 属 QT-15/QT-10，不在本单。
+  > **订正（2026-10-22 review，原文保留）**：「恒为 completed」只对**同步**通道成立（`SaveSyncResult` → `UpdateJobCompleted`）。**异步** invalid 走 `UpdateJobFailed`（`pkg/backtest/job/job.go:493`），job 行是 `failed` 且结果体被丢弃——客户端在 GET 上读到的是 failed，不是带 `result.status` 的 completed。规则不变：能读到嵌套 result 时以结果自带 status 为准；**没有 result 时 fail-closed**（review 补的测试 `TestGetBacktestResult_CompletedWithoutResultFailsClosed` 钉住这条）。
 - **两个新 code 今天没有生产者**：`data_gap_skipped` / `session_terminated` 在 core 源码里零命中（`tellurion-contracts:docs/API.md:147` 同样登记「今天源码里没有」）。本单只落消费口径与稳定常量，不伪造生产者、不新增第四值。
 - **`tellurion-contracts:dto/` 生成物不存在**（契约仓 QT-05 未启动）。③-1 的「或经生成物」路线今天不可用，按同一句的「以 openapi 为契约源」落地：DTO 手写不可避免，但由**对拍测试**钉住（CI 会 checkout core，测试自动找到 `core/docs/openapi.yaml`；单仓 checkout 显式 Skip，用 `TELLURION_OPENAPI` 可在本地指定路径）。
 - **鉴权默认 fail-closed 的实际影响面为零**：`NewBacktestClient` 今天在本仓没有生产装配点（只有测试构造），core 的 `/api/backtest` 也尚未挂 JWT 中间件（QT-50 ④ 未落）。接线时必须给 `WithBearerToken` 或显式 `WithInsecureLoopback`；这是刻意的——无凭证静默匿名调用比启动失败更难发现。
