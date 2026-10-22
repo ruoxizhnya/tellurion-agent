@@ -174,7 +174,7 @@ A4 的 dry-run 已用「全局文本替换」验证过：这 5 处一起换掉�
 
 ## 10. 机器护栏
 
-`internal/repoguard/import_inventory_test.go` 把本文件的 54 行 import 清单、汇总计数与非 import 落点逐条钉在源码树上（AST 比对，行号精确到行）。它红的时候先看是哪种：
+`internal/repoguard/import_inventory_test.go` 把本文件的 54 行 import 清单、汇总计数与非 import 落点逐条钉在源码树上（AST 比对，行号精确到行）。扫描**只覆盖本模块**：遇到自带 `go.mod` 的嵌套目录（CI 把 core checkout 到仓内 `core/`）直接跳过——否则会把 core 的旧 import 也当成 agent 的清单项。它红的时候先看是哪种：
 
 - 源码新增 / 删除了旧 import → 清单过期，重生成；
 - B4 已做完 → 按 §9-6 退场。

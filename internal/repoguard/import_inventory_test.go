@@ -242,29 +242,11 @@ func scanImports(t *testing.T, root string) (map[string]inventoryRow, map[string
 	fset := token.NewFileSet()
 	sites := map[string]inventoryRow{}
 	forbidden := map[string]bool{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "vendor", "node_modules":
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), ".go") {
-			return nil
-		}
+	walkModuleGoFiles(t, root, func(rel, path string) error {
 		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
 		if err != nil {
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
 		for _, imp := range file.Imports {
 			importPath, err := strconv.Unquote(imp.Path.Value)
 			if err != nil {
@@ -283,34 +265,13 @@ func scanImports(t *testing.T, root string) (map[string]inventoryRow, map[string
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("扫描 import 失败：%v", err)
-	}
 	return sites, forbidden
 }
 
 func scanTextOccurrences(t *testing.T, root string) map[string]inventoryRow {
 	t.Helper()
 	sites := map[string]inventoryRow{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "vendor", "node_modules":
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), ".go") {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
+	walkModuleGoFiles(t, root, func(rel, path string) error {
 		if rel == "internal/repoguard/import_inventory_test.go" {
 			return nil
 		}
@@ -328,10 +289,71 @@ func scanTextOccurrences(t *testing.T, root string) map[string]inventoryRow {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("扫描旧路径文本失败：%v", err)
-	}
 	return sites
+}
+
+// walkModuleGoFiles 只遍历本模块的 .go 文件。CI 会把 core 仓 checkout 到
+// 仓内的 core/（见 .github/workflows/ci.yml），那是一个独立 module，不属于
+// 本仓清单，必须按 go.mod 边界跳过。
+func walkModuleGoFiles(t *testing.T, root string, fn func(rel, path string) error) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "vendor", "node_modules":
+				return fs.SkipDir
+			}
+			if path != root {
+				if _, statErr := os.Stat(filepath.Join(path, "go.mod")); statErr == nil {
+					return fs.SkipDir
+				}
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		return fn(filepath.ToSlash(rel), path)
+	})
+	if err != nil {
+		t.Fatalf("扫描本模块 .go 文件失败：%v", err)
+	}
+}
+
+func TestWalkModuleGoFiles_SkipsNestedModules(t *testing.T) {
+	root := t.TempDir()
+	writeFile := func(rel, content string) {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("main.go", "package main\n")
+	writeFile("pkg/deep.go", "package pkg\n")
+	writeFile("core/go.mod", "module tellurion\n")
+	writeFile("core/handlers.go", "package main\n")
+	writeFile("core/pkg/nested.go", "package pkg\n")
+
+	var got []string
+	walkModuleGoFiles(t, root, func(rel, _ string) error {
+		got = append(got, rel)
+		return nil
+	})
+	sort.Strings(got)
+	want := []string{"main.go", "pkg/deep.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("嵌套 module 未被跳过：got %v want %v", got, want)
+	}
 }
 
 func readLine(file string, line int) (string, error) {
