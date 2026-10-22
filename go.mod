@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.3
 	github.com/rs/zerolog v1.33.0
-	github.com/ruoxizhnya/tellurion-contracts v0.0.0-20261022191510-fbe9a2d0df17
+	github.com/ruoxizhnya/tellurion-contracts v0.1.0
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/time v0.15.0

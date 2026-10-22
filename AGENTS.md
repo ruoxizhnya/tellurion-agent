@@ -43,8 +43,8 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 | 依赖 | 版本 | 说明 |
 |---|---|---|
 | `tellurion`（core） | `v0.1.0` + `replace ../tellurion` | **过渡期**，S3 拆掉；拆掉前本仓 R1 不成立 |
-| `github.com/ruoxizhnya/tellurion-contracts` | 待定（S2 后 `v0.1.0`） | 契约只认版本号 |
-| `github.com/ruoxizhnya/tellurion-kit` | 待定（S2 后 `v0.1.0`） | 同上 |
+| `github.com/ruoxizhnya/tellurion-contracts` | `v0.1.0` | 2026-10-23 已发版（tag 在 `main` 上）；契约只认版本号 |
+| `github.com/ruoxizhnya/tellurion-kit` | `v0.1.0` | 2026-10-23 已发版；本仓今天无代码引用它，`go mod tidy` 不保留未使用依赖，接入随 QT-05 ③-③ |
 
 ## 5. 活在哪、文档在哪
 
