@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/domain"
 )
 
 // ─── WalkForwardRunner (narrow interface) ─────────────────────────────

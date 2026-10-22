@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/domain"
 	"tellurion/pkg/strategy"
 )
 

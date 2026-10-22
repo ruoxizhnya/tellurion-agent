@@ -13,7 +13,7 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
-	"tellurion/pkg/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion/pkg/strategy"
 	"tellurion/pkg/strategy/expression"
 )

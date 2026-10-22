@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"tellurion/pkg/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 )
 
 // ErrBacktestFailed 标记「core 判本次 run 失败」这一**语义**失败，与传输层错误区分开：

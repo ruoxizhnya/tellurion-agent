@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/engine"
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
-	"tellurion/pkg/backtest/contracts"
-	"tellurion/pkg/domain"
 	"tellurion/pkg/storage"
 	"tellurion/pkg/strategy"
 	"tellurion/pkg/strategy/expression"

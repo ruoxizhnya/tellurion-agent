@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"tellurion/pkg/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 )
 
 func hasRobustnessChallenge(r RobustnessResult, severity string) bool {

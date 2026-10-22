@@ -53,7 +53,7 @@ If your strategy uses pre-computed factor z-scores, implement FactorAware:
 
     Available factors: domain.FactorMomentum, domain.FactorValue, domain.FactorQuality
 
-## Domain types (tellurion/pkg/domain)
+## Domain types (github.com/ruoxizhnya/tellurion-contracts/domain)
 
     type OHLCV struct {
         Symbol    string
@@ -82,7 +82,7 @@ If your strategy uses pre-computed factor z-scores, implement FactorAware:
 ## Rules
 
 1. Package name MUST be "plugins"
-2. Include these imports: "context", "time", "tellurion/pkg/domain", "tellurion/pkg/strategy"
+2. Include these imports: "context", "time", "github.com/ruoxizhnya/tellurion-contracts/domain", "tellurion/pkg/strategy"
 3. Implement ALL Strategy interface methods exactly as shown above
 4. Include an init() function that calls strategy.GlobalRegister(&yourImpl{})
 5. Return "hold" for all stocks by default; only return "buy"/"sell" when indicators give a clear signal
@@ -103,7 +103,7 @@ import (
     "sort"
     "time"
 
-    "tellurion/pkg/domain"
+    "github.com/ruoxizhnya/tellurion-contracts/domain"
     "tellurion/pkg/strategy"
 )
 

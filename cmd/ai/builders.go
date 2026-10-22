@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/engine"
 	"github.com/spf13/viper"
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/client"
@@ -22,9 +24,7 @@ import (
 	"tellurion-agent/pkg/ai/tools/builtin"
 	"tellurion-agent/pkg/copilot"
 	"tellurion/pkg/backtest"
-	"tellurion/pkg/backtest/contracts"
 	"tellurion/pkg/bootstrap"
-	"tellurion/pkg/domain"
 	"tellurion/pkg/sandbox/runner"
 	"tellurion/pkg/sandbox/staticcheck"
 	"tellurion/pkg/storage"

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"tellurion/pkg/domain"
 )
 
 // 假 store：只记下写过什么，读的时候从内存 map 里取。

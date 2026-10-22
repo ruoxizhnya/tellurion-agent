@@ -14,8 +14,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ruoxizhnya/tellurion-contracts/engine"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/backtest/contracts"
 )
 
 // BacktestTool wraps a contracts.BacktestRunner into a tools.Tool.

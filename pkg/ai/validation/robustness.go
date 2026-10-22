@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strconv"
 
-	"tellurion/pkg/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 )
 
 // NeighborPoint 是参数邻域里的一次尝试 —— 和中心点相近但不完全相同。

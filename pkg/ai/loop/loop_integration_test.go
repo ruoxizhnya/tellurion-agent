@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai"
@@ -11,7 +12,6 @@ import (
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/search"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
-	"tellurion/pkg/domain"
 	"tellurion/pkg/storage"
 )
 

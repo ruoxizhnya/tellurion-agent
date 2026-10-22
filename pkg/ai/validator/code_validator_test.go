@@ -54,7 +54,7 @@ func TestValidateCompilation_CanResolveProjectImports(t *testing.T) {
 	v := NewCodeValidator()
 	res := v.ValidateCompilation(`package strategy
 
-import "tellurion/pkg/domain"
+import "github.com/ruoxizhnya/tellurion-contracts/domain"
 
 func Compute(bar domain.OHLCV) float64 {
 	return bar.Close

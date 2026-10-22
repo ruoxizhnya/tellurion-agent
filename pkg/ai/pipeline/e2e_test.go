@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
-	"tellurion/pkg/domain"
 )
 
 // e2eMockRunner implements BacktestRunner for e2e testing.

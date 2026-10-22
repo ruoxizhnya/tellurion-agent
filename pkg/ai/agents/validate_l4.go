@@ -6,9 +6,9 @@ import (
 	"math"
 	"time"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/search"
-	"tellurion/pkg/domain"
 )
 
 // P1-12 (ODR-013 Sprint 6): L4 walk-forward validation.

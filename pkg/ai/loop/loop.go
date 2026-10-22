@@ -13,9 +13,9 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/validation"
-	"tellurion/pkg/domain"
 	"tellurion/pkg/storage"
 )
 

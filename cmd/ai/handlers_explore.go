@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai"
 	aicausal "tellurion-agent/pkg/ai/causal"
 	"tellurion-agent/pkg/ai/loop"
@@ -18,7 +19,6 @@ import (
 	"tellurion-agent/pkg/ai/search"
 	"tellurion-agent/pkg/ai/validation"
 	"tellurion/pkg/backtest"
-	"tellurion/pkg/domain"
 	"tellurion/pkg/storage"
 )
 

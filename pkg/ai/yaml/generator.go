@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ruoxizhnya/tellurion-contracts/fees"
 	"tellurion-agent/pkg/ai/intent"
-	"tellurion/pkg/fees"
 )
 
 // Generator generates YAML configuration from strategy intents

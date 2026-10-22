@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/domain"
 )
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai/pipeline"
-	"tellurion/pkg/domain"
 )
 
 // P1-2 循环控制器。

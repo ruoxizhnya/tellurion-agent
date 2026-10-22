@@ -3,7 +3,7 @@ package validation
 import (
 	"math"
 
-	"tellurion/pkg/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 )
 
 // TurnoverEstimate 是从一次回测结果反推出来的换手率。

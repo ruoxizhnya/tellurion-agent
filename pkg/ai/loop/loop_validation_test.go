@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/validation"
-	"tellurion/pkg/domain"
 )
 
 // 验证器链（P2-9）接进循环的取证。

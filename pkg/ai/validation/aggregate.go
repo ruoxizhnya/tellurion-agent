@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"tellurion/pkg/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 )
 
 // 验证器链的聚合入口：一次提案喂进去，六维的质疑清单吐出来。

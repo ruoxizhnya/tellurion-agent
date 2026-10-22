@@ -6,7 +6,7 @@ import (
 	"math"
 	"sort"
 
-	"tellurion/pkg/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 )
 
 // 因果维：讲得出为什么吗（六维里唯一需要语言模型的一维）。

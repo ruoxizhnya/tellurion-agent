@@ -1,14 +1,14 @@
 ---
-status: active
-last-verified: 2026-10-22
-verified-by: A4 只列不改交付（AST 实测 + 两段临时副本 dry-run）
+status: archived
+last-verified: 2026-10-23
+verified-by: A4 只列不改交付（AST 实测 + 两段临时副本 dry-run）；B4 已执行完毕（2026-10-23，见 §11）
 ---
 
 # contracts 迁移 · agent 侧 import 全替清单（B4 输入）
 
-> **本文件是 A4 的交付物、B4 的输入。A4 只列不改**：清单由 `go/parser` AST 实测生成，并已在临时副本上做过两段 dry-run 验证；**生产代码零改动**（import 与业务逻辑未动），改动仅限 `docs/`（本文件 + 两处入口登记）与 `internal/repoguard/` 的护栏测试。
+> **本文件是 A4 的交付物、B4 的输入；B4 已于 2026-10-23 执行完毕（执行记录见 §11）。** A4 只列不改：清单由 `go/parser` AST 实测生成，并已在临时副本上做过两段 dry-run 验证；**生产代码零改动**（import 与业务逻辑未动），改动仅限 `docs/`（本文件 + 两处入口登记）与 `internal/repoguard/` 的护栏测试。
 > **锚点**：清单采样树 = agent `a5e847e`；A4 随后的 commit 只动 `docs/` 与 `internal/repoguard/`，不影响清单行号。contracts `fbe9a2d`（`origin/main`，已推、**未打 tag**）。
-> **临时件生命周期**：B4 执行完 → 把本文件标成已执行、移入 `docs/archive/`，并删除 `internal/repoguard/import_inventory_test.go`（若包内没有别的护栏，连 `internal/repoguard/` 一起删）。那条护栏变红只有两种含义：① 源码漂移了，清单要重生成；② B4 做完了，护栏该退场。
+> **临时件生命周期（已走完）**：B4 已执行完 → 本文件已标成 archived 并移入 `docs/archive/`；`internal/repoguard/` 已整体删除（它只有这份护栏 + `doc.go`）。
 
 ## 1. 计数口径：台账的 48+5+3 是 grep 数，真实 import 是 46+5+3
 
@@ -180,3 +180,12 @@ A4 的 dry-run 已用「全局文本替换」验证过：这 5 处一起换掉�
 - B4 已做完 → 按 §9-6 退场。
 
 **不要**为了让护栏变绿而改清单去迁就源码——清单是 B4 的输入，不是事后记录。
+
+## 11. B4 执行记录（2026-10-23）
+
+- **前置**：core 侧 QT-05 B1 已落（契约三旧包删除、import 全替、`e2e/guard` 两把 SPEC 守卫就位），core `go build ./...` / `go vet ./...` / `go test ./... -count=1` 实测全 0。
+- **依赖**：`github.com/ruoxizhnya/tellurion-contracts v0.0.0-20261022191510-fbe9a2d0df17`（真实伪版本，无 `=>`）；`tellurion-kit` 已 `go get` 到 `c9143f9`，但本仓当前无代码引用它，`go mod tidy` 按 Go 规则移除未使用依赖，**未加任何 replace**。`replace tellurion => ../tellurion` 保留（S3 才删）。
+- **替换**：54 个 import 位点 / 48 文件（domain 46、engine 5、fees 3）全部按 §2 规则替换，调用点前缀未改；§6 的 5 处文本落点（`prompts.go` 3 处、`code_validator_test.go` 1 处、`copilot.go` 注释 1 处）同批替换。`gofmt -l .` 为空。
+- **护栏退场**：`internal/repoguard/import_inventory_test.go` 在替换后按设计变红（旧 import 已清零），随后与 `doc.go` 一起删除；`internal/repoguard/` 目录整体移除。
+- **验收（真退出码）**：`GOWORK=off go build ./...` = 0；`go vet ./...` = 0；`go test ./... -count=1` = 0（17 个包 ok / 3 个无测试文件）；旧路径 `git grep` = 0；跨仓 replace grep = 0。
+- **未执行**：CI 腿待 core 迁移推送后由远端跑（本地 core 提交尚未 push）；本机无 C 编译器，`-race` 不适用。

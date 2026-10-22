@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文进 archive）+ A4 import 全替清单登记
+last-verified: 2026-10-23
+verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文进 archive）+ A4 import 全替清单登记 + B4 执行完毕（2026-10-23，清单已归档）
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -23,7 +23,14 @@ verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文�
 | QT-17 | `ai.*` schema 自持 + 双写对拍 + 切读 + 停写 | `QT-17` | D24 补第 7 类动作 |
 | S3 | 删 `replace ../tellurion`，改 HTTP 粗粒度 | `QT-07 / QT-50` | QT-17 + QT-50 |
 
-> **S1 下游腿（contracts 四包切换）的 agent 侧落点**：import 全替清单见 [`contracts-import-replacement.md`](contracts-import-replacement.md)（A4 只列不改产出，B4 执行；临时件，执行完归档）。清单已实测把台账的「48+5+3」订正为 **46+5+3 = 54 位点 / 48 文件**，并写明 core 腿必须先落——否则两处 core/contracts 类型身份冲突会让构建红。
+> **S1 下游腿（contracts 四包切换）的 agent 侧落点**：import 全替清单见 [`archive/contracts-import-replacement-2026-10-23.md`](archive/contracts-import-replacement-2026-10-23.md)（A4 只列不改产出，**B4 已于 2026-10-23 执行完毕**；临时件已归档）。清单已实测把台账的「48+5+3」订正为 **46+5+3 = 54 位点 / 48 文件**，并写明 core 腿必须先落——否则两处 core/contracts 类型身份冲突会让构建红。
+
+## B4 · agent 侧 contracts import 全替 ✅ 完成（2026-10-23，已归档）
+
+> 六字段正文与执行记录（54 位点 / 48 文件逐条替换、§6 五处文本落点、护栏退场、真退出码）在
+> [`archive/contracts-import-replacement-2026-10-23.md`](archive/contracts-import-replacement-2026-10-23.md) §11。
+> **对后续的直接后果**：本仓已依赖 `tellurion-contracts` 真实伪版本（无 `replace`）；`replace tellurion => ../tellurion` 仍保留，S3 才删；
+> `tellurion-kit` 已 `go get` 但无代码引用，`go mod tidy` 已按 Go 规则移除，B5 之后若需要再按使用方实际引用引入。
 
 ## OPS-01-A · 观察页 run 状态 SSE 推送端点 ✅ 完成（2026-10-15）
 

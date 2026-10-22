@@ -21,9 +21,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/engine"
 	"tellurion-agent/pkg/copilot"
-	"tellurion/pkg/backtest/contracts"
-	"tellurion/pkg/domain"
 )
 
 // aliasStubRunner is a minimal concrete implementation used only to prove

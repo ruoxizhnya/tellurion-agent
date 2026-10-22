@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/domain"
 )
 
 // ─── SummarizeBacktestTool ─────────────────────────────────────────────

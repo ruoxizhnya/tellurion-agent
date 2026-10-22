@@ -8,7 +8,7 @@ package validation
 import (
 	"testing"
 
-	"tellurion/pkg/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
 )
 
 func TestRedundancyIntegration_RealEngineOutputIsComparable(t *testing.T) {

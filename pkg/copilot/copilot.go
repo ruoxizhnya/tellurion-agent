@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	"tellurion/pkg/backtest/contracts"
-	"tellurion/pkg/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/domain"
+	"github.com/ruoxizhnya/tellurion-contracts/engine"
 )
 
 // LLMClient is the local contract for an LLM backend that generates
@@ -100,7 +100,7 @@ type CopilotService struct {
 	// WorkingDir is the directory `go build` runs in when compiling
 	// the LLM-generated strategy. It must contain a `go.mod` so that
 	// the generated file can resolve its imports
-	// (tellurion/pkg/domain, etc.). The
+	// (github.com/ruoxizhnya/tellurion-contracts/domain, etc.). The
 	// service does NOT auto-detect this — callers MUST set it
 	// explicitly via WithWorkingDir so the configuration is
 	// environment-agnostic and reviewable in code review.
