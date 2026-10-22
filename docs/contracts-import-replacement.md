@@ -6,8 +6,8 @@ verified-by: A4 只列不改交付（AST 实测 + 两段临时副本 dry-run）
 
 # contracts 迁移 · agent 侧 import 全替清单（B4 输入）
 
-> **本文件是 A4 的交付物、B4 的输入。A4 只列不改**：清单由 `go/parser` AST 实测生成，并已在临时副本上做过两段 dry-run 验证；本仓代码零改动。
-> **锚点**：agent `a5e847e`（A4 推送后的 `main`）；contracts `fbe9a2d`（`origin/main`，已推、**未打 tag**）。
+> **本文件是 A4 的交付物、B4 的输入。A4 只列不改**：清单由 `go/parser` AST 实测生成，并已在临时副本上做过两段 dry-run 验证；**生产代码零改动**（import 与业务逻辑未动），新增的只有本文件与 `internal/repoguard/` 的护栏测试。
+> **锚点**：清单采样树 = agent `a5e847e`；A4 随后的两个 commit 只动 `docs/` 与 `internal/repoguard/`，不影响清单行号。contracts `fbe9a2d`（`origin/main`，已推、**未打 tag**）。
 > **临时件生命周期**：B4 执行完 → 把本文件标成已执行、移入 `docs/archive/`，并删除 `internal/repoguard/import_inventory_test.go`。那条护栏变红只有两种含义：① 源码漂移了，清单要重生成；② B4 做完了，护栏该退场。
 
 ## 1. 计数口径：台账的 48+5+3 是 grep 数，真实 import 是 46+5+3
