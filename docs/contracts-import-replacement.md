@@ -6,15 +6,15 @@ verified-by: A4 只列不改交付（AST 实测 + 两段临时副本 dry-run）
 
 # contracts 迁移 · agent 侧 import 全替清单（B4 输入）
 
-> **本文件是 A4 的交付物、B4 的输入。A4 只列不改**：清单由 `go/parser` AST 实测生成，并已在临时副本上做过两段 dry-run 验证；**生产代码零改动**（import 与业务逻辑未动），新增的只有本文件与 `internal/repoguard/` 的护栏测试。
-> **锚点**：清单采样树 = agent `a5e847e`；A4 随后的两个 commit 只动 `docs/` 与 `internal/repoguard/`，不影响清单行号。contracts `fbe9a2d`（`origin/main`，已推、**未打 tag**）。
-> **临时件生命周期**：B4 执行完 → 把本文件标成已执行、移入 `docs/archive/`，并删除 `internal/repoguard/import_inventory_test.go`。那条护栏变红只有两种含义：① 源码漂移了，清单要重生成；② B4 做完了，护栏该退场。
+> **本文件是 A4 的交付物、B4 的输入。A4 只列不改**：清单由 `go/parser` AST 实测生成，并已在临时副本上做过两段 dry-run 验证；**生产代码零改动**（import 与业务逻辑未动），改动仅限 `docs/`（本文件 + 两处入口登记）与 `internal/repoguard/` 的护栏测试。
+> **锚点**：清单采样树 = agent `a5e847e`；A4 随后的 commit 只动 `docs/` 与 `internal/repoguard/`，不影响清单行号。contracts `fbe9a2d`（`origin/main`，已推、**未打 tag**）。
+> **临时件生命周期**：B4 执行完 → 把本文件标成已执行、移入 `docs/archive/`，并删除 `internal/repoguard/import_inventory_test.go`（若包内没有别的护栏，连 `internal/repoguard/` 一起删）。那条护栏变红只有两种含义：① 源码漂移了，清单要重生成；② B4 做完了，护栏该退场。
 
 ## 1. 计数口径：台账的 48+5+3 是 grep 数，真实 import 是 46+5+3
 
 | 口径 | domain | engine/contracts | fees | 合计 |
 |---|---:|---:|---:|---:|
-| 台账原文（`git grep -l` 文件数） | 48 | 5 | 3 | 56 |
+| 台账原文（文件计数） | 48 | 5 | 3 | 56 |
 | **实测真实 import（AST）** | **46** | **5** | **3** | **54 位点 / 48 文件** |
 | 差值 | 2 | 0 | 0 | 2 |
 
@@ -23,7 +23,7 @@ verified-by: A4 只列不改交付（AST 实测 + 两段临时副本 dry-run）
 - `pkg/ai/prompts.go` —— `SystemPrompt` 文本里 3 处提到旧路径（`:56` / `:85` / `:106`）。
 - `pkg/ai/validator/code_validator_test.go` —— 测试夹具的源码字符串（`:57`）。
 
-它们**是真依赖**（§6 单列、B4 必须处理），但不是 import 语句；`grep -l` 把「文本提到路径」与「编译期 import」混成了同一个数。
+它们**是真落点**（§6 单列、B4 必须处理），但不是 import 语句；`grep -l` 把「文本提到路径」与「编译期 import」混成了同一个数。
 另：agent 无 `tellurion/pkg/domain/market` 直接 import（实测 0），所以本清单没有 domain/market 组。
 
 - 54 个 import 位点分布在 **48 个文件**：6 个文件各 import 两条旧路径（`builders.go`、`pipeline.go`、`backtest_runner_alias_test.go`、`economic_integration_test.go`、`live_backtest_integration_test.go`、`copilot.go`）。
@@ -155,7 +155,7 @@ A4 的 dry-run 已用「全局文本替换」验证过：这 5 处一起换掉�
 | 误报定位 | `git grep -l` vs AST 差集 | `pkg/ai/prompts.go`、`pkg/ai/validator/code_validator_test.go`（均为字符串） |
 | dry-run A：只换 agent，core 未迁 | 临时副本 `go build ./...` | **exit 1**，两处类型冲突（§7-2） |
 | dry-run B：core + agent 都迁 | 临时副本 `go build ./...` | core **exit 0**；agent **exit 0** |
-| dry-run B：agent 全量门禁 | 临时副本 `go vet ./...` / `go test ./... -count=1` | **exit 0 / exit 0**（20 个包全 ok） |
+| dry-run B：agent 全量门禁 | 临时副本 `go vet ./...` / `go test ./... -count=1` | **exit 0 / exit 0**（20 个包：17 个 ok + 3 个无测试文件） |
 
 两段 dry-run 都在工作区外的临时副本里做，未改动本仓任何文件。
 
@@ -166,11 +166,11 @@ A4 的 dry-run 已用「全局文本替换」验证过：这 5 处一起换掉�
 3. 处理 §6 的 **5 处非 import 落点**（其中 4 处必换、1 处可选）。
 4. `gofmt -w` 触碰过的文件；`gofmt -l .` 必须为空。
 5. 验收（逐条真退出码）：
-   - `git grep -nE '"tellurion/(pkg/domain|pkg/backtest/contracts|pkg/fees)"' -- '*.go'` → **0 行**（§6 也换完的前提下）。
-   - `go list -m all | grep tellurion-contracts` → 真实伪版本，**不出现 `=>`**。
-   - `go build ./...` / `go vet ./...` / `go test ./... -count=1` → 全 0。
+   - `git grep -nE 'tellurion/pkg/(domain|backtest/contracts|fees)' -- '*.go' ':!internal/repoguard/'` → **0 行**（连 §6 的无引号提示词文本一起覆盖；护栏本身在执行后已删）。
+   - `GOWORK=off go list -m all | grep tellurion-contracts` → 真实伪版本，**不出现 `=>`**。
+   - `GOWORK=off go build ./...` / `go vet ./...` / `go test ./... -count=1` → 全 0（`GOWORK=off` 用于证明走 `go.sum`，不靠本地 `go.work`）。
    - CI 绿。
-6. 收尾：删除 `internal/repoguard/import_inventory_test.go`；本文件标为已执行并移入 `docs/archive/`；在 `docs/TASKS.md` 记录 B4 完成（该单执行的是 contracts 交接单 B-1..B-3，本身没有独立单号）。
+6. 收尾：删除 `internal/repoguard/import_inventory_test.go`（若包内无其他护栏，连 `internal/repoguard/` 一起删）；本文件标为已执行并移入 `docs/archive/`；在 `docs/TASKS.md` 记录 B4 完成（该单执行的是 contracts 交接单 B 节 1..3，本身没有独立单号）。
 
 ## 10. 机器护栏
 

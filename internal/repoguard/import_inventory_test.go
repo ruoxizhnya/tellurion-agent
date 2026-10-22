@@ -123,6 +123,9 @@ func assertSummary(t *testing.T, doc string, rows []inventoryRow) {
 	for _, line := range strings.Split(doc, "\n") {
 		if m := summaryRowRE.FindStringSubmatch(line); m != nil {
 			group, oldPath, newPath := m[1], m[2], m[3]
+			if seenGroups[group] {
+				t.Errorf("汇总表重复出现 %s 组", group)
+			}
 			sites, _ := strconv.Atoi(m[4])
 			files, _ := strconv.Atoi(m[5])
 			if want, ok := inventoryMapping[oldPath]; !ok || newPath != want {
@@ -209,6 +212,9 @@ func assertTextCoverage(t *testing.T, root string, imports map[string]inventoryR
 	t.Helper()
 	documented := map[string]bool{}
 	for _, r := range nonImports {
+		if documented[r.key()] {
+			t.Errorf("清单重复登记同一非 import 落点：%s", r.key())
+		}
 		documented[r.key()] = true
 		if _, isImport := imports[r.key()]; isImport {
 			t.Errorf("%s 被登记为非 import，但源码里它是真实 import", r.key())
@@ -272,7 +278,8 @@ func scanTextOccurrences(t *testing.T, root string) map[string]inventoryRow {
 	t.Helper()
 	sites := map[string]inventoryRow{}
 	walkModuleGoFiles(t, root, func(rel, path string) error {
-		if rel == "internal/repoguard/import_inventory_test.go" {
+		// 护栏自己就在这个测试包里，常量里必然出现旧路径；test-only 包整包跳过。
+		if strings.HasPrefix(rel, "internal/repoguard/") {
 			return nil
 		}
 		content, err := os.ReadFile(path)

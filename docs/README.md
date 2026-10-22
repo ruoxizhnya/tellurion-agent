@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-22
-verified-by: 登记 A4 import 全替清单（B4 输入）
+verified-by: 功能边界固化（三份契约：db / api / dataflow）+ 登记 A4 import 全替清单（B4 输入）
 ---
 
 # 文档导航 — tellurion-agent

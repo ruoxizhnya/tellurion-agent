@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-22
-verified-by: REV-01-A 结案归档 + A4 import 全替清单登记
+verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文进 archive）+ A4 import 全替清单登记
 ---
 
 # TASKS — tellurion-agent 未完成项
