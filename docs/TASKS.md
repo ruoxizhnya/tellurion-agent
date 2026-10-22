@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-21
-verified-by: 任务台账批量重分布（QT-17 自 core 迁入）
+last-verified: 2026-10-22
+verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文进 archive）
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -139,32 +139,13 @@ verified-by: 任务台账批量重分布（QT-17 自 core 迁入）
 
 ---
 
-## REV-01-A · 消费侧对齐 refactor 修复传播（wire 契约 + 三值口径）⬜ 待做（2026-10-20 登记，refactor-plan-review H2/C1 传播）
+## REV-01-A · 消费侧对齐 refactor 修复传播（wire 契约 + 三值口径）✅ 完成（2026-10-22，已归档）
 
-> **OBS-01-R2-A 结案后追加的输入（2026-10-22，开工前先读那单的「实测偏差」四条）**：本仓 `pkg/ai/client` 的请求与响应 DTO 与 core 线上形状**两处漂移**——
-> ① 客户端发 `strategy_name`，core 认 `strategy`（`binding:"required"`）⇒ POST 恒 400；
-> ② core 同步 POST 是 `contracts.BacktestResponse` 平铺体、无嵌套 `result` 键 ⇒ 200 时 `Result` 恒 nil。
-> 三值透传已由 OBS-01-R2-A 修好并用 `Succeeded()`（`status==completed && Result!=nil`）兜住 nil 结果，但**这两条要按契约改本仓侧**（③-1），
-> 且 ⑤-2「真请求核对」必须等这两条修完才能在活 core 上过。
-
-> **来源**：`tellurion:docs/design/qt-decoupling/refactor-plan-review-2026-10-20.md` 的 H2（agent↔core wire 契约）与 C1（三值 status 映射）修复传播。规则口径冻结在 `tellurion:docs/TASKS.md` QT-50 ③-④ 与 QT-10 ③-④/QT-15 ⑤（**以彼处为准，本单只落本仓消费侧**）。与 OBS-01-R2-A 联动（那单解决三值透传结构，本单补 wire 契约与新增 invalid_reasons 码的消费口径）。
-
-- **① 目标**：本仓对 core 的 HTTP 消费面按冻结 wire 契约对齐，且能正确判读 C1 修复后新增的 `invalid_reasons` code（`data_gap_skipped` / `session_terminated`），不把 `invalid` 误当成功、不把 `failed` 误当可重试。
-- **② 上下文**（开工前逐一读）：
-  - wire 契约真相源：core 仓 `tellurion:docs/openapi.yaml`（QT-50 ③-③ 落定后存在；落定前以 QT-50 ③-③ 的 DTO 清单为准）；生成物 `tellurion-contracts:dto/`（**禁手改**，见 `tellurion-contracts:docs/TASKS.md` CT-01）。
-  - 三值映射口径（C1）：`completed` / `invalid` / `failed`（冻结于 `tellurion:docs/SPEC.md`）；`invalid` 必带 `invalid_reasons`（code 列表），新增 code `data_gap_skipped`（数据缺口跳天）与 `session_terminated`（session 终止）；`ErrStrategyFault` / `ErrContractBreach` → `failed` + `error`。下游判据：**只接受 `completed` 为成功**。
-  - 本仓消费面：`pkg/ai/client/backtest_client.go`（`RunBacktest`/`GetBacktestResult`，见 OBS-01-R2-A ②）、`pkg/ai/loop` 候选评估、Copilot 播报。
-- **③ 要求**：
-  1. **wire 契约消费**：本仓调 core 的 HTTP 客户端以 `tellurion:docs/openapi.yaml` 为契约源（或经 `tellurion-contracts:dto/` 生成物类型），**禁止手写与 openapi 漂移的私有 DTO**；若发现现有手写 DTO 与契约不一致，按契约改本仓侧，不改契约。
-  2. **鉴权消费端 fail-closed**：对 core 的请求按 QT-50 ④ 的 JWT+RBAC 面消费（本仓作为调用方持有/转发 token）；loopback-only insecure 模式仅限显式配置的本地开发，默认 fail-closed（无凭证即拒绝，不静默降级）。
-  3. **三值消费口径**：`invalid_reasons` 出现 `data_gap_skipped` / `session_terminated` 时按 **invalid 语义**处理（结果可解释、不可当成功，也不当故障重试）；`failed` + `error`（`ErrStrategyFault`/`ErrContractBreach`）按**故障语义**处理（不重试当成功）；不新增第四值、不自行改判 status。
-  4. 与 OBS-01-R2-A 共用 `BacktestOutcome` 小结构透传（若该单先行落地则直接在其上补 code 判读；若本单先行则预留字段，两单合流后无返工）。
-- **④ 约束与非目标**：不改 core 侧契约与映射逻辑（C1 修复在 core，本单只消费）；不改前端（ui 仓另立 UI-02）；不借机重构 pipeline；不新增第三方依赖。
-- **⑤ 验收**：
-  1. 单测（`httptest` 假服务端）：对含 `data_gap_skipped` / `session_terminated` 的 `invalid` 响应判读为非成功非故障；对 `failed` 响应判读为故障；对 `completed` 判读为成功——三者可区分。
-  2. **破坏验证**：把 `data_gap_skipped` 误判为成功（或误判为 failed）→ 对应用例红 → 还原绿；把手写 DTO 字段名改错 → 与 openapi 对拍（或类型编译）红 → 还原绿。
-  3. `go build ./...`、`go vet ./...`、`go test ./pkg/ai/... -race -count=1` 全绿。
-- **⑥ 边界**：只做本仓消费侧对齐与判读口径；wire 契约的制定与 openapi.yaml 落定在 `tellurion:docs/TASKS.md` QT-50；三值映射实现在 core QT-10/QT-15；前端展示口径在 `tellurion-ui:docs/TASKS.md` UI-02。
+> 六字段正文与结案记录（③ 逐条落点、⑤ 验收真退出码、独立 worktree 上的两条破坏腿与逐字节还原凭据、六条实测发现）在
+> [`archive/TASKS-2026-10-22-archived.md`](archive/TASKS-2026-10-22-archived.md)。本文件按规则只留未完成项，这里只留指针。
+> **对后续的直接后果**：① core 的 `openapi.yaml` 仍漏登记 `error` / `invalid_reasons` / `universe_max_size`，客户端用缺口 allowlist 顶着，
+> 补登记后 `TestOpenAPI_GapsAreStillGaps` 会红并提醒删行；② GET 的 job 行 status 恒 `completed`，客户端已改为「结果自带 status 优先」，
+> core 侧是否让 job 表反映 invalid 归 QT-15/QT-10；③ UI-02 的展示口径可直接对齐本单的 `StatusInvalid` + `invalid_reasons` 原样透传。
 
 ---
 

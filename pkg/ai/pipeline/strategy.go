@@ -90,10 +90,10 @@ func (p *StrategyPipeline) Run(ctx context.Context, config StrategyPipelineConfi
 	// Phase 4: Run backtest if configured
 	if config.RunBacktest && p.btClient != nil {
 		btReq := client.BacktestRequest{
-			StrategyName: template.Name,
-			StockPool:    config.StockPool,
-			StartDate:    config.StartDate,
-			EndDate:      config.EndDate,
+			Strategy:  template.Name,
+			StockPool: config.StockPool,
+			StartDate: config.StartDate,
+			EndDate:   config.EndDate,
 		}
 
 		outcome, err := p.btClient.RunBacktest(ctx, btReq)

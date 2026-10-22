@@ -102,10 +102,10 @@ func NewHTTPBacktestRunner(c *client.BacktestClient) BacktestRunner {
 
 func (r *httpBacktestRunner) RunBacktest(ctx context.Context, formula string, stockPool []string, startDate, endDate string) (BacktestMetrics, error) {
 	outcome, err := r.c.RunBacktest(ctx, client.BacktestRequest{
-		StrategyName: formula,
-		StockPool:    stockPool,
-		StartDate:    startDate,
-		EndDate:      endDate,
+		Strategy:  formula,
+		StockPool: stockPool,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	if err != nil {
 		return BacktestMetrics{}, err

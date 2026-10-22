@@ -336,10 +336,10 @@ func (a *ValidateAgent) validateL3(ctx context.Context, result *ValidationResult
 	// (defaultStockPool) instead of the former hardcoded US tickers
 	// which could not resolve in the A-share backtest engine.
 	req := client.BacktestRequest{
-		StrategyName: result.Formula,
-		StockPool:    a.defaultStockPool,
-		StartDate:    "2023-01-01",
-		EndDate:      "2024-01-01",
+		Strategy:  result.Formula,
+		StockPool: a.defaultStockPool,
+		StartDate: "2023-01-01",
+		EndDate:   "2024-01-01",
 	}
 
 	outcome, err := a.btClient.RunBacktest(ctx, req)

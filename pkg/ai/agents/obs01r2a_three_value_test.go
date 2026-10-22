@@ -22,12 +22,16 @@ func newBacktestClientStub(t *testing.T, body string) *client.BacktestClient {
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	return client.NewBacktestClient(srv.URL)
+	// REV-01-A ③-2：默认 fail-closed；这里的假 core 是本机 loopback，显式开开发模式。
+	return client.NewBacktestClient(srv.URL, client.WithInsecureLoopback())
 }
+
+// 报文形状是 core 的**线上形状**（REV-01-A ③-1）：POST /api/backtest 回平铺体，
+// 没有嵌套 `result` 键。
 
 func TestHTTPBacktestRunner_CompletedYieldsMetrics(t *testing.T) {
 	r := NewHTTPBacktestRunner(newBacktestClientStub(t,
-		`{"status":"completed","result":{"sharpe_ratio":1.5,"total_return":0.2}}`))
+		`{"id":"bt-1","status":"completed","sharpe_ratio":1.5,"total_return":0.2}`))
 
 	m, err := r.RunBacktest(context.Background(), "momentum", []string{"600000.SH"}, "2023-01-01", "2024-01-01")
 	if err != nil {
@@ -40,7 +44,7 @@ func TestHTTPBacktestRunner_CompletedYieldsMetrics(t *testing.T) {
 
 func TestHTTPBacktestRunner_InvalidIsNotSilentZeroMetrics(t *testing.T) {
 	r := NewHTTPBacktestRunner(newBacktestClientStub(t,
-		`{"status":"invalid","result":{"sharpe_ratio":0.1,"invalid_reasons":["no_trades"]}}`))
+		`{"id":"bt-2","status":"invalid","sharpe_ratio":0.1,"invalid_reasons":["no_trades"]}`))
 
 	m, err := r.RunBacktest(context.Background(), "momentum", []string{"600000.SH"}, "2023-01-01", "2024-01-01")
 	if err == nil {
@@ -59,7 +63,7 @@ func TestHTTPBacktestRunner_InvalidIsNotSilentZeroMetrics(t *testing.T) {
 
 func TestHTTPBacktestRunner_FailedStillErrors(t *testing.T) {
 	r := NewHTTPBacktestRunner(newBacktestClientStub(t,
-		`{"status":"failed","error":"calendar unavailable"}`))
+		`{"id":"bt-3","status":"failed","error":"calendar unavailable"}`))
 
 	if _, err := r.RunBacktest(context.Background(), "momentum", []string{"600000.SH"}, "2023-01-01", "2024-01-01"); err == nil {
 		t.Fatal("failed 必须报错")
