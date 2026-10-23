@@ -46,6 +46,8 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 | `github.com/ruoxizhnya/tellurion-contracts` | `v0.1.0` | 2026-10-23 已发版（tag 在 `main` 上）；契约只认版本号 |
 | `github.com/ruoxizhnya/tellurion-kit` | `v0.1.0` | 2026-10-23 已发版；本仓今天无代码引用它，`go mod tidy` 不保留未使用依赖，接入随 QT-05 ③-③ |
 
+> **契约一致性（QT-09 ③）**：`internal/conformance` 读 `tellurion-contracts:conformance/cases.json`（三仓唯一真相）实算——`fee_defaults_via_yaml` 钉住生成器的 `commission_rate`/`slippage_rate` 必须等于 `fees.DefaultCommissionRate`/`DefaultSlippageRate`（历史漂移点：滑点写成 0.001、佣金写成 0.00025）。语料定位失败一律 `t.Fatalf`，不许 `t.Skip`。core 侧编排：`cd ../tellurion && make contracts-conformance`。
+
 ## 5. 活在哪、文档在哪
 
 - **本仓台账**：`docs/TASKS.md`（唯一；OPS-01-A 等历史单在这里）。**没有单号别开工。**
