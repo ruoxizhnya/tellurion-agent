@@ -93,7 +93,12 @@ func ensureMomentum(t *testing.T, spec offlineSpec) {
 	if err := ms.Configure(params); err != nil {
 		t.Fatalf("configure momentum: %v", err)
 	}
-	if err := strategy.GlobalRegister(ms); err != nil {
+	// QT-11：注册表存构造函数，执行路径只经 NewInstance 拿实例——共享实例
+	// 注册会被 fail-closed 拒掉（回测 status=invalid、err 为空）。工厂返回
+	// 这份已配置实例（core engine_rebalance_date_test.go 同款）；重复注册时
+	// 取出既有条目重新 Configure —— 工厂返回的就是它（meta 即工厂产物），
+	// 配置对后续 run 生效。
+	if err := strategy.GlobalRegisterFactory(func() strategy.Strategy { return ms }); err != nil {
 		existing, getErr := strategy.DefaultRegistry.Get("momentum")
 		if getErr != nil {
 			t.Fatalf("momentum 既注册不上也取不出：register=%v get=%v", err, getErr)

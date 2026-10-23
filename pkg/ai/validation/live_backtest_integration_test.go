@@ -162,12 +162,18 @@ func delistedInPool(t *testing.T, ctx context.Context, store *storage.PostgresSt
 
 // configureMomentum 让注册表里的 momentum 用给定参数。
 //
-// 全局 registry 是单例，第二次 GlobalRegister 会报 already registered，
-// 所以注册失败时取出已有实例重新 Configure（同 economic_integration_test.go）。
+// 全局 registry 是单例，第二次 GlobalRegisterFactory 会报 already registered，
+// 所以注册失败时取出已有条目重新 Configure（同 economic_integration_test.go）。
+// QT-11：注册表存构造函数，执行路径只经 NewInstance 拿实例——共享实例注册
+// 会被 fail-closed 拒掉；工厂返回这份已配置实例（meta 即工厂产物），
+// 重复注册时对既有条目重新 Configure 对后续 run 同样生效。
 func configureMomentum(t *testing.T, params map[string]interface{}) {
 	t.Helper()
 	ms := examples.NewMomentumStrategy()
-	if err := strategy.GlobalRegister(ms); err != nil {
+	if err := ms.Configure(params); err != nil {
+		t.Fatalf("configure momentum: %v", err)
+	}
+	if err := strategy.GlobalRegisterFactory(func() strategy.Strategy { return ms }); err != nil {
 		existing, getErr := strategy.DefaultRegistry.Get("momentum")
 		if getErr != nil {
 			t.Fatalf("momentum 既注册不上也取不出：register=%v get=%v", err, getErr)
@@ -179,10 +185,6 @@ func configureMomentum(t *testing.T, params map[string]interface{}) {
 		if err := cfg.Configure(params); err != nil {
 			t.Fatalf("reconfigure momentum: %v", err)
 		}
-		return
-	}
-	if err := ms.Configure(params); err != nil {
-		t.Fatalf("configure momentum: %v", err)
 	}
 }
 

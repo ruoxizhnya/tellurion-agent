@@ -22,6 +22,9 @@ verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文�
 |---|---|---|---|
 | QT-17 | `ai.*` schema 自持 + 双写对拍 + 切读 + 停写 | `QT-17` | D24 补第 7 类动作 |
 | S3 | 删 `replace ../tellurion`，改 HTTP 粗粒度 | `QT-07 / QT-50` | QT-17 + QT-50 |
+| QT-65 | QT-11 跨仓回归（agent 腿）：pipeline / yaml 生产路径仍注册**共享实例**，引擎 `NewInstance` 会 fail-closed 拒掉 | `QT-11` | 无硬前置，随下个 agent 批次 |
+
+> **QT-65 证据（2026-10-23，C4 期间发现，未开工）**：core QT-11（`67bee39`）把注册表改存构造函数后，`strategy.GlobalRegister(实例)` 注册的共享条目在执行路径被 `Registry.NewInstance` fail-closed 拒绝（`ErrSharedStrategy`）。本仓两个**生产**调用点没跟上：`pkg/ai/pipeline/pipeline.go:726`（`registerOrConfigure` 的注册分支，ExecuteFromYAML 链路）与 `pkg/ai/yaml/loader.go:150`（`LoadAndRegister`）。现有测试全绿是因为没有用例在注册后真经引擎跑（latent，非当前红）；validation 集成测试同形状共享注册的 5 例红已在 C4 修掉（`GlobalRegisterFactory` 返回已配置实例，core `engine_rebalance_date_test.go` 同款模式）。修这两处时要一起想清楚「reconfigure in place」语义在工厂注册表下的新形态——reconfigure meta 不再影响工厂每次新造的实例。
 
 > **S1 下游腿（contracts 四包切换）的 agent 侧落点**：import 全替清单见 [`archive/contracts-import-replacement-2026-10-23.md`](archive/contracts-import-replacement-2026-10-23.md)（A4 只列不改产出，**B4 已于 2026-10-23 执行完毕**；临时件已归档）。清单已实测把台账的「48+5+3」订正为 **46+5+3 = 54 位点 / 48 文件**，并写明 core 腿必须先落——否则两处 core/contracts 类型身份冲突会让构建红。
 
