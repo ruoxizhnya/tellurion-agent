@@ -37,6 +37,7 @@ HTTP 面（:8086）
 | `pkg/ai/tools` | 工具注册与执行 | 不做鉴权（用 kit） |
 | `pkg/ai/causal` | 因果判定 | 不改结果 |
 | `pkg/copilot` | 自然语言 → 代码 → 编译 → 回测 | 不做沙箱（用 core） |
+| `pkg/aistore` | `ai.*` 的 DDL、迁移与（QT-17 ② 起）实验域读写 | 不碰仪器域表；不持有连接池（池归装配层） |
 | `cmd/ai` | HTTP 面与装配 | 不含业务逻辑 |
 
 ## 4. 三份契约（功能的边界就在这三份文件里）
@@ -71,6 +72,6 @@ tellurion-agent  ──(过渡期，S3 删)── require + replace ../tellurion
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| QT-17 | `ai.*` 自持 + 双写对拍 | ⬜ |
-| S3 | 删 `replace ../tellurion`，改 HTTP | 依赖 QT-50 |
+| QT-17 | `ai.*` 自持 + 双写对拍 | 🔶 ① DDL + 迁移机制已落 `pkg/aistore`（2026-10-23）；② 自有 store / 双写 / 切读 / 停写待做 |
+| S3 | 删 `replace ../tellurion`，改 HTTP | 依赖 QT-17 + QT-50（core 侧 QT-50 未开工 ⇒ 本仓 76 处 core import 仍在） |
 | — | SSE 已上线（OPS-01-A ✅ 2026-10-15） | ✅ |

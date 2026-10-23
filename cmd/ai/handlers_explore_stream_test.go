@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -109,7 +110,11 @@ func TestExploreHandler_StreamCompletedRunSSEFrames(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
+	// 只钉媒体类型，不钉参数：gin 的 SSE 写出会附带 charset（gin-contrib/sse
+	// 新版本是 `text/event-stream;charset=utf-8`），契约要求的是 event-stream 本身。
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	require.NoError(t, err)
+	require.Equal(t, "text/event-stream", mediaType)
 
 	// 服务端 progress+complete 后收流，连接关闭 → ReadAll 返回，确定性。
 	// gin v1.10 的 SSE 帧是 `event:<name>` / `data:<json>`（冒号后无空格），按实测匹配。

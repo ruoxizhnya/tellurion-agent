@@ -1,14 +1,14 @@
 ---
 status: active
-last-verified: 2026-10-20
-verified-by: 功能边界固化（三份契约：db / api / dataflow）
+last-verified: 2026-10-23
+verified-by: QT-17 ① —— ai.* DDL 与迁移机制落 pkg/aistore（逐表对照 core 现有定义）
 ---
 
 # DB Schema — tellurion-agent
 
 > **所有权声明**：本仓**拥有 `ai` schema 的 DDL 与迁移**（目标态，QT-17）。
 
-**现状**：实验 / 研究 / 基因数据仍住在 core，**不在 `quant` schema** —— `experiments` / `factor_genes` / `strategy_genes` 在 `public`，研究域三表在 `research` schema。DDL 唯一在 `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`（`experiments` :424、`factor_genes` :930、`strategy_genes` :954、研究域 :361-393），`experiments.go` / `research.go` 只有读写代码、没有建表语句。本仓当前通过 core 的 `*PostgresStore` 读写 —— 这是**要拆掉的耦合**。
+**现状**：`ai` schema 的 DDL 与迁移入口已落本仓 [`pkg/aistore`](../pkg/aistore)（QT-17 ①，2026-10-23）——六张表逐列对照 core 定义搬入，`parent_id` 自引用与外键改指 `ai.*`。**读写路径仍走 core 的 `*PostgresStore`**（`experiments` / `factor_genes` / `strategy_genes` 在 core `public`，研究域三表在 core `research` schema）——数据归属切换（QT-17 ②：自有 store + 双写对拍 + 切读 + 停写）尚未开始。core 侧 DDL 唯一在 `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`（`experiments` :424、`factor_genes` :930、`strategy_genes` :954、研究域 :361-398）。
 > 上级依据：`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §1 —— **DDL 只有一个 owner**，同一个 PG 实例、每服务一个 schema，将来拆库是"按 schema 搬走"而不是重写。
 > 本文件是本仓表结构的**唯一真相源**：代码里的建表语句与它不一致时，**改代码**；要改表结构，先改本文件（结构级变更还要立 ADR）。
 
@@ -18,10 +18,12 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 
 | 表 | 内容 | 现状 |
 |---|---|---|
-| `ai.experiments` | 实验记录 | 现住 core `public.experiments`（`tellurion:pkg/storage/postgres.go:424`） |
-| `ai.factor_genes` | 因子基因池 | 现住 core `public.factor_genes`（`tellurion:pkg/storage/postgres.go:930`） |
-| `ai.strategy_genes` | 策略基因池 | 现住 core `public.strategy_genes`（`tellurion:pkg/storage/postgres.go:954`） |
-| `ai.research_*` | 研究域（profile / question / conclusion） | 现住 core `research` schema（DDL 在 `tellurion:pkg/storage/postgres.go:361-393`） —— **表名以 core 现有定义为唯一来源**，迁移时逐表核对，本文不预写 |
+| `ai.experiments` | 实验记录 | DDL 已落 `pkg/aistore/schema.go`（列对照 core `public.experiments`）；读写仍在 core |
+| `ai.factor_genes` | 因子基因池 | DDL 已落（对照 core `public.factor_genes`）；读写仍在 core |
+| `ai.strategy_genes` | 策略基因池 | DDL 已落（对照 core `public.strategy_genes`）；读写仍在 core |
+| `ai.research_profile` | 研究画像 | DDL 已落（对照 core `research.profile`）；读写仍在 core |
+| `ai.research_conclusion` | 研究结论 | DDL 已落（对照 core `research.conclusion`）；读写仍在 core |
+| `ai.research_question` | 研究问题 | DDL 已落（对照 core `research.question`）；读写仍在 core |
 
 > 迁入纪律（QT-17）：**以 core 现有 DDL 为准逐表搬**，不按类型名臆造表名；迁移后 core 侧定义标 `deprecated` 并登记删除期限。
 
@@ -50,17 +52,14 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 
 **本仓约定**（从建仓第一天执行）：
 
-- 迁移文件只放 `migrations/`，命名 `<序号>_<动作>.sql`，**本仓内**递增（不与别的仓共享序列，也不复用号）。
-- **执行机制随第一个建表单定，二选一（不能"都不选"）**：
-  1. **core 式**：Go 里的 `migrationStatements()` 数组 + 启动执行，幂等、无版本表——与 core 一致、运维零新增；
-  2. **版本化**：引入迁移库 + `schema_migrations` 表（可 down、有执行记录）——服务变多后更稳，但要一次性 baseline。
-  **取向**：X1~X3 期间优先 ①（少一层依赖），服务数 ≥3 或出现"必须先降级"的需求时重估 ②。
-- **只前滚**：已合并的迁移不改；修错靠新增一条。
-- 每条必须可重入（`IF NOT EXISTS` / `IF EXISTS`），且能在空库上一次跑完。
+- **执行机制（已定，2026-10-23）**：选 ①「core 式」——`pkg/aistore/schema.go` 的 `statements` 数组是 DDL 唯一真相，经 `kit/db.Migrate` 按序执行，幂等、无版本表、无 down。**不设 `migrations/*.sql` 镜像**（双份必然漂移）；历史镜像若将来需要，只能由数组机械生成。**启动接线随 QT-17 ② 的自有连接池一起落**——今天连接池仍由 core 的 `bootstrap.InitStore` 持有，本仓不借它的句柄跑迁移（D10：连接能力用 kit，数据归属自持）。
+- 每条必须可重入（`IF NOT EXISTS`），且能在空库上一次跑完；`TestStatements_AreIdempotent` 与 `TestMigrate_Integration` 钉住这两点。
+- 表名 / 列必须与 `tellurion:pkg/storage/postgres.go` 逐表一致；`TestSchema_ColumnsMatchCore` 直接读 core 源码对拍，多一列或少一列都红。
+- 只前滚：已合并的迁移不改；修错靠新增一条。
 - 跨 schema 取数只走**只读视图或 API**；出现 `join` 别人的表就是边界腐化的第一信号。
 - 结构变更的同步义务：本文件 + `docs/ARCHITECTURE.md` 的「数据归属」节必须同一次提交里更新。
 
 ## 5. 待定
 
 - 双写期长度未定（QT-17 ④）。
-- `research_*` 的确切表名与列，需在 QT-17 开工时从 core `pkg/storage/research.go` 读取后回填本文件。
+- 读写路径切换（自有 store 替换 12 处 `*PostgresStore` 用法）与双写对拍尚未开始（QT-17 ②④）。

@@ -158,7 +158,7 @@ verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文�
 
 ---
 
-## QT-17 · agent 数据自持（D10：`ai.*` schema 建表与迁移）⬜
+## QT-17 · agent 数据自持（D10：`ai.*` schema 建表与迁移）🔶
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「S2~S3 · 拆仓」迁入（任务台账批量重分布：实现整体落本仓的单迁入本仓台账）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
 
@@ -173,6 +173,9 @@ verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文�
 - **④ 约束与非目标**：**不删 core 旧表**（保留只读一个周期）；不迁行情/回测结果/因子定义（仪器域）；不改 core 的实验 handler；不在本单做 HTTP 化（QT-50）。
 - **⑤ 验收**：agent `grep -r "pkg/storage"` = 0；`ai.*` 行数与旧表对拍一致（报告归档）；停写后 core 旧表不再增长；core 侧 deprecated 标记存在；日历/上市窗口经 port 取到且值一致。
 - **⑥ 边界**：只做实验/研究域的数据归属；`ai.*` 之外的 schema 不动；X 线服务的数据归属按 QT-40。
+
+> **🔶 进度（2026-10-23，① 腿）**：`pkg/aistore` 落 `ai` schema 六表 DDL（experiments / research_profile / research_conclusion / research_question / factor_genes / strategy_genes）+ `Migrate`（`kit/db.Migrate`，core 式幂等、无版本表）。表名与列**逐表对照** `tellurion:pkg/storage/postgres.go`，`parent_id` 自引用与外键改指 `ai.*`；`TestSchema_ColumnsMatchCore` 直接读 core 源码对拍（单仓 checkout 显式 Skip，CI checkout core 后生效），`TestStatements_AreIdempotent` / `TestMigrate_Integration`（`TEST_DATABASE_DSN` opt-in）钉住幂等与真库可跑。**仍待**：② 自有 store 替换 12 处 `*PostgresStore`；④ 双写对拍 / 切读 / 停写；⑤ `pkg/storage` AST 护栏（随 ② 一起落，否则今天加了就红）。
+> **S3 前置状态（2026-10-23 实测）**：core `QT-50` 仍 `⬜`，本仓仍有 76 处 core 实现包 import（13 包）；此刻删 `replace` 必然编不过 ⇒ ② 去 `replace` 未做，留待 QT-50 完成后的独立 S3 提交。
 
 ---
 
