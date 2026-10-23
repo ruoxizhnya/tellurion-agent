@@ -11,6 +11,7 @@
 //	public.experiments    → ai.experiments
 //	public.factor_genes   → ai.factor_genes
 //	public.strategy_genes → ai.strategy_genes
+//	public.factor_hypothesis → ai.factor_hypothesis
 //	research.profile      → ai.research_profile
 //	research.conclusion   → ai.research_conclusion
 //	research.question     → ai.research_question
@@ -36,6 +37,7 @@ var Tables = []string{
 	"ai.research_question",
 	"ai.factor_genes",
 	"ai.strategy_genes",
+	"ai.factor_hypothesis",
 }
 
 // statements is the execution truth: idempotent DDL, executed in order by
@@ -155,6 +157,18 @@ var statements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_strategy_genes_status ON ai.strategy_genes(status)`,
 	`CREATE INDEX IF NOT EXISTS idx_strategy_genes_fitness ON ai.strategy_genes(fitness DESC)`,
 	`CREATE INDEX IF NOT EXISTS idx_strategy_genes_type_status ON ai.strategy_genes(strategy_type, status)`,
+
+	// factor_hypothesis — core public.factor_hypothesis (Migration 032, P2-3).
+	// 因子的假设来源（「这个因子凭什么有效」）。factor_name 做主键、覆盖式
+	// 更新的语义在 store 的 SQL 里，与 core 逐字同款。
+	`CREATE TABLE IF NOT EXISTS ai.factor_hypothesis (
+		factor_name  VARCHAR(32) PRIMARY KEY,
+		source_kind  VARCHAR(24) NOT NULL,
+		hypothesis   TEXT        NOT NULL,
+		reference    TEXT,
+		created_at   TIMESTAMPTZ DEFAULT NOW(),
+		updated_at   TIMESTAMPTZ DEFAULT NOW()
+	)`,
 }
 
 // Statements returns a copy of the DDL in execution order. Mutating the result

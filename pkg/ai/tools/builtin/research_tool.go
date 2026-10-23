@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/storage"
+	"tellurion-agent/pkg/aistore"
 )
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -69,19 +69,19 @@ const (
 )
 
 // ResearchProfileClient is the narrow read contract satisfied by
-// *storage.PostgresStore. Extracted so the tool can be unit-tested with a
+// *aistore.Store (QT-17 ②). Extracted so the tool can be unit-tested with a
 // mock instead of a live PostgreSQL pool.
 type ResearchProfileClient interface {
 	// GetResearchProfile returns the archived profile of a bare 6-digit
 	// ticker plus its conclusions and questions, or (nil, nil) when the
 	// ticker was never projected.
-	GetResearchProfile(ctx context.Context, ticker string) (*storage.ResearchProfile, error)
+	GetResearchProfile(ctx context.Context, ticker string) (*aistore.ResearchProfile, error)
 }
 
 // Compile-time assertion that the concrete store satisfies the narrow
 // interface. A failure here is a wiring bug — failing at build time beats
 // failing inside setup.go at startup.
-var _ ResearchProfileClient = (*storage.PostgresStore)(nil)
+var _ ResearchProfileClient = (*aistore.Store)(nil)
 
 // bareTickerPattern matches the contract C2 ticker form (contracts/profile.schema.json).
 var bareTickerPattern = regexp.MustCompile(`^[0-9]{6}$`)
@@ -274,7 +274,7 @@ func (t *ResearchProfileTool) Execute(ctx context.Context, args map[string]inter
 // fromProjection shapes a research.* row set into the tool result.
 func (t *ResearchProfileTool) fromProjection(
 	ticker string,
-	profile *storage.ResearchProfile,
+	profile *aistore.ResearchProfile,
 	wantConclusions, wantQuestions bool,
 ) (interface{}, error) {
 	if err := checkSchemaVersion(profile.SchemaVersion, ticker); err != nil {
@@ -456,7 +456,7 @@ func profileStaleness(generatedAt time.Time, sourceMtime *time.Time, now time.Ti
 
 // conclusionsFromProjection maps research.conclusion rows onto the contract C2
 // output shape, leaving the citations JSONB untouched.
-func conclusionsFromProjection(rows []storage.ResearchConclusion) []profileConclusion {
+func conclusionsFromProjection(rows []aistore.ResearchConclusion) []profileConclusion {
 	out := make([]profileConclusion, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, profileConclusion{
@@ -473,7 +473,7 @@ func conclusionsFromProjection(rows []storage.ResearchConclusion) []profileConcl
 }
 
 // questionsFromProjection maps research.question rows onto the output shape.
-func questionsFromProjection(rows []storage.ResearchQuestion) []profileQuestion {
+func questionsFromProjection(rows []aistore.ResearchQuestion) []profileQuestion {
 	out := make([]profileQuestion, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, profileQuestion{

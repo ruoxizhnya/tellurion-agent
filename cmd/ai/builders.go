@@ -22,12 +22,12 @@ import (
 	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/tools"
 	"tellurion-agent/pkg/ai/tools/builtin"
+	"tellurion-agent/pkg/aistore"
 	"tellurion-agent/pkg/copilot"
 	"tellurion/pkg/backtest"
 	"tellurion/pkg/bootstrap"
 	"tellurion/pkg/sandbox/runner"
 	"tellurion/pkg/sandbox/staticcheck"
-	"tellurion/pkg/storage"
 )
 
 // ── 来自 core pkg/bootstrap/copilot.go（AI 拆仓阶段 2 随迁，逐字搬运）──
@@ -308,7 +308,7 @@ func (a *WalkForwardEngineAdapter) RunWalkForward(
 //   - DataFetchTool 用共享 HTTPClient 指向 data-service URL。
 //   - StrategyRegistryTool 读包级 strategy.DefaultRegistry，无需装配。
 //   - Gene Pool tools 收窄接口，由 *gene_pool.FactorPool / StrategyPool 满足。
-//   - ResearchProfileTool 收 *storage.PostgresStore + equitydeep.vault_path。
+//   - ResearchProfileTool 收 *aistore.Store（QT-17 ② 自有 store）+ equitydeep.vault_path。
 func BuildToolsRegistry(
 	v *viper.Viper,
 	factorAPIURL string,
@@ -318,7 +318,7 @@ func BuildToolsRegistry(
 	strategyPool builtin.StrategyPoolClient,
 	regimeDetector builtin.RegimeDetectorClient,
 	researchProfile builtin.ResearchProfileClient,
-	hypothesisStore *storage.PostgresStore,
+	hypothesisStore *aistore.Store,
 	logger zerolog.Logger,
 ) *tools.Registry {
 	reg := tools.NewRegistry()
@@ -416,9 +416,9 @@ func BuildToolsRegistry(
 	// ── Group 11: Factor hypothesis (P2-3) ─────────────────────────
 	// 「这个因子凭什么有效」—— 采用一个因子之前先看它的机制来自哪里。
 	//
-	// 显式判空而不是直接传 hypothesisStore：*PostgresStore 的 nil 塞进
-	// 接口会变成非 nil 的接口值，工具会拿着空指针去查库（P1-1b 的老坑）。
-	// 没连库时工具仍可用 —— 它回退到 domain 里的内置假设表。
+	// 显式判空而不是直接传 hypothesisStore：具体指针类型（*aistore.Store）
+	// 的 nil 塞进接口会变成非 nil 的接口值，工具会拿着空指针去查库
+	//（P1-1b 的老坑）。没连库时工具仍可用 —— 它回退到 domain 里的内置假设表。
 	var hs builtin.FactorHypothesisStore
 	if hypothesisStore != nil {
 		hs = hypothesisStore

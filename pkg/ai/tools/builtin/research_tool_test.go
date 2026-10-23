@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/storage"
+	"tellurion-agent/pkg/aistore"
 )
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -24,13 +24,13 @@ import (
 // It returns a preset profile/error and records the ticker it was asked for,
 // so tests can assert the tool normalised the caller's input.
 type mockResearchProfileClient struct {
-	profile   *storage.ResearchProfile
+	profile   *aistore.ResearchProfile
 	err       error
 	gotTicker string
 	calls     int
 }
 
-func (m *mockResearchProfileClient) GetResearchProfile(_ context.Context, ticker string) (*storage.ResearchProfile, error) {
+func (m *mockResearchProfileClient) GetResearchProfile(_ context.Context, ticker string) (*aistore.ResearchProfile, error) {
 	m.calls++
 	m.gotTicker = ticker
 	if m.err != nil {
@@ -43,13 +43,13 @@ func (m *mockResearchProfileClient) GetResearchProfile(_ context.Context, ticker
 
 // freshProfile returns a schema_version 1 profile generated "now", so the
 // staleness check does not fire unless a test deliberately ages it.
-func freshProfile(ticker string) *storage.ResearchProfile {
-	return &storage.ResearchProfile{
+func freshProfile(ticker string) *aistore.ResearchProfile {
+	return &aistore.ResearchProfile{
 		Ticker:        ticker,
 		Name:          "贵州茅台",
 		SchemaVersion: 1,
 		UpdatedAt:     time.Now().Add(-time.Hour),
-		Conclusions: []storage.ResearchConclusion{
+		Conclusions: []aistore.ResearchConclusion{
 			{
 				Ticker:     ticker,
 				ID:         "C1",
@@ -60,7 +60,7 @@ func freshProfile(ticker string) *storage.ResearchProfile {
 				Confidence: strPtr("高"),
 			},
 		},
-		Questions: []storage.ResearchQuestion{
+		Questions: []aistore.ResearchQuestion{
 			{Ticker: ticker, ID: "Q1", Text: "系列酒放量能否持续？", Status: "open"},
 		},
 	}

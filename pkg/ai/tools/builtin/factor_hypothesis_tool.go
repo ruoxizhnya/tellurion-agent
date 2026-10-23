@@ -27,7 +27,7 @@ import (
 // Input: factor_name (optional)
 // Output: *factorHypothesisResult 或 *factorHypothesisListResult
 
-// FactorHypothesisStore 是假设来源的读取/写入面（满足者为 *storage.PostgresStore）。
+// FactorHypothesisStore 是假设来源的读取/写入面（满足者为 *aistore.Store，QT-17 ②）。
 //
 // 抽成窄接口是为了能用一个假的 store 单测，不必起数据库。
 type FactorHypothesisStore interface {

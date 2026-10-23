@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-20
-verified-by: 功能边界固化（三份契约：db / api / dataflow）
+last-verified: 2026-10-23
+verified-by: QT-17 ② —— 双写期落 experiment_dualwrite + 读面切 ai.*
 ---
 
 # Dataflow — tellurion-agent
@@ -26,9 +26,12 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
 ### 探索一轮
 1. `POST /api/explore/runs` → 建 run（内存态）+ 返回 `runID`
 2. 后台 goroutine 跑 loop：每轮 attempt → 组策略 → 调 core 引擎回测
-3. 每次 attempt 落 `ai.experiments`（+ 三 hash）
+3. 每次 attempt 落 `ai.experiments`；**双写期（QT-17 ④）** 经 `cmd/ai/experiment_dualwrite.go` 同写 core `public.experiments`（legacy）——两张表 BIGSERIAL 各自发号，适配器内记 legacyID→aiID 映射保证行随动；映射是进程内的，重启即失，丢映射的差异由对拍测试暴露（行数 / 内容按 `(run_id, seq)` 对齐）
 4. ui 订阅 `GET .../stream`：每 tick 推 `progress`（快照与轮询端点同形状）
 5. 结束推 `complete`；`POST .../stop` 只停调度，不 cancel 正在跑的回测
+
+### 研究域 / 因子假设读取
+- `research.profile` / `research.conclusion` / `research.question` 与 `factor_hypothesis` 的**读面已切 `ai.*`**（自有 `aistore`）；写入方在 core 与工具播种（builtin 假设启动时 `ON CONFLICT DO NOTHING` 镜像），本仓这几张表只读不写。
 
 ## 3. 失败模式（每一处 fail-closed 都要能指名）
 
@@ -44,7 +47,7 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
 1. `ai.*` 与 core 旧表在双写期行数一致（对拍报告归档）。
 2. 同一实验配置 → 同一结果（引擎确定性 + 三 hash 留痕）。
 3. 断线不影响 run 的生命周期。
-4. 本仓不出现 `pkg/storage` 的 import（QT-17 后）。
+4. 本仓生产代码不出现 `pkg/storage` 的 import——过渡期白名单三条（见 `docs/db-schema.md` §2 红线），由 `internal/repoguard` AST 护栏钉住；S3（QT-50 后）收归零。
 
 ## 5. 与契约文档的关系
 

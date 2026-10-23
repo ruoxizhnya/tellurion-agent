@@ -17,7 +17,7 @@ import (
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
-	"tellurion/pkg/storage"
+	"tellurion-agent/pkg/aistore"
 	"tellurion/pkg/strategy"
 	"tellurion/pkg/strategy/expression"
 )
@@ -80,16 +80,16 @@ type BacktestRunner = contracts.BacktestRunner
 
 // ExperimentSink 是实验日志的落点（P1-1b）。
 //
-// 用接口而非 *storage.PostgresStore，有两个理由：pipeline 不该绑死在具体
+// 用接口而非 *aistore.Store，有两个理由：pipeline 不该绑死在具体
 // 存储上；更要紧的是，实验日志最有价值的契约是「失败也落行」，而这条契约
 // 不该被「DB 没起来」挡在测试门外。
 //
 // 三个动作对应一次尝试的三个时刻：开始（落 running 行）→ 参数确定（补写
 // 试了什么）→ 结束（收尾成 completed / failed）。
 type ExperimentSink interface {
-	InsertExperiment(ctx context.Context, e *storage.Experiment) (int64, error)
-	UpdateExperiment(ctx context.Context, id int64, u storage.ExperimentUpdate) error
-	CompleteExperiment(ctx context.Context, id int64, m *storage.ExperimentMetrics, errMsg string) error
+	InsertExperiment(ctx context.Context, e *aistore.Experiment) (int64, error)
+	UpdateExperiment(ctx context.Context, id int64, u aistore.ExperimentUpdate) error
+	CompleteExperiment(ctx context.Context, id int64, m *aistore.ExperimentMetrics, errMsg string) error
 }
 
 // WithExperimentSink 注入实验日志落点。不注入即不记日志 —— 日志是观测
@@ -757,17 +757,17 @@ func (p *Pipeline) openExperiment(ctx context.Context, result *Result, descripti
 		ec.RunID = result.ID
 	}
 	if ec.DatasetSplit == "" {
-		ec.DatasetSplit = storage.DatasetSplitTrain
+		ec.DatasetSplit = aistore.DatasetSplitTrain
 	}
 
-	id, err := p.expSink.InsertExperiment(ctx, &storage.Experiment{
+	id, err := p.expSink.InsertExperiment(ctx, &aistore.Experiment{
 		RunID:        ec.RunID,
 		Seq:          ec.Seq,
 		ParentID:     ec.ParentID,
 		Hypothesis:   ec.Hypothesis,
 		DatasetSplit: ec.DatasetSplit,
 		Params:       map[string]any{"intent": description},
-		Status:       storage.ExperimentStatusRunning,
+		Status:       aistore.ExperimentStatusRunning,
 	})
 	if err != nil {
 		// 写不进去不能把实验搞挂，但必须留下可见痕迹：「库里没行」若被读成
@@ -804,7 +804,7 @@ func (p *Pipeline) recordWhatWasTried(ctx context.Context, id int64, result *Res
 		params["min_strength"] = cfg.Expression.Signal.MinStrength
 	}
 
-	if err := p.expSink.UpdateExperiment(ctx, id, storage.ExperimentUpdate{
+	if err := p.expSink.UpdateExperiment(ctx, id, aistore.ExperimentUpdate{
 		Params:       params,
 		StrategyName: s.Name(),
 		Expression:   cfg.Expression.Signal.Expression,
@@ -829,9 +829,9 @@ func (p *Pipeline) closeExperiment(ctx context.Context, id int64, result *Result
 
 	// 没跑回测（runner 为 nil）时 BacktestResult 是 nil，指标留空 ——
 	// 那也是一次真实的尝试，只是没有产出指标。
-	var m *storage.ExperimentMetrics
+	var m *aistore.ExperimentMetrics
 	if bt := result.BacktestResult; bt != nil {
-		m = &storage.ExperimentMetrics{
+		m = &aistore.ExperimentMetrics{
 			SharpeRatio: bt.SharpeRatio,
 			TotalReturn: bt.TotalReturn,
 			TotalTrades: bt.TotalTrades,

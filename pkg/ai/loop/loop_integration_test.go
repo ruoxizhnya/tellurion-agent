@@ -2,9 +2,11 @@ package loop
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
+	kitdb "github.com/ruoxizhnya/tellurion-kit/db"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai"
@@ -12,7 +14,7 @@ import (
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/search"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
-	"tellurion/pkg/storage"
+	"tellurion-agent/pkg/aistore"
 )
 
 // stubBacktest 顶替真实回测引擎：真回测要查行情、跑撮合，一轮几十次下来太慢，
@@ -34,18 +36,22 @@ func (s *stubBacktest) RunBacktest(ctx context.Context, name string, pool []stri
 // 这也是 P1-1c 缺的那一半 —— 单次尝试能回放早就有了，这里要证明**多步**
 // 也讲得通：seq 连续、状态齐全、父代指得对。
 //
-// DB 没起就 skip（与 pkg/storage 的约定一致）：连不上库是环境问题。
+// QT-17 ② 起落库的是本仓自有的 ai.experiments（经 experimentSink 的双写期，
+// 断言打 ai 侧）。TEST_DATABASE_DSN 未设置就 skip：连不上库是环境问题。
 func TestRun_RealPipelineAndRealDB(t *testing.T) {
 	ctx := context.Background()
-	store, err := storage.NewPostgresStore(ctx,
-		"postgres://postgres:postgres@localhost:5432/tellurion?sslmode=disable")
-	if err != nil {
-		t.Skipf("skipping: cannot connect to DB: %v", err)
+	dsn := os.Getenv("TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_DSN 未设置：跳过真库腿（本地 docker compose 起库后指定 DSN 可跑）")
 	}
-	defer store.Close()
+	pool, err := kitdb.Connect(ctx, dsn, kitdb.DefaultPoolOptions())
+	require.NoError(t, err)
+	defer pool.Close()
+	require.NoError(t, aistore.Migrate(ctx, pool))
+	store := aistore.NewStoreWithPool(pool)
 
 	runID := "itest_loop_run"
-	defer store.DB().Exec(ctx, "DELETE FROM experiments WHERE run_id=$1", runID)
+	defer pool.Exec(ctx, "DELETE FROM ai.experiments WHERE run_id=$1", runID)
 
 	p := pipeline.NewPipelineWithDeps(
 		intent.NewParser(), yamlgen.NewGenerator(), &ai.MockClient{},
@@ -68,19 +74,39 @@ func TestRun_RealPipelineAndRealDB(t *testing.T) {
 	assert.Equal(t, StopExhausted, out.Stopped)
 
 	// 从库里回放 —— 这是「能回放一条完整探索路径」的实证。
-	rows, err := store.ListExperiments(ctx, runID)
+	// aistore 没有实验读方法（agent 只写不读），所以直接 SQL 取行。
+	rows, err := pool.Query(ctx, `
+		SELECT seq, parent_id, status, metrics, expression, hypothesis
+		FROM ai.experiments WHERE run_id = $1 ORDER BY seq`, runID)
 	require.NoError(t, err)
-	require.Len(t, rows, tries, "跑几次就该有几行，一次都不能少")
+	defer rows.Close()
+
+	type replayRow struct {
+		seq        int
+		parentID   *int64
+		status     string
+		metrics    []byte
+		expression string
+		hypothesis string
+	}
+	var replay []replayRow
+	for rows.Next() {
+		var r replayRow
+		require.NoError(t, rows.Scan(&r.seq, &r.parentID, &r.status,
+			&r.metrics, &r.expression, &r.hypothesis))
+		replay = append(replay, r)
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, replay, tries, "跑几次就该有几行，一次都不能少")
 
 	seenParent := 0
-	for i, r := range rows {
-		assert.Equal(t, i, r.Seq, "seq 必须连续，回放才有意义")
-		assert.Equal(t, runID, r.RunID)
-		assert.Equal(t, storage.ExperimentStatusCompleted, r.Status, "第 %d 次没跑完", i)
-		require.NotNil(t, r.Metrics, "第 %d 次没有指标", i)
-		assert.NotEmpty(t, r.Expression, "第 %d 次看不出跑了什么信号", i)
-		assert.NotEmpty(t, r.Hypothesis, "第 %d 次没说为什么试这个", i)
-		if r.ParentID != nil {
+	for i, r := range replay {
+		assert.Equal(t, i, r.seq, "seq 必须连续，回放才有意义")
+		assert.Equal(t, aistore.ExperimentStatusCompleted, r.status, "第 %d 次没跑完", i)
+		assert.NotEmpty(t, r.metrics, "第 %d 次没有指标", i)
+		assert.NotEmpty(t, r.expression, "第 %d 次看不出跑了什么信号", i)
+		assert.NotEmpty(t, r.hypothesis, "第 %d 次没说为什么试这个", i)
+		if r.parentID != nil {
 			seenParent++
 		}
 	}
@@ -89,8 +115,8 @@ func TestRun_RealPipelineAndRealDB(t *testing.T) {
 	// P1-2b 的核心：一轮下来不能全是同一个表达式。全是同一个，说明参数
 	// 根本没进执行，这一轮等于把同一个策略跑了 N 遍。
 	distinct := map[string]struct{}{}
-	for _, r := range rows {
-		distinct[r.Expression] = struct{}{}
+	for _, r := range replay {
+		distinct[r.expression] = struct{}{}
 	}
 	assert.Greater(t, len(distinct), 1,
 		"一轮探索应出现不同的表达式，实际只有 %d 种（参数没进执行？）", len(distinct))

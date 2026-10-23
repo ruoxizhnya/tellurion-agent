@@ -45,6 +45,7 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 | `tellurion`（core） | `v0.1.0` + `replace ../tellurion` | **过渡期**，S3 拆掉；拆掉前本仓 R1 不成立 |
 | `github.com/ruoxizhnya/tellurion-contracts` | `v0.1.1` | 2026-10-23 发版：把 `conformance/` 语料打进 tag（`v0.1.0` 的 tag 树里没有），导出面零变化；契约只认版本号。⚠️ 本仓 `replace tellurion` 在册期间，core 的 contracts pin 参与本仓模块图——core 升本仓必须同批升，否则整仓 `go test` 报 `updates to go.mod needed` |
 | `github.com/ruoxizhnya/tellurion-kit` | `v0.1.0` | 2026-10-23 已发版；`pkg/aistore` 用 `kit/db` 的迁移机制（QT-17 ①），连接池由调用方持有 |
+| `github.com/jackc/pgx/v5` | `v5.7.3` | `pkg/aistore` 直连 PG（连接池 / `ErrNoRows` 哨兵，QT-17 ①②）；随 `kit/db` 同版本，未单独升级 |
 
 > **契约一致性（QT-09 ③）**：`internal/conformance` 读 `tellurion-contracts:conformance/cases.json`（三仓唯一真相）实算——`fee_defaults_via_yaml` 钉住生成器的 `commission_rate`/`slippage_rate` 必须等于 `fees.DefaultCommissionRate`/`DefaultSlippageRate`（历史漂移点：滑点写成 0.001、佣金写成 0.00025）。语料定位失败一律 `t.Fatalf`，不许 `t.Skip`。core 侧编排：`cd ../tellurion && make contracts-conformance`。
 

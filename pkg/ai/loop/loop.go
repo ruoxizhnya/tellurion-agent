@@ -16,7 +16,7 @@ import (
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/validation"
-	"tellurion/pkg/storage"
+	"tellurion-agent/pkg/aistore"
 )
 
 // TryRunner 跑一次尝试。*pipeline.Pipeline 天然满足它。
@@ -165,7 +165,7 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 		cfg.RunID = uuid.New().String()
 	}
 	if cfg.DatasetSplit == "" {
-		cfg.DatasetSplit = storage.DatasetSplitTrain
+		cfg.DatasetSplit = aistore.DatasetSplitTrain
 	}
 
 	out := &RunResult{RunID: cfg.RunID, Stopped: StopExhausted}

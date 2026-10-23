@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai/gene_pool"
-	"tellurion/pkg/storage"
+	"tellurion-agent/pkg/aistore"
 )
 
 // ──────────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ func (stubRegimeDetector) DetectRegime(_ context.Context, _ []domain.OHLCV) (*do
 // tool registration, not execution.
 type stubResearchProfile struct{}
 
-func (stubResearchProfile) GetResearchProfile(_ context.Context, _ string) (*storage.ResearchProfile, error) {
+func (stubResearchProfile) GetResearchProfile(_ context.Context, _ string) (*aistore.ResearchProfile, error) {
 	return nil, nil
 }
 

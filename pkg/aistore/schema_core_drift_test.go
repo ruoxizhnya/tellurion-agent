@@ -24,6 +24,7 @@ var coreToAI = map[string]string{
 	"research.profile":    "ai.research_profile",
 	"research.conclusion": "ai.research_conclusion",
 	"research.question":   "ai.research_question",
+	"factor_hypothesis":   "ai.factor_hypothesis",
 }
 
 var columnNameRE = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)

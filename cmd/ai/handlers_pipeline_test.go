@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai/pipeline"
-	"tellurion/pkg/storage"
+	"tellurion-agent/pkg/aistore"
 )
 
 // stubBacktestRunner is a test double implementing pipeline.BacktestRunner.
@@ -54,16 +54,16 @@ type countingSink struct {
 	completed int
 }
 
-func (c *countingSink) InsertExperiment(ctx context.Context, e *storage.Experiment) (int64, error) {
+func (c *countingSink) InsertExperiment(ctx context.Context, e *aistore.Experiment) (int64, error) {
 	c.inserts++
 	return int64(c.inserts), nil
 }
 
-func (c *countingSink) UpdateExperiment(ctx context.Context, id int64, u storage.ExperimentUpdate) error {
+func (c *countingSink) UpdateExperiment(ctx context.Context, id int64, u aistore.ExperimentUpdate) error {
 	return nil
 }
 
-func (c *countingSink) CompleteExperiment(ctx context.Context, id int64, m *storage.ExperimentMetrics, errMsg string) error {
+func (c *countingSink) CompleteExperiment(ctx context.Context, id int64, m *aistore.ExperimentMetrics, errMsg string) error {
 	c.completed++
 	return nil
 }

@@ -18,16 +18,20 @@ package main
 // 同一个实验在两个进程跑出不同结果是不可接受的（可复现性）。
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	kitdb "github.com/ruoxizhnya/tellurion-kit/db"
 	"github.com/spf13/viper"
 	"tellurion-agent/pkg/ai/gene_pool"
 	"tellurion-agent/pkg/ai/pipeline"
+	"tellurion-agent/pkg/aistore"
 	"tellurion/pkg/backtest"
 	"tellurion/pkg/bootstrap"
 	"tellurion/pkg/marketdata"
 	"tellurion/pkg/observability"
+	"tellurion/pkg/storage"
 )
 
 func main() {
@@ -44,6 +48,26 @@ func main() {
 
 	store := bootstrap.InitStore(v, logger)
 	engine.SetStore(store)
+
+	// QT-17 ②：实验/研究/假设域的自有 store（ai schema，幂等迁移 + 内置
+	// 假设种子）。DSN 与 core store 同源同键（database.*），只是落自己的表。
+	aiDSN, err := storage.BuildDSN(storage.DatabaseConfig{
+		URL:      v.GetString("database.url"),
+		Host:     v.GetString("database.host"),
+		Port:     v.GetInt("database.port"),
+		User:     v.GetString("database.user"),
+		Password: v.GetString("database.password"),
+		Name:     v.GetString("database.database"),
+		SSLMode:  v.GetString("database.sslmode"),
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("invalid ai store database configuration")
+	}
+	aiStore, err := aistore.NewStore(context.Background(), aiDSN, kitdb.DefaultPoolOptions())
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to initialize ai store")
+	}
+	defer aiStore.Close()
 
 	authSvc := bootstrap.InitAuth(v, store, logger)
 
@@ -92,8 +116,8 @@ func main() {
 		factorPool,
 		strategyPool,
 		riskManager,
-		store,
-		store,
+		aiStore,
+		aiStore,
 		logger,
 	)
 
@@ -112,11 +136,12 @@ func main() {
 	// ── 四族 AI 路由（自 analysis 迁入，路径不变）────────────────────
 	registerCopilotRoutes(router, copilotService, copilotRunner)
 
-	// P1-1b：实验日志落点。显式判空而非直接传 store —— *PostgresStore 的
-	// nil 塞进接口会变成非 nil 接口值（P0-5 的 aiClient 同款坑）。
+	// P1-1b：实验日志落点。QT-17 ④ 双写期：旧表（core 读方还在）与
+	// ai.experiments 同时写，对拍一致后才切读、停写。显式判空而非直接传
+	// store —— 具体指针的 nil 塞进接口会变成非 nil 接口值（P0-5 同款坑）。
 	var expSink pipeline.ExperimentSink
-	if store != nil {
-		expSink = store
+	if store != nil && aiStore != nil {
+		expSink = newDualWriteSink(store, aiStore)
 	}
 	registerPipelineRoutes(router, copilotRunner, expSink)
 	registerExploreRoutes(router, copilotRunner, expSink, engine)

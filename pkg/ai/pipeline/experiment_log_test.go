@@ -13,7 +13,7 @@ import (
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
-	"tellurion/pkg/storage"
+	"tellurion-agent/pkg/aistore"
 )
 
 // P1-1b：pipeline 是实验日志的**生产者**。
@@ -26,19 +26,19 @@ import (
 
 type completeCall struct {
 	id      int64
-	metrics *storage.ExperimentMetrics
+	metrics *aistore.ExperimentMetrics
 	errMsg  string
 }
 
 // memSink 记录每一次写入，供断言。
 type memSink struct {
-	inserted  []*storage.Experiment
+	inserted  []*aistore.Experiment
 	completed []completeCall
 	insertErr error
 	nextID    int64
 }
 
-func (m *memSink) InsertExperiment(ctx context.Context, e *storage.Experiment) (int64, error) {
+func (m *memSink) InsertExperiment(ctx context.Context, e *aistore.Experiment) (int64, error) {
 	if m.insertErr != nil {
 		return 0, m.insertErr
 	}
@@ -48,7 +48,7 @@ func (m *memSink) InsertExperiment(ctx context.Context, e *storage.Experiment) (
 	return m.nextID, nil
 }
 
-func (m *memSink) UpdateExperiment(ctx context.Context, id int64, u storage.ExperimentUpdate) error {
+func (m *memSink) UpdateExperiment(ctx context.Context, id int64, u aistore.ExperimentUpdate) error {
 	for _, e := range m.inserted {
 		if e.ID != id {
 			continue
@@ -68,7 +68,7 @@ func (m *memSink) UpdateExperiment(ctx context.Context, id int64, u storage.Expe
 	return fmt.Errorf("experiment %d not found", id)
 }
 
-func (m *memSink) CompleteExperiment(ctx context.Context, id int64, metrics *storage.ExperimentMetrics, errMsg string) error {
+func (m *memSink) CompleteExperiment(ctx context.Context, id int64, metrics *aistore.ExperimentMetrics, errMsg string) error {
 	m.completed = append(m.completed, completeCall{id: id, metrics: metrics, errMsg: errMsg})
 	return nil
 }
@@ -96,7 +96,7 @@ func TestExecute_LogsExperimentOnSuccess(t *testing.T) {
 	require.Len(t, sink.completed, 1, "跑完必须收尾，不能永远 running")
 
 	// 插入即 running：先落「开始了」这个事实，进程崩了也能看见断在哪。
-	assert.Equal(t, storage.ExperimentStatusRunning, sink.inserted[0].Status)
+	assert.Equal(t, aistore.ExperimentStatusRunning, sink.inserted[0].Status)
 
 	require.NotNil(t, sink.completed[0].metrics, "成功的尝试必须留下指标")
 	assert.InDelta(t, 1.8, sink.completed[0].metrics.SharpeRatio, 1e-9)
@@ -134,7 +134,7 @@ func TestExecute_HonoursExperimentContext(t *testing.T) {
 		Seq:          5,
 		ParentID:     &parentID,
 		Hypothesis:   "父代窗口 20 不错，试试 30",
-		DatasetSplit: storage.DatasetSplitHold,
+		DatasetSplit: aistore.DatasetSplitHold,
 	})
 
 	_, err := newLoggedPipeline(sink).Execute(ctx, "做一个动量策略", &mockBacktestRunner{})
@@ -147,7 +147,7 @@ func TestExecute_HonoursExperimentContext(t *testing.T) {
 	require.NotNil(t, e.ParentID)
 	assert.Equal(t, int64(11), *e.ParentID)
 	assert.Equal(t, "父代窗口 20 不错，试试 30", e.Hypothesis)
-	assert.Equal(t, storage.DatasetSplitHold, e.DatasetSplit)
+	assert.Equal(t, aistore.DatasetSplitHold, e.DatasetSplit)
 }
 
 // TestExecute_DefaultExperimentContext：不传上下文时的默认行为 ——
@@ -163,7 +163,7 @@ func TestExecute_DefaultExperimentContext(t *testing.T) {
 	assert.Equal(t, res.ID, e.RunID, "默认用 job ID 作 run ID")
 	assert.Equal(t, 0, e.Seq)
 	assert.Nil(t, e.ParentID)
-	assert.Equal(t, storage.DatasetSplitTrain, e.DatasetSplit)
+	assert.Equal(t, aistore.DatasetSplitTrain, e.DatasetSplit)
 }
 
 // TestExecute_RecordsWhatWasTried：参数向量与表达式必须留下 ——

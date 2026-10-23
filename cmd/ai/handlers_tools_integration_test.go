@@ -36,7 +36,7 @@ import (
 	"tellurion-agent/pkg/ai/gene_pool"
 	"tellurion-agent/pkg/ai/tools"
 	"tellurion-agent/pkg/ai/tools/builtin"
-	"tellurion/pkg/storage"
+	"tellurion-agent/pkg/aistore"
 )
 
 // ──────────────────────────────────────────────────────────────────────
@@ -430,11 +430,11 @@ func TestIntegration_GateDecision_AllFields_Survive_HTTP(t *testing.T) {
 // Returning a nil profile with no vault path configured is the "never
 // researched" case → the tool reports ErrNotFound.
 type httpTestResearchProfile struct {
-	profile   *storage.ResearchProfile
+	profile   *aistore.ResearchProfile
 	gotTicker string
 }
 
-func (m *httpTestResearchProfile) GetResearchProfile(_ context.Context, ticker string) (*storage.ResearchProfile, error) {
+func (m *httpTestResearchProfile) GetResearchProfile(_ context.Context, ticker string) (*aistore.ResearchProfile, error) {
 	m.gotTicker = ticker
 	return m.profile, nil
 }
@@ -459,7 +459,7 @@ func TestIntegration_DottedToolName_RoutesThroughGin(t *testing.T) {
 	}
 
 	t.Run("execute reaches the tool and normalises a suffixed ticker", func(t *testing.T) {
-		client := &httpTestResearchProfile{profile: &storage.ResearchProfile{
+		client := &httpTestResearchProfile{profile: &aistore.ResearchProfile{
 			Ticker:        "600519",
 			Name:          "贵州茅台",
 			SchemaVersion: 1,
