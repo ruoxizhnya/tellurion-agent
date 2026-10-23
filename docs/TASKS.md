@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-23
-verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文进 archive）+ A4 import 全替清单登记 + B4 执行完毕（2026-10-23，清单已归档）
+last-verified: 2026-10-24
+verified-by: QT-17 ④ 停写切换落账（ODR-001）+ core 侧 deprecated 交接件登记
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -184,7 +184,34 @@ verified-by: REV-01-A 结案归档（wire 契约对齐 + 三值口径，正文�
 > - **④ 双写开始（对拍期）**：`cmd/ai/experiment_dualwrite.go` 双写 `ai.experiments` + legacy `public.experiments`；两张表 BIGSERIAL 各自发号，适配器内记 legacyID→aiID 映射（进程内，重启即失，差异由对拍测试暴露）。**读面已切 `ai.*`**（research 三表 + factor_hypothesis）——实证：真库 `research.*` 0 行、`factor_hypothesis` 12 行全 builtin 种子且 agent 启动镜像播种收敛、experiments 本仓只写不读。**停写待办**：对拍零差异 → 停写 legacy（检查项见 `docs/db-schema.md` §5：`factor_genes` / `strategy_genes` 无写入方，将来接写必须直写 `ai.*`）。
 > - **⑤ 护栏**：`internal/repoguard/storage_import_test.go`——非测试 `.go` 禁 import `tellurion/pkg/storage`，白名单三条（`cmd/ai/main.go` 引擎仪器域装配 / `experiment_dualwrite.go` 双写期与 replace 同寿 / `handlers_explore.go` ListingWindow 仪器域待 D24 第 7 类 port），每条带理由+过期条件；**夹具正反取证**（违规→红 / 干净→绿 / 白名单放行 / 条目不再 import→红 / 条目文件消失→红 / 测试文件不在范围），真仓腿另查「白名单条目必须还活着」。
 > - **验收（真库腿已跑）**：`TEST_DATABASE_DSN` 下全量 `go test ./...` —— aistore / pipeline / loop / cmd / repoguard 全绿；`pkg/ai/validation` 5 例红为**既有跨仓回归**（core 未推 QT-11~13 注册表改构造函数，与本单正交，处置归 C4/推送前）。构建取证：core 工作树有另一会话的 QT-52 WIP 会污染 replace 链，本单在 core HEAD `865f7bf` 隔离 worktree 下完成 `go build`/`go vet`/`go test` 取证。
-> - **仍待**：④ 停写切换 + core 侧 deprecated 标记；③ 仪器域只读 port（D24 第 7 类动作，需用户确认）；S3 去 replace（依赖 QT-50，见下）。
+> - **仍待**：③ 仪器域只读 port（D24 第 7 类动作，需用户确认）；S3 去 replace（依赖 QT-50，见下）；core 侧 deprecated 标记（交接件见下）。
+> **🔶 进度（2026-10-24，④ 停写切换，本次）**：见下行专节。
+>
+> #### ④ 停写切换（2026-10-24，ODR-001）
+>
+> **已落**：
+> 1. **对拍零差异**：双写适配器的真库对拍腿（完成/失败/裁决/父子链四条路径）切换前 `PASS`；存量单独数过——旧表 30 行（8 run / 20 行有父代）、`ai.experiments` 0 行（30 行全部早于双写期），故先做一次性回填归档。
+> 2. **回填归档（幂等）**：`INSERT … ON CONFLICT (run_id, seq) DO NOTHING` 搬 30 行，再按 `(run_id, parent.seq)` 把 `parent_id` 从 legacy id 空间重映射到 ai 空间（20 行）。行级 `EXCEPT` 双向对拍：`legacy_only=0 / ai_only=0`。
+> 3. **停写**：`cmd/ai/main.go` 直接注入 `*aistore.Store`（同时满足 `pipeline.ExperimentSink` 与 `verdictSink`）；删除 `cmd/ai/experiment_dualwrite.go` 及其对拍测试；`BuildDSN` 改走 `kit/db`，`main.go` 不再 import storage。
+> 4. **护栏**：`internal/repoguard` 白名单三条 → 一条（只剩 `handlers_explore.go` 仪器域 `ListingWindow`）；新增真库腿 `TestStopWrite_LegacyExperimentsFrozen` 钉住「旧表行数与 `max(id)` 都不前进」。
+>
+> **验收取证（真实输出）**：停写驱动一轮完整写入后 `public.experiments` 仍 **30 行 / max(id)=1203**、`ai.experiments` 30 行；`go build ./...`、`go vet ./...`、`go test ./...`（含 `TEST_DATABASE_DSN` 真库腿）全绿。破坏验证：在 `main.go` 临时重新 import `tellurion/pkg/storage` → `internal/repoguard` 当场红（点名 `cmd/ai/main.go -> tellurion/pkg/storage`）→ 逐字节还原（SHA256 一致：`8D27E45D…E5B9FB`）→ 复绿，零残留。
+>
+> **未落 / 如实登记**：
+> - `research.*` 的「停写」是**无操作**：全工作区不存在其生产写入方（core `pkg/storage/research.go` 只有 `GetResearchProfile`，`cmd/analysis` 无研究域 handler；真库 0 行）。此前台账/`db-schema.md` 写的「写方在 core」**与代码事实不符**，已订正。
+> - `factor_genes` / `strategy_genes` **仍写 core `public.*`**（`pkg/ai/gene_pool` 用未限定表名，经 `search_path` 落到 `public`，池也是 core 的 `store.DB()`）；两表真库当前 0 行。切换属独立一步，**未做**，见 `docs/db-schema.md` §5 待定 1。
+> - `grep -r "pkg/storage"` **未归零**：生产代码 1 处（`handlers_explore.go`，等 D24 第 7 类动作），其余在 `_test.go` / 文档 / 护栏注释；整体归零依赖 S3 删 replace（QT-50）。
+
+> #### core 侧交接件（QT-17 ④ 的另一半——本仓**不改 core**，报协调者）
+>
+> **要做**：把 core `pkg/storage` 的旧表定义与存取方法标 `deprecated`，并登记删除期限。
+> - `tellurion:pkg/storage/experiments.go`：`Experiment` / `ExperimentMetrics` / `ExperimentUpdate` / `ExperimentStatus*` / `DatasetSplit*` 及 `InsertExperiment` / `GetExperiment` / `ListExperiments` / `UpdateExperiment` / `CompleteExperiment` / `RecordVerdict`。
+> - `tellurion:pkg/storage/research.go`：`ResearchProfile` / `ResearchConclusion` / `ResearchQuestion` / `GetResearchProfile`（注：**该文件只有读方法，core 侧无写入方**）。
+> - `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`：`experiments`（:424、`verdict` :449 的 ALTER）、研究域三表（:361-398）——DDL 暂留（不删表），标注 owner 已迁至 `tellurion-agent:pkg/aistore`。
+> - **前置事实（供 core 复核）**：`GetExperiment` / `ListExperiments` 无生产调用方（仅 `*_test.go`）；core 无实验日志 HTTP 端点；`tellurion-ui` / `tellurion-analytics` 均不读这两块数据。
+> - **建议删除期限**：**2027-01-31**（保留只读一个季度，覆盖一次发布周期后再删）。需协调者/core 确认；本仓不代改。
+> - **删除前置**：S3（QT-50 完成、agent 删 `replace`）先落，否则 core 的 `storage` 包仍被 agent 的生产/测试代码引用。
+
 > **S3 前置状态（2026-10-23 实测）**：core `QT-50` 仍 `⬜`，本仓仍有 76 处 core 实现包 import（13 包）；此刻删 `replace` 必然编不过 ⇒ ② 去 `replace` 未做，留待 QT-50 完成后的独立 S3 提交。
 
 ---

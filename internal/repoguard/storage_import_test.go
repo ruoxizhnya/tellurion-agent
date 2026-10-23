@@ -1,9 +1,17 @@
 // Package repoguard 持有本仓的结构性护栏测试。
 //
-// 本文件钉的不变量（QT-17 ②）：实验域数据由本仓自有的 aistore（ai.* schema）
-// 持有，生产代码不得再借 core 的 *PostgresStore 读写这块数据 ——
-// 即非测试的 .go 文件禁止 import tellurion/pkg/storage，唯一出口是
-// storageWhitelist 里的三条过渡边（每条带理由与过期条件）。
+// 本文件钉的不变量（QT-17 ②⑤，④ 停写后收紧）：实验域数据由本仓自有的
+// aistore（ai.* schema）持有，生产代码不得再借 core 的 *PostgresStore 读写
+// 这块数据 —— 即非测试的 .go 文件禁止 import tellurion/pkg/storage，唯一
+// 出口是 storageWhitelist 里剩下的那条仪器域过渡边（带理由与过期条件）。
+//
+// QT-17 ④ 停写切换后，白名单从三条收到一条：
+//   - cmd/ai/experiment_dualwrite.go 随停写整体删除（条目失效即红，所以同时删）；
+//   - cmd/ai/main.go 改用 kit/db 的 BuildDSN，不再 import storage；
+//   - 只剩 handlers_explore.go 的 ListingWindow（仪器域，等 D24 第 7 类动作）。
+//
+// 这条护栏因此同时是「legacy 旧表停写」的执法者：想再写 public.experiments /
+// research.*，就必须重新 import storage，而那条 import 会在这里当场变红。
 //
 // 判定哲学沿用 core:internal/repoguard/ai_boundary_test.go 的 fail-closed：
 // 名列允许的才放行，其余一律红；白名单不是豁免列表，是登记簿 ——
@@ -33,14 +41,9 @@ const storageImportPath = "tellurion/pkg/storage"
 // key = 仓内 slash 分隔的文件相对路径；value = 为什么还在 + 什么时候消失。
 // 新增条目必须在 value 里写清这两件事，否则条目本身就不该存在。
 var storageWhitelist = map[string]string{
-	// S3（QT-07）删 replace 时一并改写为纯 aistore/kit 装配：aiStore 的 DSN
-	// 目前与 core 的 bootstrap.InitStore 同键同源，这是过渡态，不是惯例。
-	"cmd/ai/main.go": "引擎仪器域装配（bootstrap.InitStore / BuildDSN 同源）+ aiStore DSN 装配；过期条件 = S3 删 replace",
-	// 双写期适配器（QT-17 ④）：legacy public.experiments 还得有人写，
-	// 停写切换（对拍零差异后）时删掉整个文件，白名单条目随之消失。
-	"cmd/ai/experiment_dualwrite.go": "QT-17 ④ 双写期：legacy public.experiments 的写路径；过期条件 = 停写切换（与 replace 同寿）",
 	// ListingWindow 系列工具读的是仪器域（行情/宇宙）数据，不是实验域；
 	// D24 第 7 类动作（core 只读 port）落地后切 port 走。
+	// 停写切换后这是**最后一条**：实验域的三条过渡边已全部收回。
 	"cmd/ai/handlers_explore.go": "ListingWindow 仪器域列表读 core 存储；过期条件 = D24 第 7 类动作（只读 port）落地",
 }
 

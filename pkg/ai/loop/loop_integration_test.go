@@ -36,8 +36,9 @@ func (s *stubBacktest) RunBacktest(ctx context.Context, name string, pool []stri
 // 这也是 P1-1c 缺的那一半 —— 单次尝试能回放早就有了，这里要证明**多步**
 // 也讲得通：seq 连续、状态齐全、父代指得对。
 //
-// QT-17 ② 起落库的是本仓自有的 ai.experiments（经 experimentSink 的双写期，
-// 断言打 ai 侧）。TEST_DATABASE_DSN 未设置就 skip：连不上库是环境问题。
+// QT-17 ② 起落库的是本仓自有的 ai.experiments（QT-17 ④ 起为唯一写目标，
+// legacy public.experiments 已停写），断言打 ai 侧。TEST_DATABASE_DSN
+// 未设置就 skip：连不上库是环境问题。
 func TestRun_RealPipelineAndRealDB(t *testing.T) {
 	ctx := context.Background()
 	dsn := os.Getenv("TEST_DATABASE_DSN")

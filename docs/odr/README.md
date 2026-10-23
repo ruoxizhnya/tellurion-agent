@@ -62,4 +62,4 @@
 
 | 编号 | 标题 | 状态 | 日期 |
 |---|---|---|---|
-| — | （暂无） | — | — |
+| [001](001-qt17-04-停写-legacy-experiments.md) | QT-17 ④ 停写 legacy 实验域表（public.experiments 写路径收回 + 30 行回填归档） | Completed | 2026-10-24 |

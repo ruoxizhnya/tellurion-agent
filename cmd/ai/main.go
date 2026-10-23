@@ -31,7 +31,6 @@ import (
 	"tellurion/pkg/bootstrap"
 	"tellurion/pkg/marketdata"
 	"tellurion/pkg/observability"
-	"tellurion/pkg/storage"
 )
 
 func main() {
@@ -50,8 +49,9 @@ func main() {
 	engine.SetStore(store)
 
 	// QT-17 ②：实验/研究/假设域的自有 store（ai schema，幂等迁移 + 内置
-	// 假设种子）。DSN 与 core store 同源同键（database.*），只是落自己的表。
-	aiDSN, err := storage.BuildDSN(storage.DatabaseConfig{
+	// 假设种子）。DSN 与 core store 同源同键（database.*），只是落自己的表；
+	// 连接能力用 kit（D10），不借 core 的 storage.BuildDSN。
+	aiDSN, err := kitdb.BuildDSN(kitdb.Config{
 		URL:      v.GetString("database.url"),
 		Host:     v.GetString("database.host"),
 		Port:     v.GetInt("database.port"),
@@ -136,12 +136,14 @@ func main() {
 	// ── 四族 AI 路由（自 analysis 迁入，路径不变）────────────────────
 	registerCopilotRoutes(router, copilotService, copilotRunner)
 
-	// P1-1b：实验日志落点。QT-17 ④ 双写期：旧表（core 读方还在）与
-	// ai.experiments 同时写，对拍一致后才切读、停写。显式判空而非直接传
-	// store —— 具体指针的 nil 塞进接口会变成非 nil 接口值（P0-5 同款坑）。
+	// P1-1b：实验日志落点。QT-17 ④ 已**停写** legacy public.experiments，
+	// 写路径只剩本仓自持的 ai.experiments —— aistore.Store 同时满足
+	// pipeline.ExperimentSink 与 explore 的 verdictSink，不再需要双写适配器。
+	// 显式判空而非直接传 —— 具体指针的 nil 塞进接口会变成非 nil 接口值
+	// （P0-5 同款坑）。
 	var expSink pipeline.ExperimentSink
-	if store != nil && aiStore != nil {
-		expSink = newDualWriteSink(store, aiStore)
+	if aiStore != nil {
+		expSink = aiStore
 	}
 	registerPipelineRoutes(router, copilotRunner, expSink)
 	registerExploreRoutes(router, copilotRunner, expSink, engine)

@@ -16,8 +16,9 @@
 //	research.conclusion   → ai.research_conclusion
 //	research.question     → ai.research_question
 //
-// The core tables stay in place during the dual-write period (QT-17 ④); this
-// schema is additive and never drops or rewrites them.
+// The core tables stay in place (read-only, no longer written since the QT-17 ④
+// stop-write switch on 2026-10-24); this schema is additive and never drops or
+// rewrites them.
 //
 // Table names and columns are copied from core, never inferred from Go type
 // names: the drift test next to this file compares both sides and fails when

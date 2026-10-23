@@ -72,6 +72,6 @@ tellurion-agent  ──(过渡期，S3 删)── require + replace ../tellurion
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| QT-17 | `ai.*` 自持 + 双写对拍 | 🔶 ① DDL + 迁移机制已落 `pkg/aistore`（2026-10-23）；② 自有 store / 双写 / 切读 / 停写待做 |
+| QT-17 | `ai.*` 自持 + 双写对拍 + 停写 | 🔶 ① DDL + 迁移机制已落 `pkg/aistore`（2026-10-23）；② 自有 store / 双写 / 切读已落（2026-10-23）；**④ 停写已落（2026-10-24，ODR-001）**：写路径只剩 `ai.experiments`，旧表冻结；③ 仪器域只读 port 等 D24 第 7 类动作 |
 | S3 | 删 `replace ../tellurion`，改 HTTP | 依赖 QT-17 + QT-50（core 侧 QT-50 未开工 ⇒ 本仓 76 处 core import 仍在） |
 | — | SSE 已上线（OPS-01-A ✅ 2026-10-15） | ✅ |
