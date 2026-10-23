@@ -10,6 +10,7 @@ package yaml
 
 import (
 	"fmt"
+	"sync"
 
 	yamlv3 "gopkg.in/yaml.v3"
 
@@ -87,9 +88,10 @@ const expressionTemplateName = "expression_template"
 //     long, short, close, hold
 //
 // The returned strategy is NOT registered. Callers who want it in the
-// global registry should use LoadAndRegister, or call
-// strategy.GlobalRegister themselves. This keeps LoadStrategy a pure
-// "YAML → object" function for easy testing.
+// global registry should use LoadAndRegister (factory registration —
+// the execution path needs per-run instances) or register a factory
+// themselves. This keeps LoadStrategy a pure "YAML → object" function
+// for easy testing.
 func LoadStrategy(yamlStr string) (strategy.Strategy, error) {
 	config, err := ParseConfig(yamlStr)
 	if err != nil {
@@ -133,23 +135,92 @@ func LoadStrategy(yamlStr string) (strategy.Strategy, error) {
 	return s, nil
 }
 
-// LoadAndRegister parses YAML, builds an ExpressionStrategy, and
-// registers it with the global strategy registry. This is a convenience
-// wrapper around LoadStrategy + strategy.GlobalRegister for callers who
-// want the strategy immediately available for backtest lookup by name.
+// strategySources 钉住每个经本包注册的工厂背后的 YAML 文本，按策略名索引。
 //
-// Returns the registered strategy. If a strategy with the same name is
-// already registered, GlobalRegister returns an error which is passed
-// through to the caller; use strategy.GlobalGet to check first, or use
-// LoadStrategy + Configure for in-place reconfiguration.
+// 为什么需要它（QT-65）：core QT-11 之后执行路径只经 Registry.NewInstance
+// 取每 run 一份的新实例，而 registry 的 RegisterFactory **拒绝同名重注册**
+// （没有 replace / unregister 入口）。同一个策略名在 AI 调参循环里会被反复
+// 执行；旧语义「就地 Configure 已注册实例」在工厂注册表下改不到 run 用的新
+// 实例（ConfigureStrategy 对工厂条目明确拒绝，见 core registry.go）。所以这
+// 里注册的是「从当前 YAML 源重建」的工厂：同名再次登记时只换源，注册表里的
+// 工厂始终指向同一个源对象 —— 重新注册的是工厂的输入，而不是把一份已配置
+// 实例塞回共享注册表。
+var (
+	strategySourcesMu sync.Mutex
+	strategySources   = make(map[string]*yamlSource)
+)
+
+type yamlSource struct {
+	mu      sync.RWMutex
+	yamlStr string
+}
+
+func (s *yamlSource) set(yamlStr string) {
+	s.mu.Lock()
+	s.yamlStr = yamlStr
+	s.mu.Unlock()
+}
+
+// build 是 StrategyFactory 的实体：每次 NewInstance 都按最新 YAML 重建一份
+// 配置完整的实例。YAML 在入库前已由 LoadStrategy 校验，返回 nil 只可能是
+// 「源被绕过校验替换」的缺陷 —— NewInstance 会把 nil 报成工厂错误。
+func (s *yamlSource) build() strategy.Strategy {
+	s.mu.RLock()
+	yamlStr := s.yamlStr
+	s.mu.RUnlock()
+
+	built, err := LoadStrategy(yamlStr)
+	if err != nil {
+		return nil
+	}
+	return built
+}
+
+// LoadAndRegister parses YAML, builds an ExpressionStrategy, and registers a
+// **factory** (not a shared instance) with the global registry, so the
+// execution path can obtain a per-run instance via Registry.NewInstance.
+//
+// Re-registering the same strategy name is supported: the factory's YAML
+// source is replaced, and the next NewInstance rebuilds from the latest YAML.
+// That is the replacement for the old "reconfigure in place" semantics —
+// mutating the registered instance cannot reach per-run instances.
+//
+// Returns the freshly built strategy for metadata use (Name / Parameters).
+// Execution must not rely on this instance: the engine asks the registry for
+// its own per-run copy.
 func LoadAndRegister(yamlStr string) (strategy.Strategy, error) {
 	s, err := LoadStrategy(yamlStr)
 	if err != nil {
 		return nil, err
 	}
-	if err := strategy.GlobalRegister(s); err != nil {
+	name := s.Name()
+
+	strategySourcesMu.Lock()
+	defer strategySourcesMu.Unlock()
+
+	if src, ok := strategySources[name]; ok {
+		src.set(yamlStr)
+		return s, nil
+	}
+
+	// 名字已被注册、但不是本包登记的 YAML 工厂：拿不到可替换的源，
+	// 也拒绝用「就地改原型」冒充生效（NewInstance 用的是新实例）。
+	if existing, err := strategy.GlobalGet(name); err == nil {
+		if _, ok := existing.(*expression.ExpressionStrategy); !ok {
+			return nil, fmt.Errorf(
+				"yaml: LoadAndRegister: strategy name %q is already registered with a different (non-expression) type",
+				name)
+		}
+		return nil, fmt.Errorf(
+			"yaml: LoadAndRegister: strategy name %q is already registered outside the YAML registration path; its factory cannot be replaced",
+			name)
+	}
+
+	src := &yamlSource{yamlStr: yamlStr}
+	if err := strategy.GlobalRegisterFactory(src.build); err != nil {
 		return nil, fmt.Errorf("yaml: LoadAndRegister: %w", err)
 	}
+	strategySources[name] = src
 	return s, nil
 }
 
@@ -159,12 +230,13 @@ func LoadAndRegister(yamlStr string) (strategy.Strategy, error) {
 // partial updates preserve the existing config (Configure semantics:
 // missing keys keep current values).
 //
-// Used by Pipeline.ExecuteFromYAML to reconfigure an already-registered
-// strategy in place when the same name is loaded again. The param-name
-// strings here mirror ExpressionStrategy.Parameters() in
-// pkg/strategy/expression/strategy.go and intentToExpressionConfig in
-// generator.go — keeping the mapping in one package avoids divergent
-// copies.
+// Registration no longer reconfigures an in-place instance (QT-65): the
+// registry stores a factory and per-run instances are rebuilt from YAML.
+// This mapping remains the single YAML → Configure-param translation for
+// callers that need it. The param-name strings mirror
+// ExpressionStrategy.Parameters() in pkg/strategy/expression/strategy.go and
+// intentToExpressionConfig in generator.go — keeping the mapping in one
+// package avoids divergent copies.
 //
 // When the Expression section is empty (the strategy.type == "expression"
 // path with no explicit expression: block), the returned map contains

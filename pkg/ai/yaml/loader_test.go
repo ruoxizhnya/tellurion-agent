@@ -355,10 +355,10 @@ backtest:
 	assert.Contains(t, err.Error(), "expression")
 }
 
-// TestLoadAndRegister_HappyPath verifies the convenience wrapper
-// registers the strategy so GlobalGet can find it. We use a unique name
-// (per invocation) to avoid collisions across tests and -count=2 re-runs
-// — the global registry has no Unregister.
+// TestLoadAndRegister_HappyPath verifies the convenience wrapper registers
+// the strategy as a factory, so the execution path can obtain a per-run
+// instance via NewInstance (QT-65). We use a unique name (per invocation) to
+// avoid collisions across tests and -count=2 re-runs.
 func TestLoadAndRegister_HappyPath(t *testing.T) {
 	name := uniqueName(t)
 	yamlStr := fmt.Sprintf(`strategy:
@@ -373,31 +373,60 @@ expression:
 	require.NotNil(t, s)
 	assert.Equal(t, name, s.Name())
 
-	// Verify it's retrievable via the global registry.
-	retrieved, err := strategy.GlobalGet(name)
+	// Execution path: a fresh instance must be obtainable by name. A shared
+	// instance registration would fail here with ErrSharedStrategy.
+	retrieved, err := strategy.GlobalNewInstance(name)
 	require.NoError(t, err)
 	assert.Equal(t, s.Name(), retrieved.Name())
 }
 
-// TestLoadAndRegister_DuplicateName verifies that registering a strategy
-// with an already-registered name returns an error from GlobalRegister.
-func TestLoadAndRegister_DuplicateName(t *testing.T) {
+// TestLoadAndRegister_ReregisterSwapsFactory locks the QT-65 replacement for
+// the old "reconfigure in place" semantics. The registry has no replace API,
+// so re-registering the same name swaps the factory's YAML source; the next
+// NewInstance rebuilds from the latest YAML instead of mutating a prototype.
+func TestLoadAndRegister_ReregisterSwapsFactory(t *testing.T) {
 	name := uniqueName(t)
-	yamlStr := fmt.Sprintf(`strategy:
+	first := fmt.Sprintf(`strategy:
   name: %s
   type: expression
 expression:
   signal:
     expression: "close > 50"
 `, name)
-	// First registration succeeds.
-	_, err := LoadAndRegister(yamlStr)
+	second := fmt.Sprintf(`strategy:
+  name: %s
+  type: expression
+expression:
+  signal:
+    expression: "close > 60"
+`, name)
+
+	_, err := LoadAndRegister(first)
 	require.NoError(t, err)
 
-	// Second registration of the same name should fail.
-	_, err = LoadAndRegister(yamlStr)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), name)
+	s, err := LoadAndRegister(second)
+	require.NoError(t, err, "同名重登记必须换工厂源，而不是报 already registered")
+	assert.Equal(t, name, s.Name())
+
+	inst, err := strategy.GlobalNewInstance(name)
+	require.NoError(t, err)
+	assert.Equal(t, "close > 60", signalExprParam(t, inst),
+		"新实例必须按最新 YAML 重建")
+}
+
+// signalExprParam reads the signal_expr parameter default from a strategy.
+func signalExprParam(t *testing.T, s strategy.Strategy) string {
+	t.Helper()
+	c := strategy.AsConfigurable(s)
+	require.NotNil(t, c)
+	for _, p := range c.Parameters() {
+		if p.Name == "signal_expr" {
+			v, _ := p.Default.(string)
+			return v
+		}
+	}
+	t.Fatal("signal_expr parameter missing")
+	return ""
 }
 
 // verifyDirectionConstants ensures our test assumptions about

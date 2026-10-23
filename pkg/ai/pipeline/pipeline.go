@@ -19,7 +19,6 @@ import (
 	yamlgen "tellurion-agent/pkg/ai/yaml"
 	"tellurion-agent/pkg/aistore"
 	"tellurion/pkg/strategy"
-	"tellurion/pkg/strategy/expression"
 )
 
 // Stage represents a pipeline stage
@@ -414,16 +413,18 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 //
 // 这是 P0-5 的修复点：回测按名字查 registry，所以「生成」之后必须有
 // 「注册」，否则名字对不上任何东西。ExecuteFromYAML 复用同一份逻辑。
+//
+// 注册的是**工厂**而不是共享实例（QT-65）：core QT-11 之后执行路径只经
+// Registry.NewInstance 取每 run 一份的新实例，共享实例会被 fail-closed
+// 拒成 ErrSharedStrategy。yaml.LoadAndRegister 负责同名重登记——换掉工厂
+// 的 YAML 源，而不是把一份已配置实例塞回注册表。
 func (p *Pipeline) buildAndRegister(yamlStr string) (strategy.Strategy, *yamlgen.Config, error) {
 	cfg, err := yamlgen.ParseConfig(yamlStr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("YAML parse failed: %w", err)
 	}
-	s, err := yamlgen.LoadStrategy(yamlStr)
+	s, err := yamlgen.LoadAndRegister(yamlStr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Strategy load failed: %w", err)
-	}
-	if err := p.registerOrConfigure(s, cfg); err != nil {
 		return nil, nil, err
 	}
 	return s, cfg, nil
@@ -480,8 +481,10 @@ func (p *Pipeline) ExecuteAsync(ctx context.Context, description string, runner 
 // "AI as quant researcher"). The flow is:
 //
 //  1. Parse YAML → Config (for universe/dates) + LoadStrategy → Strategy
-//  2. Registration: GlobalGet(name) → if same concrete type, Configure
-//     in place; if different type, error; if not found, GlobalRegister
+//  2. Registration: register a factory for the strategy name; if the name was
+//     already registered through the YAML path, swap the factory's YAML source
+//     (re-register) instead of mutating a registered instance. The execution
+//     path obtains per-run instances via Registry.NewInstance.
 //  3. runner.RunBacktest(ctx, name, universe, startDate, endDate)
 //
 // Result.YAMLConfig is populated; GeneratedCode/BuildError are left
@@ -703,43 +706,6 @@ func (p *Pipeline) recordBacktestOutcome(result *Result, btResult *domain.Backte
 	}
 	p.log(result, "Backtest completed successfully")
 	return nil
-}
-
-// registerOrConfigure handles strategy registration with collision
-// resolution for ExecuteFromYAML. If the name is not registered, it
-// registers s. If a strategy with the same name exists and is also an
-// *expression.ExpressionStrategy, it reconfigures the existing one in
-// place (so any engine holding the existing reference sees the update).
-// If the existing strategy is a different concrete type, it returns an
-// error — silently calling Configure on a non-expression strategy would
-// be a hidden bug (it might ignore the expression params).
-//
-// S7-P3-2 (ODR-043): the type assertion on *expression.ExpressionStrategy
-// is safe because yamlgen.LoadStrategy only returns that concrete type.
-// The pipeline → expression dependency is consistent with the existing
-// pipeline → yaml → expression transitive dependency.
-func (p *Pipeline) registerOrConfigure(s strategy.Strategy, config *yamlgen.Config) error {
-	name := s.Name()
-	existing, err := strategy.GlobalGet(name)
-	if err != nil {
-		// Not registered — register new.
-		return strategy.GlobalRegister(s)
-	}
-	// Collision — require same concrete type.
-	existingExpr, ok1 := existing.(*expression.ExpressionStrategy)
-	_, ok2 := s.(*expression.ExpressionStrategy)
-	if !ok1 || !ok2 {
-		return fmt.Errorf(
-			"pipeline: strategy name %q already registered with a different (non-expression) type",
-			name)
-	}
-	// Same type — reconfigure existing in place.
-	params := yamlgen.ExpressionParamsFromConfig(config)
-	c := strategy.AsConfigurable(existingExpr)
-	if c == nil {
-		return fmt.Errorf("pipeline: existing strategy %q is not Configurable", name)
-	}
-	return c.Configure(params)
 }
 
 // fail marks a pipeline job as failed

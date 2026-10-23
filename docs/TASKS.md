@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-24
-verified-by: QT-17 ④ 停写切换落账（ODR-001）+ core 侧 deprecated 交接件登记
+verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切换落账
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -22,9 +22,9 @@ verified-by: QT-17 ④ 停写切换落账（ODR-001）+ core 侧 deprecated 交�
 |---|---|---|---|
 | QT-17 | `ai.*` schema 自持 + 双写对拍 + 切读 + 停写 | `QT-17` | D24 补第 7 类动作 |
 | S3 | 删 `replace ../tellurion`，改 HTTP 粗粒度 | `QT-07 / QT-50` | QT-17 + QT-50 |
-| QT-65 | QT-11 跨仓回归（agent 腿）：pipeline / yaml 生产路径仍注册**共享实例**，引擎 `NewInstance` 会 fail-closed 拒掉 | `QT-11` | 无硬前置，随下个 agent 批次 |
+| QT-65 | QT-11 跨仓回归（agent 腿）：pipeline / yaml 生产路径改**工厂注册** ✅ 完成（2026-10-24，见下方完成记录） | `QT-11` | 无硬前置 |
 
-> **QT-65 证据（2026-10-23，C4 期间发现，未开工）**：core QT-11（`67bee39`）把注册表改存构造函数后，`strategy.GlobalRegister(实例)` 注册的共享条目在执行路径被 `Registry.NewInstance` fail-closed 拒绝（`ErrSharedStrategy`）。本仓两个**生产**调用点没跟上：`pkg/ai/pipeline/pipeline.go:726`（`registerOrConfigure` 的注册分支，ExecuteFromYAML 链路）与 `pkg/ai/yaml/loader.go:150`（`LoadAndRegister`）。现有测试全绿是因为没有用例在注册后真经引擎跑（latent，非当前红）；validation 集成测试同形状共享注册的 5 例红已在 C4 修掉（`GlobalRegisterFactory` 返回已配置实例，core `engine_rebalance_date_test.go` 同款模式）。修这两处时要一起想清楚「reconfigure in place」语义在工厂注册表下的新形态——reconfigure meta 不再影响工厂每次新造的实例。
+> **QT-65 证据（2026-10-23，C4 期间发现；2026-10-24 已闭环）**：core QT-11（`67bee39`）把注册表改存构造函数后，`strategy.GlobalRegister(实例)` 注册的共享条目在执行路径被 `Registry.NewInstance` fail-closed 拒绝（`ErrSharedStrategy`）。本仓两个**生产**调用点没跟上：`pkg/ai/pipeline/pipeline.go`（`registerOrConfigure` 的注册分支，ExecuteFromYAML 链路）与 `pkg/ai/yaml/loader.go`（`LoadAndRegister`）。现有测试当时全绿是因为没有用例在注册后真经引擎跑（latent，非当前红）。
 
 > **S1 下游腿（contracts 四包切换）的 agent 侧落点**：import 全替清单见 [`archive/contracts-import-replacement-2026-10-23.md`](archive/contracts-import-replacement-2026-10-23.md)（A4 只列不改产出，**B4 已于 2026-10-23 执行完毕**；临时件已归档）。清单已实测把台账的「48+5+3」订正为 **46+5+3 = 54 位点 / 48 文件**，并写明 core 腿必须先落——否则两处 core/contracts 类型身份冲突会让构建红。
 
@@ -223,3 +223,25 @@ verified-by: QT-17 ④ 停写切换落账（ODR-001）+ core 侧 deprecated 交�
 - **要点**：判定 `turnover_rate` **确可被 DSL 求值**（注册于 `pkg/expression/registry.go:222`，Source=activity、DependsOn=market_activity，有物理表 `market_activity`（Migration 056））⇒ **修测试不改注册表**：把 `turnover_rate` 从两项护栏的幻影清单移除。
 - **要点（根因与收敛）**：根因是清单在两个测试文件各抄一份、D5 加注册项后没同步删 → 收敛为单一来源 `dslPhantomFields` + `phantomViolations` 的「过时自检」，加 `TestPhantomGuard_DetectsStaleRegistry` 三腿破坏验证。
 - **要点（验证）**：本地复现红→绿；首跑 CI 实测（2026-10-21）`7f711e5` 后 agent main 全绿。
+
+---
+
+## QT-65（agent 腿）· QT-11 跨仓回归：pipeline / yaml 生产路径改工厂注册 ✅ 完成（2026-10-24）
+
+- **① 目标**：把本仓两条生产注册路径从「注册共享实例」改为「注册工厂」，使引擎的 `Registry.NewInstance(name)` 能拿到每 run 一份的实例；同时把旧「就地 reconfigure 已注册实例」语义改成「重新注册工厂的 YAML 源」，不得再把已配置实例塞回共享注册表。
+- **② 上下文**：core QT-11（`67bee39`）把注册表改存构造函数后，`strategy.GlobalRegister(实例)` 的共享条目在 `NewInstance` 处 fail-closed 返回 `ErrSharedStrategy`。原调用点：`pkg/ai/pipeline/pipeline.go` 的 `registerOrConfigure` 注册分支（`Execute` / `ExecuteFromYAML` 共用）与 `pkg/ai/yaml/loader.go` 的 `LoadAndRegister`。
+- **③ 落点与实现**：
+  1. `yaml.LoadAndRegister` 改为 `strategy.GlobalRegisterFactory`；工厂体是 `yamlSource.build`，每次调用按**当前 YAML 文本**重建一份完整配置的 `ExpressionStrategy`（手写互斥保护，`NewInstance` 可并发调用）。
+  2. `yamlSource` 按策略名登记在包内 `strategySources`：同名再次 `LoadAndRegister` 只替换 YAML 源，注册表里的工厂始终指向同一源对象 —— 工厂注册表没有 replace/unregister 入口，这是「重新注册工厂」在不改 core 前提下的落地形态。
+  3. pipeline 删除 `registerOrConfigure`（含 `GlobalGet` → 就地 `Configure` 分支），`buildAndRegister` 统一走 `yaml.LoadAndRegister`；非表达式同名冲突由 YAML 层显式报错，不再静默改原型。
+  4. 回归用例走真实执行路径：`pkg/ai/pipeline` 的 `TestExecuteFromYAML_RegistersFactoryForEngine` 用一个只经 `strategy.GlobalNewInstance` 取实例并真的调用 `GenerateSignals` 的 runner；`pkg/ai/yaml` 的同名重登记用例断言新实例按最新 YAML 重建（`signal_expr`）。
+- **④ 约束与非目标**：不删 `replace tellurion => ../tellurion`（S3 未到）；不 import `tellurion/pkg/storage`（repoguard 白名单仍只有一条）；不在本仓实现编译器；不改 core（deprecated 标记 / D24 第 7 类只读 port / QT-50 HTTP 端点均跨仓）。
+- **⑤ 验收取证（真实输出）**：
+  - `gofmt -l pkg/ai/pipeline pkg/ai/yaml` → 空。
+  - `go build ./...` → EXIT=0；`go vet ./...` → EXIT=0。
+  - `go test ./... -count=1` → 全部 `ok`（含 `pipeline 4.910s` / `validation 7.209s` / `repoguard 0.543s`），EXIT=0。取证环境：`golang:1.25-alpine` 容器 + core HEAD `2629ac7` 的 `git archive` 快照（replace 链指向快照，避免 core 工作树其他会话 WIP 污染）。
+  - 目标用例：`TestExecuteFromYAML_RegistersFactoryForEngine`、`TestPipeline_ExecuteFromYAML_RegistrationCollision`、`TestLoadAndRegister_HappyPath`、`TestLoadAndRegister_ReregisterSwapsFactory` 全 PASS。
+- **⑥ 破坏验证**：把 `LoadAndRegister` 的 `strategy.GlobalRegisterFactory(src.build)` 临时改回 `strategy.GlobalRegister(s)`（即回到两处原语义）→ 上述两条执行路径用例当场红：
+  `engine strategy lookup failed: strategy is registered as a shared instance: ... (registered with Register; a per-run instance needs RegisterFactory)`。
+  从备份逐字节还原后 `SHA256=0EB49D35…77C59D7A` 与改前一致，复跑全绿。
+- **⑦ 停止项（按派发要求不动）**：`QT-17 ③`（D24 第 7 类只读 port）、`QT-07 ⑥ S3`（删 replace）、`QT-32`（依赖 G1-QT-26 / G5-QT-41b）继续等待；QT-17 ④ 停写切换已于 `b1a8fcd` 提交，本轮不重复施工。

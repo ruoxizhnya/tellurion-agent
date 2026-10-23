@@ -16,7 +16,56 @@ import (
 	"tellurion-agent/pkg/ai/agents"
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
+	"tellurion/pkg/strategy"
 )
+
+// newInstanceRunner 模拟真实回测引擎的取用方式：只经 Registry.NewInstance
+// 拿每 run 一份的新实例，并真的调用一次 GenerateSignals。共享实例注册会在
+// 这里拿到 ErrSharedStrategy —— 这就是 QT-65 的破坏验证面。
+type newInstanceRunner struct {
+	Ran bool
+}
+
+func (r *newInstanceRunner) RunBacktest(ctx context.Context, strategyName string, stockPool []string, startDate, endDate string) (*domain.BacktestResult, error) {
+	s, err := strategy.GlobalNewInstance(strategyName)
+	if err != nil {
+		return nil, fmt.Errorf("engine strategy lookup failed: %w", err)
+	}
+	if _, err := s.GenerateSignals(ctx, risingBars(70), &domain.Portfolio{}); err != nil {
+		return nil, fmt.Errorf("engine signal generation failed: %w", err)
+	}
+	r.Ran = true
+	return &domain.BacktestResult{TotalTrades: 2}, nil
+}
+
+// risingBars 造一段单调上涨的日线序列，供表达式策略求值。
+func risingBars(n int) map[string][]domain.OHLCV {
+	base := time.Now().AddDate(0, 0, -n)
+	bars := make([]domain.OHLCV, 0, n)
+	for i := 0; i < n; i++ {
+		p := 10 + float64(i)*0.5
+		bars = append(bars, domain.OHLCV{
+			Symbol: "600000.SH", Date: base.AddDate(0, 0, i),
+			Open: p, High: p, Low: p, Close: p, Volume: 1000,
+		})
+	}
+	return map[string][]domain.OHLCV{"600000.SH": bars}
+}
+
+// TestExecuteFromYAML_RegistersFactoryForEngine 是 QT-65 的回归腿：
+// ExecuteFromYAML 注册的必须是工厂，执行路径只经 Registry.NewInstance
+// 取实例。破坏验证：把注册改回 strategy.GlobalRegister，本用例当场红。
+func TestExecuteFromYAML_RegistersFactoryForEngine(t *testing.T) {
+	p := NewPipeline()
+	name := uniqueYAMLName(t)
+	runner := &newInstanceRunner{}
+
+	res, err := p.ExecuteFromYAML(context.Background(), expressionYAMLForTest(name), runner)
+
+	require.NoError(t, err)
+	assert.Equal(t, StageComplete, res.Status)
+	assert.True(t, runner.Ran, "回测必须真的经 NewInstance 拿到策略并求值")
+}
 
 // mockBacktestRunner is a test double for BacktestRunner
 type mockBacktestRunner struct {
@@ -789,28 +838,55 @@ func TestPipeline_ExecuteFromYAML_HappyPath(t *testing.T) {
 	assert.Empty(t, result.BuildError)
 }
 
-// TestPipeline_ExecuteFromYAML_RegistrationCollision verifies that
-// calling ExecuteFromYAML twice with the same YAML (same strategy name)
-// reconfigures the already-registered strategy in place rather than
-// erroring. This is the common AI iterative-tuning workflow: the same
-// strategy name is re-run with tweaked expression params.
+// TestPipeline_ExecuteFromYAML_RegistrationCollision verifies that calling
+// ExecuteFromYAML twice with the same strategy name re-registers the factory
+// instead of erroring. This is the common AI iterative-tuning workflow: the
+// same name is re-run with tweaked expression params. QT-65 changed the
+// semantics from "reconfigure the registered instance in place" (invisible to
+// per-run instances) to "swap the factory's YAML source".
 func TestPipeline_ExecuteFromYAML_RegistrationCollision(t *testing.T) {
 	p := NewPipeline()
 	name := uniqueYAMLName(t)
-	yamlStr := expressionYAMLForTest(name)
-
 	runner := &mockBacktestRunner{}
 
-	// First call — registers the strategy.
-	result1, err := p.ExecuteFromYAML(context.Background(), yamlStr, runner)
+	// First call — registers the factory.
+	result1, err := p.ExecuteFromYAML(context.Background(), expressionYAMLForTest(name), runner)
 	require.NoError(t, err)
 	assert.Equal(t, StageComplete, result1.Status)
 
-	// Second call — same name, should Configure in place (not error).
-	result2, err := p.ExecuteFromYAML(context.Background(), yamlStr, runner)
+	// Second call — same name, different expression. Must re-register, not error.
+	tuned := expressionYAMLWith(name, "close > 60")
+	result2, err := p.ExecuteFromYAML(context.Background(), tuned, runner)
 	require.NoError(t, err)
 	assert.Equal(t, StageComplete, result2.Status)
 	require.NotNil(t, result2.BacktestResult)
+
+	// The engine's view of the strategy must reflect the latest YAML.
+	inst, err := strategy.GlobalNewInstance(name)
+	require.NoError(t, err)
+	c := strategy.AsConfigurable(inst)
+	require.NotNil(t, c)
+	var expr string
+	for _, param := range c.Parameters() {
+		if param.Name == "signal_expr" {
+			expr, _ = param.Default.(string)
+		}
+	}
+	assert.Equal(t, "close > 60", expr, "重登记后新实例必须按最新 YAML 重建")
+}
+
+// expressionYAMLWith builds a minimal expression YAML with a custom signal
+// expression, used to prove re-registration actually swaps the source.
+func expressionYAMLWith(name, expr string) string {
+	return fmt.Sprintf(`strategy:
+  name: %s
+  type: expression
+expression:
+  signal:
+    expression: "%s"
+    action: buy
+    direction: long
+`, name, expr)
 }
 
 // TestPipeline_ExecuteFromYAML_InvalidYAML verifies that malformed YAML
