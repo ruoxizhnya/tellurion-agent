@@ -3,113 +3,107 @@ package builtin
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ruoxizhnya/tellurion-contracts/domain"
+	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/strategy"
 )
 
-// uniqueStrategyName builds a strategy name unique per test invocation
-// (including -count=2 re-runs) so GlobalRegister never collides.
-// The global strategy registry has no Unregister, so fixed names
-// flake under -count=2. Mirrors the pattern in pkg/ai/yaml/loader_test.go.
-func uniqueStrategyName(t *testing.T) string {
-	t.Helper()
-	return fmt.Sprintf("tool_test_%s_%d", t.Name(), time.Now().UnixNano())
+// fakeStrategyCatalog implements StrategyCatalog for tool-level tests.
+// The HTTP shape itself is pinned in pkg/ai/client/strategy_client_test.go —
+// here we only exercise the tools' handling of the returned catalog.
+type fakeStrategyCatalog struct {
+	infos []client.StrategyInfo
+	err   error
+	calls int
 }
 
-// stubStrategy is a minimal Strategy implementation for registry tests.
-// It embeds *strategy.BaseStrategy to get Configure/Cleanup/Parameters
-// defaults, and adds no-op GenerateSignals/Weight.
-type stubStrategy struct {
-	*strategy.BaseStrategy
-	name string
+func (f *fakeStrategyCatalog) ListStrategies(context.Context) ([]client.StrategyInfo, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.infos, nil
 }
 
-func newStubStrategy(name string) *stubStrategy {
-	s := &stubStrategy{name: name}
-	s.BaseStrategy = strategy.NewBaseStrategy(name, "stub strategy for tool tests")
-	return s
-}
-
-func (s *stubStrategy) GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]strategy.Signal, error) {
-	return nil, nil
-}
-
-func (s *stubStrategy) Weight(signal strategy.Signal, portfolioValue float64) float64 {
-	return 0
+func sampleCatalog() []client.StrategyInfo {
+	return []client.StrategyInfo{
+		{
+			Name:        "momentum",
+			Description: "Momentum strategy",
+			Parameters: []client.StrategyParameter{
+				{Name: "lookback", Type: "int", Default: float64(20)},
+			},
+		},
+		{
+			Name:        "dual_momentum",
+			Description: "Dual momentum strategy",
+		},
+	}
 }
 
 // ─── StrategyListTool tests ───────────────────────────────────────────
 
 func TestStrategyListTool_Name(t *testing.T) {
-	tt := NewStrategyListTool()
+	tt := NewStrategyListTool(&fakeStrategyCatalog{})
 	assert.Equal(t, "strategy.list", tt.Name())
 }
 
 func TestStrategyListTool_Description(t *testing.T) {
-	tt := NewStrategyListTool()
+	tt := NewStrategyListTool(&fakeStrategyCatalog{})
 	assert.NotEmpty(t, tt.Description())
 	assert.Contains(t, tt.Description(), "strateg")
 }
 
 func TestStrategyListTool_Parameters(t *testing.T) {
-	tt := NewStrategyListTool()
+	tt := NewStrategyListTool(&fakeStrategyCatalog{})
 	// strategy.list takes no parameters.
 	assert.Nil(t, tt.Parameters())
 }
 
 func TestStrategyListTool_OutputSchema(t *testing.T) {
-	tt := NewStrategyListTool()
+	tt := NewStrategyListTool(&fakeStrategyCatalog{})
 	schema := tt.OutputSchema()
 	assert.Equal(t, "array", schema.Type)
 	assert.NotEmpty(t, schema.Fields)
 }
 
-func TestStrategyListTool_Execute_ReturnsSlice(t *testing.T) {
-	// Register a unique strategy so the list is non-empty.
-	name := uniqueStrategyName(t)
-	require.NoError(t, strategy.GlobalRegister(newStubStrategy(name)))
+func TestStrategyListTool_Execute_ReturnsCatalog(t *testing.T) {
+	catalog := &fakeStrategyCatalog{infos: sampleCatalog()}
+	tt := NewStrategyListTool(catalog)
 
-	tt := NewStrategyListTool()
 	result, err := tt.Execute(context.Background(), nil)
 	require.NoError(t, err)
+	assert.Equal(t, sampleCatalog(), result)
+	assert.Equal(t, 1, catalog.calls)
+}
 
-	list, ok := result.([]strategy.StrategyInfo)
-	require.True(t, ok, "result should be []strategy.StrategyInfo, got %T", result)
-	assert.NotEmpty(t, list, "list should contain at least the strategy we just registered")
+func TestStrategyListTool_Execute_PropagatesError(t *testing.T) {
+	catalogErr := errors.New("list_strategies returned status 500")
+	tt := NewStrategyListTool(&fakeStrategyCatalog{err: catalogErr})
 
-	// Verify our strategy is in the list.
-	found := false
-	for _, info := range list {
-		if info.Name == name {
-			found = true
-			break
-		}
-	}
-	assert.True(t, found, "registered strategy %q should appear in list", name)
+	_, err := tt.Execute(context.Background(), nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, catalogErr)
 }
 
 // ─── StrategyGetTool tests ────────────────────────────────────────────
 
 func TestStrategyGetTool_Name(t *testing.T) {
-	tt := NewStrategyGetTool()
+	tt := NewStrategyGetTool(&fakeStrategyCatalog{})
 	assert.Equal(t, "strategy.get", tt.Name())
 }
 
 func TestStrategyGetTool_Description(t *testing.T) {
-	tt := NewStrategyGetTool()
+	tt := NewStrategyGetTool(&fakeStrategyCatalog{})
 	assert.NotEmpty(t, tt.Description())
 }
 
 func TestStrategyGetTool_Parameters(t *testing.T) {
-	tt := NewStrategyGetTool()
+	tt := NewStrategyGetTool(&fakeStrategyCatalog{})
 	params := tt.Parameters()
 	require.Len(t, params, 1)
 	assert.Equal(t, "name", params[0].Name)
@@ -117,29 +111,31 @@ func TestStrategyGetTool_Parameters(t *testing.T) {
 }
 
 func TestStrategyGetTool_OutputSchema(t *testing.T) {
-	tt := NewStrategyGetTool()
+	tt := NewStrategyGetTool(&fakeStrategyCatalog{})
 	schema := tt.OutputSchema()
 	assert.Equal(t, "object", schema.Type)
 	assert.NotEmpty(t, schema.Fields)
 }
 
-func TestStrategyGetTool_Execute_HappyPath(t *testing.T) {
-	name := uniqueStrategyName(t)
-	require.NoError(t, strategy.GlobalRegister(newStubStrategy(name)))
+func TestStrategyGetTool_Execute_FiltersFromList(t *testing.T) {
+	catalog := &fakeStrategyCatalog{infos: sampleCatalog()}
+	tt := NewStrategyGetTool(catalog)
 
-	tt := NewStrategyGetTool()
-	args := map[string]interface{}{"name": name}
+	args := map[string]interface{}{"name": "dual_momentum"}
 	result, err := tt.Execute(context.Background(), args)
 	require.NoError(t, err)
 
-	info, ok := result.(strategy.StrategyInfo)
-	require.True(t, ok, "result should be strategy.StrategyInfo, got %T", result)
-	assert.Equal(t, name, info.Name)
-	assert.Equal(t, "stub strategy for tool tests", info.Description)
+	info, ok := result.(client.StrategyInfo)
+	require.True(t, ok, "result should be client.StrategyInfo, got %T", result)
+	assert.Equal(t, "dual_momentum", info.Name)
+	assert.Equal(t, "Dual momentum strategy", info.Description)
+	// 按 name 过滤走的是 list 结果，一次调用即可 —— 不再单查 /api/strategies/{id}
+	// （那条路径只查 DB，内置策略会 404）。
+	assert.Equal(t, 1, catalog.calls)
 }
 
 func TestStrategyGetTool_Execute_NotFound(t *testing.T) {
-	tt := NewStrategyGetTool()
+	tt := NewStrategyGetTool(&fakeStrategyCatalog{infos: sampleCatalog()})
 	args := map[string]interface{}{"name": "nonexistent_strategy_xyz_123"}
 	_, err := tt.Execute(context.Background(), args)
 	require.Error(t, err)
@@ -149,34 +145,51 @@ func TestStrategyGetTool_Execute_NotFound(t *testing.T) {
 }
 
 func TestStrategyGetTool_Execute_MissingName(t *testing.T) {
-	tt := NewStrategyGetTool()
+	catalog := &fakeStrategyCatalog{infos: sampleCatalog()}
+	tt := NewStrategyGetTool(catalog)
 	_, err := tt.Execute(context.Background(), map[string]interface{}{})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, tools.ErrInvalidArgs))
 	assert.Contains(t, err.Error(), "name")
+	// 参数非法时不该打下游。
+	assert.Zero(t, catalog.calls)
 }
 
 func TestStrategyGetTool_Execute_EmptyName(t *testing.T) {
-	tt := NewStrategyGetTool()
-	args := map[string]interface{}{"name": ""}
-	_, err := tt.Execute(context.Background(), args)
+	tt := NewStrategyGetTool(&fakeStrategyCatalog{infos: sampleCatalog()})
+	_, err := tt.Execute(context.Background(), map[string]interface{}{"name": ""})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, tools.ErrInvalidArgs))
 }
 
 func TestStrategyGetTool_Execute_WrongTypeName(t *testing.T) {
-	tt := NewStrategyGetTool()
-	args := map[string]interface{}{"name": 42}
-	_, err := tt.Execute(context.Background(), args)
+	tt := NewStrategyGetTool(&fakeStrategyCatalog{infos: sampleCatalog()})
+	_, err := tt.Execute(context.Background(), map[string]interface{}{"name": 42})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, tools.ErrInvalidArgs))
 }
 
-// ─── Registry integration ─────────────────────────────────────────────
+func TestStrategyGetTool_Execute_PropagatesListError(t *testing.T) {
+	catalogErr := errors.New("list_strategies returned status 401")
+	tt := NewStrategyGetTool(&fakeStrategyCatalog{err: catalogErr})
+
+	_, err := tt.Execute(context.Background(), map[string]interface{}{"name": "momentum"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, catalogErr)
+	assert.Contains(t, err.Error(), "strategy.get")
+}
+
+// ─── Wiring / registration ────────────────────────────────────────────
+
+func TestStrategyTools_PanicOnNilCatalog(t *testing.T) {
+	assert.Panics(t, func() { NewStrategyListTool(nil) })
+	assert.Panics(t, func() { NewStrategyGetTool(nil) })
+}
 
 func TestStrategyTools_RegisterInRegistry(t *testing.T) {
-	listTool := NewStrategyListTool()
-	getTool := NewStrategyGetTool()
+	catalog := &fakeStrategyCatalog{infos: sampleCatalog()}
+	listTool := NewStrategyListTool(catalog)
+	getTool := NewStrategyGetTool(catalog)
 
 	reg := tools.NewRegistry()
 	require.NoError(t, reg.Register(listTool))

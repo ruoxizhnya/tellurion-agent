@@ -306,7 +306,8 @@ func (a *WalkForwardEngineAdapter) RunWalkForward(
 //   - FactorTool 走 HTTP 指向 factorAPIURL —— 拆出 ai-service 后该 URL 指向
 //     analysis-service（/api/factor/* 只在那里注册），不再「指向自身」。
 //   - DataFetchTool 用共享 HTTPClient 指向 data-service URL。
-//   - StrategyRegistryTool 读包级 strategy.DefaultRegistry，无需装配。
+//   - StrategyListTool / StrategyGetTool 走 HTTP 打 analysis-service 的
+//     /api/strategies（QT-17 S3-c-2：不再读包级 strategy.DefaultRegistry）。
 //   - Gene Pool tools 收窄接口，由 *gene_pool.FactorPool / StrategyPool 满足。
 //   - ResearchProfileTool 收 *aistore.Store（QT-17 ② 自有 store）+ equitydeep.vault_path。
 func BuildToolsRegistry(
@@ -360,11 +361,15 @@ func BuildToolsRegistry(
 		logger.Fatal().Err(err).Msg("failed to register data.fundamentals tool")
 	}
 
-	// ── Group 4: Strategy registry (S7-P3-3) ─────────────────────────
-	if err := reg.Register(builtin.NewStrategyListTool()); err != nil {
+	// ── Group 4: Strategy catalog (S7-P3-3, QT-17 S3-c-2) ────────────
+	// strategy.list / strategy.get 改走 core 的 `GET /api/strategies`
+	// （默认分支合并「注册表 ∪ DB 活跃项」），本仓不再读包级注册表、
+	// 不再 import tellurion/pkg/strategy。base URL 与因子工具同源。
+	strategyClient := client.NewStrategyClient(factorAPIURL)
+	if err := reg.Register(builtin.NewStrategyListTool(strategyClient)); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register strategy.list tool")
 	}
-	if err := reg.Register(builtin.NewStrategyGetTool()); err != nil {
+	if err := reg.Register(builtin.NewStrategyGetTool(strategyClient)); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register strategy.get tool")
 	}
 

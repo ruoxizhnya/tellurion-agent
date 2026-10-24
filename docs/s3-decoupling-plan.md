@@ -127,10 +127,10 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 ### S3-c｜HTTP 化（依赖 core 端点；子序按「端点已具备 → 端点待补」）
 
 1. **risk** ✅ 完成（2026-10-25）：直接接 `POST /api/risk/detect_regime`。core 的**粗粒度形状已落地**（QT-70 ✅ 2026-10-24：`symbol + start_date + end_date` 由服务端取数，未接线 503 / 无行 404），agent 不必先把 OHLCV 拉进上下文再回传。零 core 改动。
-2. **strategy 注册表**：接 `GET /api/strategies`（默认分支已合并注册表 ∪ DB 活跃项，`ListWithDB`）；`strategy.get` 改为从 list 结果过滤（`GET /{id}` 只查 DB）。**零 core 改动**，只需行为对拍。
+2. **strategy 注册表** ✅ 完成（2026-10-25）：接 `GET /api/strategies`（默认分支已合并注册表 ∪ DB 活跃项，`ListWithDB`）；`strategy.get` 改为从 list 结果过滤（`GET /{id}` 只查 DB）。**零 core 改动**，只需行为对拍。
 3. **backtest**：接 `POST /api/backtest` + `POST /api/walkforward`；删除 `cmd/ai` 的 `newEngine` / `pgProvider` / `dataAdapter` / `wfEngine` 装配。`/api/backtest` 运行时已能收 `strategy_ref` / `strategy_params`（绑定结构嵌入 `contracts.BacktestRequest`）；**walkforward 的 `strategy_params` 已由 core QT-68 ✅（2026-10-24）补齐**，且 `POST /api/walkforward` 已登记为 D24 第 8 类粗粒度动作（core 裁-12，2026-10-25）。
 4. **expression**：接 core 新端点（静态校验 + 目录），删除 parser/evaluator 依赖。**前置已满足**：QT-69 ✅（2026-10-24）落 `POST /api/expression/validate` + `GET /api/expression/catalog`（字段三态、探测 fail-closed）。
-- 规模：4 包 / 10 个生产文件 / 92 处符号引用（`strategy` 3 + `expression` 4 + `backtest` 2 + `risk` 1）；S3-c-1 已清 `risk` 1 个生产文件 / 7 处符号引用，剩余 3 包（`strategy` / `expression` / `backtest`）。
+- 规模：4 包 / 10 个生产文件 / 92 处符号引用（`strategy` 3 + `expression` 4 + `backtest` 2 + `risk` 1）；S3-c-1 已清 `risk` 1 个生产文件 / 7 处符号引用；S3-c-2 已清 `strategy` 注册表 1 个生产文件 + 1 个测试文件（`strategy` 仍有 2 个生产文件：`pipeline/pipeline.go`、`yaml/loader.go`，属类型/配置面，不在 S3-c-2 范围）；剩余 `strategy` 类型/配置面、`expression`、`backtest`。
 - 门：用到的端点必须在 core `docs/openapi.yaml` 有登记（本仓已有 `TestClientEndpoints_AreRegisteredInCoreOpenAPI` 护栏，端点字面量自动纳入）；同参数同数据下，HTTP 回测与进程内回测的关键指标对拍（Sharpe / 总收益 / 交易数）。
 
 > **S3-c-1 施工记录（risk 工具 HTTP 化，2026-10-25，commit 随本行落）**：
@@ -142,6 +142,16 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 > - **验收（真实输出）**：`go build ./...` → BUILD OK；`go vet ./...` → VET OK；`go test ./...` → 全部包 `ok`（`cmd/ai 0.309s`、`pkg/ai/client 0.239s`、`pkg/ai/tools/builtin 0.162s`、`pkg/ai/pipeline 4.255s`，无 FAIL）。
 > - **破坏验证**：把 `risk_client.go` 请求标签 `json:"start_date"` 改成 `json:"start"` ⇒ `TestRiskClient_DetectRegime_CoarseShape` 红（实际体 `"start":"2024-01-01"` vs 期望 `"start_date"`）；逐字节还原后同一用例绿。
 > - **边界**：`grep '"tellurion/pkg/risk"'` 生产**零命中**，只剩 2 个测试文件（`pkg/ai/validation/economic_integration_test.go`、`live_backtest_integration_test.go`，随 S3-d 测试腿清零）。core 实现包 import 面：39 → **38 处**（清掉生产 1 处），分布 **22 文件 / 11 包**（生产 9 文件 15 处、测试 13 文件 23 处；`prompts.go` 3 处与 `repoguard` 4 处伪命中不计）。
+
+> **S3-c-2 施工记录（strategy 注册表 HTTP 化，2026-10-25，commit 随本行落）**：
+> - **改了什么**：新增 `pkg/ai/client/strategy_client.go`（`StrategyClient.ListStrategies(ctx)` → `GET /api/strategies`，**不发任何 query**，30s 超时，与 `FactorClient` / `RiskClient` 同源基址、同样不带 bearer token）。本地 DTO `StrategyInfo` / `StrategyParameter` 逐字镜像 core 的 json tag（`name` / `description` / `parameters` / `type` / `default` / `min` / `max`），不 import core 包。`pkg/ai/tools/builtin/strategy_registry.go` 的两个工具改为注入窄接口 `StrategyCatalog`（`NewStrategyListTool` / `NewStrategyGetTool` 形参由空变一，nil 在装配时报 panic）；`cmd/ai/builders.go` 的 `BuildToolsRegistry` **形参未变**，Group 4 用 `client.NewStrategyClient(factorAPIURL)` 一次构造、两工具共用。
+> - **`strategy.get` 语义**：改为从 list 结果里按 `name` **精确匹配**（与旧 `GlobalGet` 的 map 键语义一致），不再单查 `GET /api/strategies/{id}` —— 那条路径只查 DB（内置策略 404），无法覆盖合并目录。未命中错误仍以 `strategy.get:` 开头且不是 `tools.ErrInvalidArgs`（参数合法、策略不存在）；参数非法时**不打下游**（测试钉住 `catalog.calls == 0`）。
+> - **对拍口径**：响应形状直接取自 core `DB.ListWithDB`（先 DB 活跃项、DB 条目 `name = strategy_id`，再补注册表未覆盖项；DB 的 params 对象被投影成 `Parameter` 数组、键排序）。`strategy_client_test.go` 用两段真实形状（描述符数组 / `parameters:null`）逐字段解码；`StrategyGetTool` 的过滤语义在 builtin 侧用 fake catalog 覆盖。
+> - **如实登记（不是遗漏）**：core `docs/openapi.yaml` 的 `/api/strategies` 200 schema 声明 items 为 `StrategyConfig`（DB 配置形状），而默认分支**实际返回**的是 `StrategyInfo`（合并目录）——这是 core 的文档缺口，本仓不代改；本仓的护栏只要求路径有出处（`TestClientEndpoints_AreRegisteredInCoreOpenAPI` 绿），不对此 DTO 做 openapi 键对拍。
+> - **端点登记**：路径字面量写在 `pkg/ai/client/strategy_client.go` 非测试源码里，自动进入 `TestClientEndpoints_AreRegisteredInCoreOpenAPI` 的扫描面；另加 `TestStrategyClient_EndpointIsScannedByContractTest` 直接断言扫描结果包含 `/api/strategies`。「无 query」由 `TestStrategyClient_ListStrategies_RequestShape` 钉死（带 `?active=true` 会切到只查 DB 分支，内置策略整批消失）。
+> - **验收（真实输出）**：`go build ./...` → BUILD OK；`go vet ./...` → VET OK；`go test ./...` → 全部包 `ok`（无 FAIL）。
+> - **破坏验证**：把 `strategy_client.go` 响应封装标签 `json:"strategies"` 改成 `json:"items"` ⇒ `TestStrategyClient_ListStrategies_RequestShape` / `_FieldsFlowThrough` / `TestStrategyClient_ResponseMatchesCoreListWithDBShape` 三条红（`"[]" should have N item(s)`）；从备份逐字节还原（SHA256 `031D3C16…1681ECAC` 与改前一致）后同一组用例绿。
+> - **边界**：`grep '"tellurion/pkg/strategy"'` 在**注册表工具**生产代码零命中；但 `strategy` 包仍有 **2 个生产文件**（`pkg/ai/pipeline/pipeline.go`、`pkg/ai/yaml/loader.go`，用的是类型/工厂注册面）与 5 个测试文件，属 S3-c 的后续段（不虚报为已清）。core 实现包 import 面：38 → **36 处**（清掉生产 1 + 测试 1），分布 **20 文件**（生产 8 文件 14 处、测试 12 文件 22 处；`prompts.go` 3 处伪命中与 `repoguard` 4 处伪命中不计）。
 
 ### S3-d｜装配收尾 + 测试腿清零 + 删 `replace`
 
