@@ -80,5 +80,5 @@ require (
 // 本地开发：core 仓在工作区同级目录。CI 里由 workflow 用
 // `go mod edit -replace` 改写到 checkout 路径（见 .github/workflows/ci.yml）。
 // require 已指 v0.1.0（core 分仓起点 tag，QT-06），但 S0~S3 期间 agent 仍 import
-// core 实现包（20 包 / 37 文件），故 replace **保留**：删它之前本仓单仓编不过。
+// core 实现包（15 包 / 64 处 import / 43 文件，2026-10-25 实测），故 replace **保留**：删它之前本仓单仓编不过。
 replace tellurion => ../tellurion
