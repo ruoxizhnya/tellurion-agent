@@ -184,7 +184,7 @@ verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切�
 > - **④ 双写开始（对拍期）**：`cmd/ai/experiment_dualwrite.go` 双写 `ai.experiments` + legacy `public.experiments`；两张表 BIGSERIAL 各自发号，适配器内记 legacyID→aiID 映射（进程内，重启即失，差异由对拍测试暴露）。**读面已切 `ai.*`**（research 三表 + factor_hypothesis）——实证：真库 `research.*` 0 行、`factor_hypothesis` 12 行全 builtin 种子且 agent 启动镜像播种收敛、experiments 本仓只写不读。**停写待办**：对拍零差异 → 停写 legacy（检查项见 `docs/db-schema.md` §5：`factor_genes` / `strategy_genes` 无写入方，将来接写必须直写 `ai.*`）。
 > - **⑤ 护栏**：`internal/repoguard/storage_import_test.go`——非测试 `.go` 禁 import `tellurion/pkg/storage`，白名单三条（`cmd/ai/main.go` 引擎仪器域装配 / `experiment_dualwrite.go` 双写期与 replace 同寿 / `handlers_explore.go` ListingWindow 仪器域待 D24 第 7 类 port），每条带理由+过期条件；**夹具正反取证**（违规→红 / 干净→绿 / 白名单放行 / 条目不再 import→红 / 条目文件消失→红 / 测试文件不在范围），真仓腿另查「白名单条目必须还活着」。
 > - **验收（真库腿已跑）**：`TEST_DATABASE_DSN` 下全量 `go test ./...` —— aistore / pipeline / loop / cmd / repoguard 全绿；`pkg/ai/validation` 5 例红为**既有跨仓回归**（core 未推 QT-11~13 注册表改构造函数，与本单正交，处置归 C4/推送前）。构建取证：core 工作树有另一会话的 QT-52 WIP 会污染 replace 链，本单在 core HEAD `865f7bf` 隔离 worktree 下完成 `go build`/`go vet`/`go test` 取证。
-> - **仍待**：③ 仪器域只读 port（**QT-67 已于 2026-10-24 落地并推送 `2a4b076`，可开工消费**）；S3 去 replace（依赖 QT-17 ③ + QT-50，见下）；core 侧 deprecated 标记（交接件见下）。
+> - **仍待**：S3 去 replace（依赖 QT-17 ③ + QT-50，见下）。③ 仪器域只读 port 已于 2026-10-25 消费 QT-67 落地（见下节）；core 侧 deprecated 标记已由 core 仓 QT-05 ④ 落地（删除期限见下交接件）。
 > **🔶 进度（2026-10-24，④ 停写切换，本次）**：见下行专节。
 >
 > #### ④ 停写切换（2026-10-24，ODR-001）
@@ -202,7 +202,21 @@ verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切�
 > - `factor_genes` / `strategy_genes` **仍写 core `public.*`**（`pkg/ai/gene_pool` 用未限定表名，经 `search_path` 落到 `public`，池也是 core 的 `store.DB()`）；两表真库当前 0 行。切换属独立一步，**未做**，见 `docs/db-schema.md` §5 待定 1。
 > - `grep -r "pkg/storage"` **未归零**：生产代码 1 处（`handlers_explore.go`，等 D24 第 7 类动作），其余在 `_test.go` / 文档 / 护栏注释；整体归零依赖 S3 删 replace（QT-50）。
 
+> #### ③ 仪器域只读 port 消费（2026-10-25，QT-67）
+>
+> **已落**：
+> 1. **客户端**：`pkg/ai/client/reference_data_client.go` 新增 `ReferenceDataClient`，消费 core QT-67 的两条只读动作（`GET /api/v1/trading-calendar`、`POST /api/v1/listing-windows`）。DTO 与 core `docs/openapi.yaml` 逐键对拍（`TestOpenAPI_ReferenceDataShapesMatchContract`），端点字面量自动进入 `TestClientEndpoints_AreRegisteredInCoreOpenAPI`。凭证**每次调用显式传入**：handler 从入站请求取 `Authorization: Bearer …` 转发，客户端不签发、不刷新、不降级成匿名（缺 token 在发请求前 `ErrReferenceDataNoCredentials`）。
+> 2. **偏差维接线**：`cmd/ai/handlers_explore.go` 的 `listing` 从 `engine.ListingWindows`（core 进程内实现）改为 `client.ListingWindows`；偏差维的 `PoolSource` / `PoolSize` / `DelistedInPool` 语义不变（`delist_date != nil` 计为池内已摘牌）。窗口读不到时**保持最保守口径** `PoolSourceCurrent` 并留日志 —— 不把一次失败当成「没有数据」。
+> 3. **护栏清零**：`internal/repoguard` 的 `storageWhitelist` 三条 → 一条 → **0 条**；`handlers_explore.go` 同时删掉 `tellurion/pkg/storage` 与 `tellurion/pkg/backtest` 两个 core 实现包 import（`registerExploreRoutes` 不再需要 `*backtest.Engine`）。
+> 4. **依赖联动**：core 当日已把 contracts pin 切到 `v0.6.0`；本仓 `replace tellurion => ../tellurion` 期间 core 的 pin 参与本仓模块图，故同批 `go mod tidy`（contracts `v0.5.0` → `v0.6.0`，新增 `wazero` indirect）。这是仓内 AGENTS §4 已登记的联动，不是新增依赖。
+>
+> **验收取证（真实退出码）**：`gofmt -l`（改动的 7 个文件）→ 空；`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./cmd/ai/... ./pkg/ai/client/... ./internal/repoguard/... -count=1` → 全 `ok`，**0**。
+> **破坏验证**：临时新建 `cmd/ai/__storage_probe.go`（`import _ "tellurion/pkg/storage"`）→ `TestStorageImportBoundary` 当场红并点名 `cmd/ai/__storage_probe.go -> tellurion/pkg/storage`（**EXIT=1**）→ 删除探针后复跑 → **EXIT=0**，工作区零残留。
+> **仍未做（如实）**：`guard` 判据只覆盖「生产 .go 不 import storage」；`_test.go` 里的合法用法（如 `pkg/ai/validation/live_backtest_integration_test.go` 查仪器域）仍在护栏范围外，单独 `grep -r` 不会归零。整体归零仍等 S3 删 `replace`（QT-50）。
+
 > #### core 侧交接件（QT-17 ④ 的另一半——本仓**不改 core**，报协调者）
+>
+> **状态（2026-10-25）**：core 侧已落 —— `experiments.go` / `research.go` 的导出符号带 `Deprecated:` 说明，删除期限登记在 `tellurion:docs/TASKS.md` QT-05 ④；本仓此处保留交接要求作为来源记录。
 >
 > **要做**：把 core `pkg/storage` 的旧表定义与存取方法标 `deprecated`，并登记删除期限。
 > - `tellurion:pkg/storage/experiments.go`：`Experiment` / `ExperimentMetrics` / `ExperimentUpdate` / `ExperimentStatus*` / `DatasetSplit*` 及 `InsertExperiment` / `GetExperiment` / `ListExperiments` / `UpdateExperiment` / `CompleteExperiment` / `RecordVerdict`。
@@ -235,7 +249,7 @@ verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切�
   2. `yamlSource` 按策略名登记在包内 `strategySources`：同名再次 `LoadAndRegister` 只替换 YAML 源，注册表里的工厂始终指向同一源对象 —— 工厂注册表没有 replace/unregister 入口，这是「重新注册工厂」在不改 core 前提下的落地形态。
   3. pipeline 删除 `registerOrConfigure`（含 `GlobalGet` → 就地 `Configure` 分支），`buildAndRegister` 统一走 `yaml.LoadAndRegister`；非表达式同名冲突由 YAML 层显式报错，不再静默改原型。
   4. 回归用例走真实执行路径：`pkg/ai/pipeline` 的 `TestExecuteFromYAML_RegistersFactoryForEngine` 用一个只经 `strategy.GlobalNewInstance` 取实例并真的调用 `GenerateSignals` 的 runner；`pkg/ai/yaml` 的同名重登记用例断言新实例按最新 YAML 重建（`signal_expr`）。
-- **④ 约束与非目标**：不删 `replace tellurion => ../tellurion`（S3 未到）；不 import `tellurion/pkg/storage`（repoguard 白名单仍只有一条）；不在本仓实现编译器；不改 core（deprecated 标记 / D24 第 7 类只读 port / QT-50 HTTP 端点均跨仓）。
+- **④ 约束与非目标**：不删 `replace tellurion => ../tellurion`（S3 未到）；不 import `tellurion/pkg/storage`（repoguard 白名单已清零）；不在本仓实现编译器；不改 core（deprecated 标记 / D24 第 7 类只读 port / QT-50 HTTP 端点均跨仓）。
 - **⑤ 验收取证（真实输出）**：
   - `gofmt -l pkg/ai/pipeline pkg/ai/yaml` → 空。
   - `go build ./...` → EXIT=0；`go vet ./...` → EXIT=0。

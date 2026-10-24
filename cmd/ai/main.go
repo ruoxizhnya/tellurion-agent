@@ -24,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	kitdb "github.com/ruoxizhnya/tellurion-kit/db"
 	"github.com/spf13/viper"
+	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/gene_pool"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/aistore"
@@ -108,9 +109,10 @@ func main() {
 
 	// factor.compute / factor.evaluate / compute_factor_ic 经 HTTP 打
 	// analysis-service 的 /api/factor/*（只在那里注册）。
+	analysisURL := analysisAPIURL(v)
 	toolsRegistry := BuildToolsRegistry(
 		v,
-		analysisFactorAPIURL(v),
+		analysisURL,
 		copilotRunner,
 		wfRunner,
 		factorPool,
@@ -146,7 +148,9 @@ func main() {
 		expSink = aiStore
 	}
 	registerPipelineRoutes(router, copilotRunner, expSink)
-	registerExploreRoutes(router, copilotRunner, expSink, engine)
+	// QT-17 ③：上市窗口改走 core 的 QT-67 只读端点（D24 第 7 类），
+	// 不再 import core 的 pkg/storage。
+	registerExploreRoutes(router, copilotRunner, expSink, client.NewReferenceDataClient(analysisURL))
 
 	// AUD-02 (ODR-065 H5)：WithToolsAuth 按工具的审计副作用类做 per-tool
 	// RBAC —— save_factor / save_strategy 要 trader-or-admin，其余未分类
@@ -160,9 +164,10 @@ func main() {
 	bootstrap.GracefulShutdown(srv, nil, nil, store, logger)
 }
 
-// analysisFactorAPIURL 解析 analysis 侧 factor 端点基址
-// （ai_service.factor_api_url，缺省 :8085）。
-func analysisFactorAPIURL(v *viper.Viper) string {
+// analysisAPIURL 解析 core analysis-service 的基址
+// （ai_service.factor_api_url，缺省 :8085）。因子工具与 QT-67 的
+// 日历/上市窗口只读动作共用同一个服务；配置键名是历史沿用，不再只指因子。
+func analysisAPIURL(v *viper.Viper) string {
 	if u := v.GetString("ai_service.factor_api_url"); u != "" {
 		return u
 	}

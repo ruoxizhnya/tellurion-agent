@@ -105,6 +105,38 @@ func TestOpenAPI_GapsAreStillGaps(t *testing.T) {
 	}
 }
 
+// TestOpenAPI_ReferenceDataShapesMatchContract 钉住 QT-67（D24 第 7 类）两条
+// 只读动作：路径必须在 openapi 里，DTO 的每个 json 键都要有 schema 出处。
+// 手写镜像可以，但漂移在这里当场红 —— 与 backtest DTO 同一条纪律。
+func TestOpenAPI_ReferenceDataShapesMatchContract(t *testing.T) {
+	doc, path := loadCoreOpenAPI(t)
+
+	for _, endpoint := range []string{"/api/v1/trading-calendar", "/api/v1/listing-windows"} {
+		if _, ok := doc.Paths[endpoint]; !ok {
+			t.Errorf("%s：core openapi 未登记 %s", path, endpoint)
+		}
+	}
+
+	schemas := map[string][]string{
+		"TradingCalendarEntry":    jsonKeys(TradingCalendarEntry{}),
+		"TradingCalendarResponse": jsonKeys(tradingCalendarResponse{}),
+		"ListingWindow":           jsonKeys(ListingWindow{}),
+		"ListingWindowsResponse":  jsonKeys(listingWindowsResponse{}),
+	}
+	for name, keys := range schemas {
+		schema, ok := doc.Components.Schemas[name]
+		if !ok || len(schema.Properties) == 0 {
+			t.Errorf("%s：openapi 里没有 %s schema", path, name)
+			continue
+		}
+		for _, k := range keys {
+			if _, ok := schema.Properties[k]; !ok {
+				t.Errorf("%s：DTO 键 %q 在 openapi %s 里没有出处", path, k, name)
+			}
+		}
+	}
+}
+
 // TestOpenAPI_CheckerRejectsLegacyShapes 是破坏验证的长期在案版：
 // 旧的两处漂移（请求发 strategy_name、响应只认嵌套 result）必须被同一个检查判红。
 // 这两条形状就是 REV-01-A 开工前线上的真实形状，不是假想。

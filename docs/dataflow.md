@@ -47,7 +47,7 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
 1. `ai.*` 与 core 旧表在停写切换时行级一致（回填归档 + `EXCEPT` 双向 0 差异，见 ODR-001）；停写后 `public.experiments` 行数与序列不再前进。
 2. 同一实验配置 → 同一结果（引擎确定性 + 三 hash 留痕）。
 3. 断线不影响 run 的生命周期。
-4. 本仓生产代码不出现 `pkg/storage` 的 import——停写后白名单只剩一条（`handlers_explore.go` 的仪器域 `ListingWindow`，等 D24 第 7 类动作），由 `internal/repoguard` AST 护栏钉住；S3（QT-50 后）收归零。
+4. 本仓生产代码不出现 `pkg/storage` 的 import——**白名单已清零（QT-17 ③，2026-10-25）**：仪器域上市窗口改走 core QT-67 的只读端点（`POST /api/v1/listing-windows`，凭证从入站请求转发），由 `internal/repoguard` AST 护栏钉住；全仓 `grep` 归零仍等 S3 删 `replace`（QT-50）。
 
 ## 5. 与契约文档的关系
 

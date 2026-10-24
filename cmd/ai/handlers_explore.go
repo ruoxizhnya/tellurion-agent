@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"tellurion/pkg/httpserver"
 	"time"
@@ -14,12 +15,11 @@ import (
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai"
 	aicausal "tellurion-agent/pkg/ai/causal"
+	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/loop"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/search"
 	"tellurion-agent/pkg/ai/validation"
-	"tellurion/pkg/backtest"
-	"tellurion/pkg/storage"
 )
 
 // verdictSink 把验证器裁决写回实验日志那一行（P2-9 接线）。
@@ -52,6 +52,13 @@ var exploreBias = validation.BiasInput{
 	// 探索这条链路没查过。于是前视子维度是「未评估」并给 note。
 }
 
+// listingWindowsSource 读仪器域上市窗口（D24 第 7 类只读动作，core QT-67）。
+//
+// 返回**全部标的**的窗口：偏差维要的是池子大小与其中已摘牌的数量，不是
+// 某个标的的上市日。nil = 未装配，偏差维退回最保守口径。
+// token 从入站请求转发 —— 本进程不签发、不刷新凭证。
+type listingWindowsSource func(ctx context.Context, bearerToken string) ([]client.ListingWindow, error)
+
 // ExploreHandler 是 P1-2 循环控制器的 HTTP 入口。
 //
 // 控制器本身只是个库，没有这一层它就只是躺在包里的能力 —— 跟 P1-1b 的 sink
@@ -69,9 +76,9 @@ type ExploreHandler struct {
 	// narrator 是因果维（P2-9f）的叙述者。nil = 因果维未评估 —— 没讲就是
 	// 没讲，不拿剩下五维凑一个"看起来完整"的结论。
 	narrator validation.Narrator
-	// listing 读引擎当前使用的上市日历（P2-4）。nil 或返回空 = 引擎这次
-	// 没能按日在市过滤，偏差维必须照实记上 PoolSourceCurrent。
-	listing func() map[string]storage.ListingWindow
+	// listing 读仪器域上市窗口（P2-4）。nil 或返回空 = core 这次没能给出
+	// 上市窗口，偏差维必须照实记上 PoolSourceCurrent。
+	listing listingWindowsSource
 
 	mu   sync.Mutex
 	runs map[string]*exploreRun
@@ -79,27 +86,43 @@ type ExploreHandler struct {
 
 // biasInput 组装这一轮的偏差维输入（P2-4）。
 //
-// 池子来源**按引擎的实测状态**决定，不再是写死的常量：引擎预热到了上市
-// 日历，就说明这次回测真的是「按日在市」取池子，那条 blocking 该消失；
-// 预热不到（stocks 表空 / 没连库），就仍然报 PoolSourceCurrent ——
-// 这时候债还在，藏起来它就会变成错误的自信。
-func (h *ExploreHandler) biasInput() validation.BiasInput {
+// 池子来源按 core 的实测数据决定，不再是写死的常量：core 的 QT-67 端点
+// 返回了上市窗口（与引擎同源的 stocks 表），就说明这一轮取池子有按日在市
+// 的依据，那条 blocking 该消失；取不到（端点不可用 / 表空 / 没连库），
+// 就仍然报 PoolSourceCurrent —— 这时候债还在，藏起来它就会变成错误的自信。
+func (h *ExploreHandler) biasInput(ctx context.Context, bearerToken string) validation.BiasInput {
 	in := exploreBias
 	if h.listing == nil {
 		return in // 无从判断，保持最保守的口径
 	}
-	windows := h.listing()
+	windows, err := h.listing(ctx, bearerToken)
+	if err != nil {
+		// 读不到 ≠ 没有数据：保持最保守口径，并把原因留在日志里。
+		log.Printf("explore: 上市窗口未取到，偏差维按 current 池子记: %v", err)
+		return in
+	}
 	if len(windows) == 0 {
 		return in
 	}
 	in.PoolSource = validation.PoolSourcePointInTime
 	in.PoolSize = len(windows)
 	for _, w := range windows {
-		if w.Delist != nil {
+		if w.DelistDate != nil {
 			in.DelistedInPool++
 		}
 	}
 	return in
+}
+
+// bearerTokenFromHeader 取 `Authorization: Bearer <jwt>` 里的 token，
+// 供转发给 core 的 D24 只读动作使用。缺失/形状不对一律返回空串，
+// 由客户端 fail-closed 拒绝，不降级成匿名调用。
+func bearerTokenFromHeader(header string) string {
+	const prefix = "Bearer "
+	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return ""
+	}
+	return strings.TrimSpace(header[len(prefix):])
 }
 
 // exploreRun 是一轮进行中（或已结束）的探索。
@@ -171,21 +194,23 @@ func (h *ExploreHandler) RegisterExploreRoutes(router *gin.RouterGroup) {
 //
 // 探索用的 pipeline 实例**必须带上实验日志落点** —— 否则这一路的尝试一行
 // 都不会记，而「试了多少次」正是过拟合检测唯一依赖的数字。
-func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, sink pipeline.ExperimentSink, engine *backtest.Engine) {
+func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, sink pipeline.ExperimentSink, refData *client.ReferenceDataClient) {
 	var opts []pipeline.PipelineOption
 	if sink != nil {
 		opts = append(opts, pipeline.WithExperimentSink(sink))
 	}
 	handler := NewExploreHandler(pipeline.NewPipeline(opts...), runner)
-	// P2-4：上市日历读到什么口径，偏差维就报什么口径。engine 可能为 nil
-	//（DB 没配），那种情况下 listing 保持 nil，偏差维退回最保守的
+	// P2-4：上市日历读到什么口径，偏差维就报什么口径。refData 可能为 nil
+	//（未配置 core 地址），那种情况下 listing 保持 nil，偏差维退回最保守的
 	// PoolSourceCurrent —— 债还在就照实记。
-	if engine != nil {
-		handler.listing = engine.ListingWindows
+	if refData != nil {
+		handler.listing = func(ctx context.Context, bearerToken string) ([]client.ListingWindow, error) {
+			return refData.ListingWindows(ctx, bearerToken, nil)
+		}
 	}
-	// 实验日志落点若同时能写裁决（*storage.PostgresStore 满足），就把裁决
-	// 也接上；不满足就只记日志不记裁决。main.go 里 Store 可能为 nil
-	//（DB 没配），那种情况 sink 是 nil 接口，断言自然失败。
+	// 实验日志落点若同时能写裁决（*aistore.Store 满足），就把裁决
+	// 也接上；不满足就只记日志不记裁决。main.go 里 aiStore 在初始化失败时
+	// 进程已退出，sink 只可能是非 nil 的 *aistore.Store。
 	if vs, ok := sink.(verdictSink); ok {
 		handler.verdicts = vs
 	}
@@ -220,6 +245,8 @@ func (h *ExploreHandler) Start(c *gin.Context) {
 
 	// ⚠️ 刻意不用 c.Request.Context()：响应一返回 gin 就会取消它，异步跑的
 	// 这一轮会在第一步就被掐断。这里要的是独立于请求的生命周期。
+	// 凭证在返回前取出：gin 的 context 在 handler 返回后会被复用，不能带进 goroutine。
+	bearerToken := bearerTokenFromHeader(c.GetHeader("Authorization"))
 	ctx, cancel := context.WithCancel(context.Background())
 
 	space := &search.SearchSpace{Params: []search.ParamDef{
@@ -247,7 +274,7 @@ func (h *ExploreHandler) Start(c *gin.Context) {
 			RunID:       runID,
 			Description: req.Description,
 			MaxTries:    req.MaxTries,
-			Bias:        h.biasInput(),
+			Bias:        h.biasInput(ctx, bearerToken),
 			OnAttempt: func(a loop.Attempt) {
 				run.mu.Lock()
 				run.attempts = append(run.attempts, a)

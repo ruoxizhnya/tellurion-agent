@@ -1,14 +1,16 @@
 // Package repoguard 持有本仓的结构性护栏测试。
 //
-// 本文件钉的不变量（QT-17 ②⑤，④ 停写后收紧）：实验域数据由本仓自有的
-// aistore（ai.* schema）持有，生产代码不得再借 core 的 *PostgresStore 读写
-// 这块数据 —— 即非测试的 .go 文件禁止 import tellurion/pkg/storage，唯一
-// 出口是 storageWhitelist 里剩下的那条仪器域过渡边（带理由与过期条件）。
+// 本文件钉的不变量（QT-17 ②⑤，③ 消费 QT-67 后清零）：实验域数据由本仓自有的
+// aistore（ai.* schema）持有，仪器域的日历/上市窗口改走 core 的只读端点
+// （QT-67，D24 第 7 类）—— 非测试的 .go 文件**一处**都不许 import
+// tellurion/pkg/storage。storageWhitelist 是登记簿，不是豁免表：
+// 今天为空，将来真需要过渡边时必须同时写理由与过期条件。
 //
-// QT-17 ④ 停写切换后，白名单从三条收到一条：
-//   - cmd/ai/experiment_dualwrite.go 随停写整体删除（条目失效即红，所以同时删）；
-//   - cmd/ai/main.go 改用 kit/db 的 BuildDSN，不再 import storage；
-//   - 只剩 handlers_explore.go 的 ListingWindow（仪器域，等 D24 第 7 类动作）。
+// 收敛过程：
+//   - QT-17 ④ 停写切换：cmd/ai/experiment_dualwrite.go 随停写删除，
+//     cmd/ai/main.go 改用 kit/db 的 BuildDSN —— 三条收到一条；
+//   - QT-17 ③（2026-10-25）：handlers_explore.go 的 ListingWindow 改走
+//     core QT-67 只读端点（HTTP），最后一条收回 —— 白名单清零。
 //
 // 这条护栏因此同时是「legacy 旧表停写」的执法者：想再写 public.experiments /
 // research.*，就必须重新 import storage，而那条 import 会在这里当场变红。
@@ -40,12 +42,10 @@ const storageImportPath = "tellurion/pkg/storage"
 // storageWhitelist 是允许 import tellurion/pkg/storage 的生产文件的登记簿。
 // key = 仓内 slash 分隔的文件相对路径；value = 为什么还在 + 什么时候消失。
 // 新增条目必须在 value 里写清这两件事，否则条目本身就不该存在。
-var storageWhitelist = map[string]string{
-	// ListingWindow 系列工具读的是仪器域（行情/宇宙）数据，不是实验域；
-	// D24 第 7 类动作（core 只读 port）落地后切 port 走。
-	// 停写切换后这是**最后一条**：实验域的三条过渡边已全部收回。
-	"cmd/ai/handlers_explore.go": "ListingWindow 仪器域列表读 core 存储；过期条件 = D24 第 7 类动作（只读 port）落地",
-}
+//
+// 2026-10-25（QT-17 ③）起为**空**：实验域的三条停写边先收回，最后一条
+// 仪器域边（handlers_explore.go 的 ListingWindow）随 core QT-67 只读端点落地。
+var storageWhitelist = map[string]string{}
 
 // scanStorageImports 扫描 root 下所有非测试 .go 文件的 import，返回两组结果：
 // violations —— 白名单外的 storage import；staleWhitelist —— 白名单里
