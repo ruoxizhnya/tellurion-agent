@@ -316,7 +316,6 @@ func BuildToolsRegistry(
 	wfRunner builtin.WalkForwardRunner,
 	factorPool builtin.FactorPoolClient,
 	strategyPool builtin.StrategyPoolClient,
-	regimeDetector builtin.RegimeDetectorClient,
 	researchProfile builtin.ResearchProfileClient,
 	hypothesisStore *aistore.Store,
 	logger zerolog.Logger,
@@ -399,8 +398,11 @@ func BuildToolsRegistry(
 	}
 
 	// ── Group 9: Market regime (Hermes Phase 2.3) ──────────────────
-	// Reuses the dataClient from Group 3 for OHLCV fetching.
-	if err := reg.Register(builtin.NewGetMarketRegimeTool(regimeDetector, dataClient)); err != nil {
+	// QT-17 S3-c-1：regime 判定改走 core 的一次粗粒度 HTTP 调用
+	// （POST /api/risk/detect_regime 的 symbol + 日期区间形状），本仓不再
+	// 持有 risk.RiskManager、不再自己取 OHLCV 算指标。base URL 与因子工具
+	// 同源（analysis-service）。
+	if err := reg.Register(builtin.NewGetMarketRegimeTool(client.NewRiskClient(factorAPIURL))); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register get_market_regime tool")
 	}
 

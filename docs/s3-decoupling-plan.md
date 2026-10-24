@@ -126,12 +126,22 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 
 ### S3-c｜HTTP 化（依赖 core 端点；子序按「端点已具备 → 端点待补」）
 
-1. **risk**：直接接 `POST /api/risk/detect_regime`。core 的**粗粒度形状已落地**（QT-70 ✅ 2026-10-24：`symbol + start_date + end_date` 由服务端取数，未接线 503 / 无行 404），agent 不必先把 OHLCV 拉进上下文再回传。零 core 改动。
+1. **risk** ✅ 完成（2026-10-25）：直接接 `POST /api/risk/detect_regime`。core 的**粗粒度形状已落地**（QT-70 ✅ 2026-10-24：`symbol + start_date + end_date` 由服务端取数，未接线 503 / 无行 404），agent 不必先把 OHLCV 拉进上下文再回传。零 core 改动。
 2. **strategy 注册表**：接 `GET /api/strategies`（默认分支已合并注册表 ∪ DB 活跃项，`ListWithDB`）；`strategy.get` 改为从 list 结果过滤（`GET /{id}` 只查 DB）。**零 core 改动**，只需行为对拍。
 3. **backtest**：接 `POST /api/backtest` + `POST /api/walkforward`；删除 `cmd/ai` 的 `newEngine` / `pgProvider` / `dataAdapter` / `wfEngine` 装配。`/api/backtest` 运行时已能收 `strategy_ref` / `strategy_params`（绑定结构嵌入 `contracts.BacktestRequest`）；**walkforward 的 `strategy_params` 已由 core QT-68 ✅（2026-10-24）补齐**，且 `POST /api/walkforward` 已登记为 D24 第 8 类粗粒度动作（core 裁-12，2026-10-25）。
 4. **expression**：接 core 新端点（静态校验 + 目录），删除 parser/evaluator 依赖。**前置已满足**：QT-69 ✅（2026-10-24）落 `POST /api/expression/validate` + `GET /api/expression/catalog`（字段三态、探测 fail-closed）。
-- 规模：4 包 / 10 个生产文件 / 92 处符号引用（`strategy` 3 + `expression` 4 + `backtest` 2 + `risk` 1）。
+- 规模：4 包 / 10 个生产文件 / 92 处符号引用（`strategy` 3 + `expression` 4 + `backtest` 2 + `risk` 1）；S3-c-1 已清 `risk` 1 个生产文件 / 7 处符号引用，剩余 3 包（`strategy` / `expression` / `backtest`）。
 - 门：用到的端点必须在 core `docs/openapi.yaml` 有登记（本仓已有 `TestClientEndpoints_AreRegisteredInCoreOpenAPI` 护栏，端点字面量自动纳入）；同参数同数据下，HTTP 回测与进程内回测的关键指标对拍（Sharpe / 总收益 / 交易数）。
+
+> **S3-c-1 施工记录（risk 工具 HTTP 化，2026-10-25，commit 随本行落）**：
+> - **改了什么**：新增 `pkg/ai/client/risk_client.go`（`RiskClient.DetectRegime(ctx, symbol, startDate, endDate)` → `POST /api/risk/detect_regime`，30s 超时，与 `FactorClient` 同源基址、同样不带 bearer token）。`pkg/ai/tools/builtin/market_regime_tool.go` 由「注入 core `*risk.RiskManager` + 本地取 OHLCV 算指标」改为「注入一个窄接口 `RegimeClient`，逐字段透传服务端判定」；`cmd/ai/builders.go` 的 `BuildToolsRegistry` 删掉 `regimeDetector` 形参，Group 9 直接装配 `builtin.NewGetMarketRegimeTool(client.NewRiskClient(factorAPIURL))`。工具体积 309 → 194 行（净 −115，未增长）。
+> - **§4 表 row 15 的顾虑已解**：原判断「端点只收内联 OHLCV，接 HTTP 会把省下的 token 还回去」被 QT-70 的粗粒度形状推翻 —— 请求体只有 `symbol/start_date/end_date` 三个短字段，200+ 根 bar 留在服务端。本仓不再 import core `pkg/risk`。
+> - **如实登记的行为变化（不是遗漏）**：输出删掉 `bars_analyzed`。粗粒度端点不回报参与判定的 bar 数，旧值是本仓自己数的；填 0 或猜一个数都是「没量过的数字」，故整字段移除，`OutputSchema` 由 8 字段改 7 字段。`as_of` 语义改为「服务端完成判定的时间戳」（core 侧是 `time.Now()`，非最后一根 bar 的日期）。
+> - **对拍口径**：工具已不参与 regime 计算，改钉「请求形状 + 逐字段透传」。golden 取自 core `risk.RegimeDetector`（fast_ma=10 / slow_ma=20 / vol_lookback=60，与 `config/ai-service.yaml` 一致）对固定序列（250 根、2024-01-01 起逐日、close=100+i）的判定：`trend="sideways" volatility="low" sentiment=0.3220913107511046`；`market_regime_tool_test.go` 断言工具输出逐字段相同。
+> - **端点登记**：路径字面量写在 `pkg/ai/client/risk_client.go` 非测试源码里，自动进入 `TestClientEndpoints_AreRegisteredInCoreOpenAPI` 的扫描面；另加 `TestRiskClient_EndpointIsScannedByContractTest` 直接断言扫描结果包含 `/api/risk/detect_regime`。
+> - **验收（真实输出）**：`go build ./...` → BUILD OK；`go vet ./...` → VET OK；`go test ./...` → 全部包 `ok`（`cmd/ai 0.309s`、`pkg/ai/client 0.239s`、`pkg/ai/tools/builtin 0.162s`、`pkg/ai/pipeline 4.255s`，无 FAIL）。
+> - **破坏验证**：把 `risk_client.go` 请求标签 `json:"start_date"` 改成 `json:"start"` ⇒ `TestRiskClient_DetectRegime_CoarseShape` 红（实际体 `"start":"2024-01-01"` vs 期望 `"start_date"`）；逐字节还原后同一用例绿。
+> - **边界**：`grep '"tellurion/pkg/risk"'` 生产**零命中**，只剩 2 个测试文件（`pkg/ai/validation/economic_integration_test.go`、`live_backtest_integration_test.go`，随 S3-d 测试腿清零）。core 实现包 import 面：39 → **38 处**（清掉生产 1 处），分布 **22 文件 / 11 包**（生产 9 文件 15 处、测试 13 文件 23 处；`prompts.go` 3 处与 `repoguard` 4 处伪命中不计）。
 
 ### S3-d｜装配收尾 + 测试腿清零 + 删 `replace`
 

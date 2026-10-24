@@ -124,7 +124,6 @@ func main() {
 		wfRunner,
 		factorPool,
 		strategyPool,
-		riskManager,
 		aiStore,
 		aiStore,
 		logger,

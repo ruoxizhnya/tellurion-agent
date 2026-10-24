@@ -29,15 +29,6 @@ func (stubWFRunner) RunWalkForward(_ context.Context, _ string, _ []string, _, _
 	return &domain.WalkForwardReport{}, nil
 }
 
-// stubRegimeDetector satisfies builtin.RegimeDetectorClient for registry
-// construction tests. DetectRegime is never called — we only verify tool
-// registration, not execution.
-type stubRegimeDetector struct{}
-
-func (stubRegimeDetector) DetectRegime(_ context.Context, _ []domain.OHLCV) (*domain.MarketRegime, error) {
-	return &domain.MarketRegime{}, nil
-}
-
 // stubResearchProfile satisfies builtin.ResearchProfileClient for registry
 // construction tests. GetResearchProfile is never called — we only verify
 // tool registration, not execution.
@@ -64,7 +55,7 @@ func TestBuildToolsRegistry_RegistersAll19Tools(t *testing.T) {
 	factorPool := gene_pool.NewFactorPool(nil)
 	strategyPool := gene_pool.NewStrategyPool(nil)
 
-	reg := BuildToolsRegistry(v, "http://test-analysis:8085", &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, stubResearchProfile{}, nil, zerolog.Nop())
+	reg := BuildToolsRegistry(v, "http://test-analysis:8085", &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubResearchProfile{}, nil, zerolog.Nop())
 	require.NotNil(t, reg)
 
 	tools := reg.List()
@@ -115,7 +106,7 @@ func TestBuildToolsRegistry_NoDuplicateNames(t *testing.T) {
 	factorPool := gene_pool.NewFactorPool(nil)
 	strategyPool := gene_pool.NewStrategyPool(nil)
 
-	reg := BuildToolsRegistry(v, "http://test-analysis:8085", &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, stubResearchProfile{}, nil, zerolog.Nop())
+	reg := BuildToolsRegistry(v, "http://test-analysis:8085", &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubResearchProfile{}, nil, zerolog.Nop())
 	require.NotNil(t, reg)
 
 	tools := reg.List()
