@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai/intent"
-	"tellurion/pkg/expression"
 )
 
 // P0-5 的第二层根因：意图 → 可执行配置之间缺一层映射。
@@ -36,6 +35,7 @@ func TestGenerate_PriceExpressibleTypesProduceLoadableStrategy(t *testing.T) {
 	}
 
 	g := NewGenerator()
+	core := liveExpressionClient(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			i := &intent.Intent{
@@ -56,8 +56,7 @@ func TestGenerate_PriceExpressibleTypesProduceLoadableStrategy(t *testing.T) {
 			require.NotEmpty(t, cfg.Expression.Signal.Expression,
 				"没有表达式就没有可执行内容")
 
-			_, err = expression.NewParser().Parse(cfg.Expression.Signal.Expression)
-			assert.NoError(t, err, "默认表达式必须能被表达式引擎解析")
+			requireCoreGate(t, core, "默认表达式", cfg.Expression.Signal.Expression)
 		})
 	}
 }
@@ -80,6 +79,7 @@ func TestGenerate_FundamentalTypesProduceRealExpressions(t *testing.T) {
 		{intent.StrategyTypeQuality, []string{"roe", "roa"}, ""},
 	}
 
+	core := liveExpressionClient(t)
 	for _, tc := range cases {
 		t.Run(string(tc.typ), func(t *testing.T) {
 			i := &intent.Intent{
@@ -101,8 +101,7 @@ func TestGenerate_FundamentalTypesProduceRealExpressions(t *testing.T) {
 			for _, ref := range tc.wantRefs {
 				assert.Contains(t, expr, ref, "表达式要真的用到 %s，不能拿价格糊弄", ref)
 			}
-			_, err = expression.NewParser().Parse(expr)
-			assert.NoError(t, err, "默认表达式必须能被表达式引擎解析")
+			requireCoreGate(t, core, "基本面默认表达式", expr)
 			_ = s
 		})
 	}

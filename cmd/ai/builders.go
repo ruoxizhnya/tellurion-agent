@@ -164,8 +164,12 @@ func BuildToolsRegistry(
 	if err := reg.Register(builtin.NewFactorEvaluateTool(factorClient)); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register factor.evaluate tool")
 	}
-	// Hermes Phase 1.1: L1 syntax gate — no DI, creates fresh parser per Execute.
-	if err := reg.Register(builtin.NewValidateFactorTool()); err != nil {
+	// Hermes Phase 1.1: L1 syntax gate — delegates Parse + operator/field
+	// gate to core's POST /api/expression/validate (QT-17 S3-c-4：本仓不再
+	// import tellurion/pkg/expression).
+	expressionClient := client.NewExpressionClient(factorAPIURL,
+		client.WithTokenFromContext(), client.WithInsecureLoopback())
+	if err := reg.Register(builtin.NewValidateFactorTool(expressionClient)); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register validate_factor tool")
 	}
 	// Hermes Phase 1.2: L2 quick IC gate — reuses the same factor HTTP client.

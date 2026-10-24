@@ -627,22 +627,19 @@ func TestPipeline_JobIsolation(t *testing.T) {
 func TestNewDiscoveryPipeline(t *testing.T) {
 	researchAgent := agents.NewResearchAgent()
 	validateAgent := agents.NewValidateAgent(nil)
-	dataProvider := &mockDataProvider{}
 
-	p := NewDiscoveryPipeline(researchAgent, validateAgent, nil, dataProvider)
+	p := NewDiscoveryPipeline(researchAgent, validateAgent, nil)
 	assert.NotNil(t, p)
 	assert.Equal(t, researchAgent, p.researchAgent)
 	assert.Equal(t, validateAgent, p.validateAgent)
 	assert.NotNil(t, p.mutator) // auto-created
-	assert.Equal(t, dataProvider, p.dataProvider)
 }
 
 func TestDiscoveryPipeline_Run_NoAI(t *testing.T) {
 	researchAgent := agents.NewResearchAgent()
 	validateAgent := agents.NewValidateAgent(nil)
-	dataProvider := &mockDataProvider{}
 
-	p := NewDiscoveryPipeline(researchAgent, validateAgent, nil, dataProvider)
+	p := NewDiscoveryPipeline(researchAgent, validateAgent, nil)
 	config := DiscoveryConfig{
 		Topics:             []string{"momentum", "value"},
 		MutationsPerFactor: 2,
@@ -665,9 +662,8 @@ func TestDiscoveryPipeline_Run_NoAI(t *testing.T) {
 func TestDiscoveryPipeline_RunBatch(t *testing.T) {
 	researchAgent := agents.NewResearchAgent()
 	validateAgent := agents.NewValidateAgent(nil)
-	dataProvider := &mockDataProvider{}
 
-	p := NewDiscoveryPipeline(researchAgent, validateAgent, nil, dataProvider)
+	p := NewDiscoveryPipeline(researchAgent, validateAgent, nil)
 	configs := []DiscoveryConfig{
 		{Topics: []string{"momentum"}, MutationsPerFactor: 1, ValidationLevel: agents.L1Syntax, MinIC: 0.0},
 		{Topics: []string{"value"}, MutationsPerFactor: 1, ValidationLevel: agents.L1Syntax, MinIC: 0.0},
@@ -681,9 +677,8 @@ func TestDiscoveryPipeline_RunBatch(t *testing.T) {
 func TestDiscoveryPipeline_GetTopFactors_NoPool(t *testing.T) {
 	researchAgent := agents.NewResearchAgent()
 	validateAgent := agents.NewValidateAgent(nil)
-	dataProvider := &mockDataProvider{}
 
-	p := NewDiscoveryPipeline(researchAgent, validateAgent, nil, dataProvider)
+	p := NewDiscoveryPipeline(researchAgent, validateAgent, nil)
 	_, err := p.GetTopFactors(context.Background(), 5)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "factor pool not configured")
@@ -762,20 +757,6 @@ func TestStrategyPipeline_BatchRun(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
-
-// mockDataProvider implements expression.DataProvider for testing.
-type mockDataProvider struct{}
-
-func (m *mockDataProvider) GetField(symbol, field string, lookback int) ([]float64, error) {
-	return []float64{1.0, 2.0, 3.0}, nil
-}
-
-func (m *mockDataProvider) GetSymbols() []string {
-	return []string{"AAPL", "GOOGL"}
-}
-
-// Fields 声明该测试替身能供应的字段（OBS-08 切片 1 接口要求）。
-func (m *mockDataProvider) Fields() []string { return []string{"close"} }
 
 // ─── S7-P3-2 Phase 4: ExecuteFromYAML tests ──────────────────────────
 

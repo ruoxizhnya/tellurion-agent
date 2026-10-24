@@ -8,7 +8,6 @@ import (
 
 	"tellurion-agent/pkg/ai/agents"
 	"tellurion-agent/pkg/ai/gene_pool"
-	"tellurion/pkg/expression"
 )
 
 // DiscoveryPipeline orchestrates the factor discovery process.
@@ -17,7 +16,6 @@ type DiscoveryPipeline struct {
 	validateAgent *agents.ValidateAgent
 	factorPool    *gene_pool.FactorPool
 	mutator       *gene_pool.Mutator
-	dataProvider  expression.DataProvider
 }
 
 // DiscoveryConfig configures the discovery pipeline.
@@ -40,18 +38,19 @@ type DiscoveryResult struct {
 }
 
 // NewDiscoveryPipeline creates a new discovery pipeline.
+//
+// QT-17 S3-c-4：不再接收 expression.DataProvider —— 因子求值走
+// `*agents.ValidateAgent` 注入的 HTTP 面，pipeline 本地不持有求值器。
 func NewDiscoveryPipeline(
 	researchAgent *agents.ResearchAgent,
 	validateAgent *agents.ValidateAgent,
 	factorPool *gene_pool.FactorPool,
-	dataProvider expression.DataProvider,
 ) *DiscoveryPipeline {
 	return &DiscoveryPipeline{
 		researchAgent: researchAgent,
 		validateAgent: validateAgent,
 		factorPool:    factorPool,
 		mutator:       gene_pool.NewMutator(time.Now().UnixNano()),
-		dataProvider:  dataProvider,
 	}
 }
 

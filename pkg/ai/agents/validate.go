@@ -11,8 +11,20 @@ import (
 	"tellurion-agent/pkg/ai/metrics"
 	"tellurion-agent/pkg/ai/search"
 	"tellurion-agent/pkg/ai/validator"
-	"tellurion/pkg/expression"
 )
+
+// ExpressionValidator 是表达式静态校验的最小面（`*client.ExpressionClient`
+// 满足）。QT-17 S3-c-4：DSL 的 Parse + 闸门只在 core 一处实现，本包不再
+// import `tellurion/pkg/expression`。
+type ExpressionValidator interface {
+	Validate(ctx context.Context, expression string) (*client.ExpressionValidation, error)
+}
+
+// FactorSampler 是「按符号区间取因子值」的最小面（`*client.FactorClient`
+// 满足）。L2 的 NaN / 方差检查需要真实值，取数在 core 进程内完成。
+type FactorSampler interface {
+	ComputeFactor(ctx context.Context, req client.ComputeFactorRequest) (map[string][]float64, error)
+}
 
 // ValidationLevel defines the depth of validation.
 type ValidationLevel int
@@ -55,11 +67,10 @@ type ValidationResult struct {
 
 // ValidateAgent validates factor hypotheses through multiple levels.
 type ValidateAgent struct {
-	parser        *expression.Parser
-	evaluator     *expression.Evaluator
 	icCalc        *metrics.ICCalculator
 	turnoverCalc  *metrics.TurnoverCalculator
-	dataProvider  expression.DataProvider
+	validator     ExpressionValidator
+	factorSampler FactorSampler
 	btClient      *client.BacktestClient
 	codeValidator *validator.CodeValidator
 
@@ -101,12 +112,14 @@ var defaultAShareStockPool = []string{
 }
 
 // NewValidateAgent creates a new ValidateAgent.
-func NewValidateAgent(dataProvider expression.DataProvider) *ValidateAgent {
+//
+// validator 是必需的 L1 依赖（core 的表达式校验端点）；nil 时 L1 会
+// fail-closed 报「未配置校验器」，而不是本地猜一个结论。
+func NewValidateAgent(exprValidator ExpressionValidator) *ValidateAgent {
 	return &ValidateAgent{
-		parser:           expression.NewParser(),
 		icCalc:           metrics.NewICCalculator(),
 		turnoverCalc:     metrics.NewTurnoverCalculator(),
-		dataProvider:     dataProvider,
+		validator:        exprValidator,
 		codeValidator:    validator.NewCodeValidator(),
 		defaultStockPool: append([]string(nil), defaultAShareStockPool...),
 	}
@@ -115,12 +128,11 @@ func NewValidateAgent(dataProvider expression.DataProvider) *ValidateAgent {
 // NewValidateAgentWithBacktest creates a ValidateAgent with backtest client.
 // P1-12: also auto-wires a BacktestRunner from the client so L4 walk-forward
 // works out of the box when the backtest service is reachable.
-func NewValidateAgentWithBacktest(dataProvider expression.DataProvider, btClient *client.BacktestClient) *ValidateAgent {
+func NewValidateAgentWithBacktest(exprValidator ExpressionValidator, btClient *client.BacktestClient) *ValidateAgent {
 	a := &ValidateAgent{
-		parser:           expression.NewParser(),
 		icCalc:           metrics.NewICCalculator(),
 		turnoverCalc:     metrics.NewTurnoverCalculator(),
-		dataProvider:     dataProvider,
+		validator:        exprValidator,
 		btClient:         btClient,
 		codeValidator:    validator.NewCodeValidator(),
 		btRunner:         NewHTTPBacktestRunner(btClient),
@@ -128,6 +140,13 @@ func NewValidateAgentWithBacktest(dataProvider expression.DataProvider, btClient
 		defaultStockPool: append([]string(nil), defaultAShareStockPool...),
 	}
 	return a
+}
+
+// SetFactorSampler injects the HTTP factor sampler used by L2. Without it,
+// L2 reports a warning and skips (same fail-visible posture as the old
+// missing DataProvider).
+func (a *ValidateAgent) SetFactorSampler(s FactorSampler) {
+	a.factorSampler = s
 }
 
 // SetBacktestRunner overrides the BacktestRunner. Pass nil to disable
@@ -183,7 +202,7 @@ func (a *ValidateAgent) Validate(ctx context.Context, formula string, level Vali
 	}
 
 	// L1: Syntax validation
-	if err := a.validateL1(result); err != nil {
+	if err := a.validateL1(ctx, result); err != nil {
 		return result, nil // Return with errors, don't fail
 	}
 
@@ -232,53 +251,62 @@ func (a *ValidateAgent) ValidateGene(ctx context.Context, gene *gene_pool.Factor
 	return result, nil
 }
 
-// validateL1 performs syntax validation.
-func (a *ValidateAgent) validateL1(result *ValidationResult) error {
-	expr, err := a.parser.Parse(result.Formula)
+// validateL1 performs syntax validation via core's expression endpoint.
+//
+// QT-17 S3-c-4：判定来自 `POST /api/expression/validate`（与 core 内
+// `(*expression.Expression).Validate()` 同一条实现）。传输失败是**故障**
+// （fail-closed），不伪装成「表达式不合法」。
+func (a *ValidateAgent) validateL1(ctx context.Context, result *ValidationResult) error {
+	if a.validator == nil {
+		result.Errors = append(result.Errors, "No expression validator configured for L1 validation")
+		return fmt.Errorf("no expression validator")
+	}
+
+	verdict, err := a.validator.Validate(ctx, result.Formula)
 	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("Parse error: %v", err))
+		result.Errors = append(result.Errors, fmt.Sprintf("Validation service error: %v", err))
 		return err
 	}
 
-	result.Inputs = expr.Inputs
-
-	if err := expr.Validate(); err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("Validation error: %v", err))
-		return err
+	result.Inputs = append([]string(nil), verdict.Inputs...)
+	if !verdict.Valid {
+		result.Errors = append(result.Errors, fmt.Sprintf("Validation error: %s", verdict.Error))
+		return fmt.Errorf("expression is invalid at stage %q", verdict.Stage)
 	}
 
 	// Check for common issues
-	if len(expr.Inputs) == 0 {
+	if len(result.Inputs) == 0 {
 		result.Warnings = append(result.Warnings, "Formula has no data inputs (pure literal)")
-	}
-
-	// Check formula complexity
-	complexity := estimateComplexity(expr.AST)
-	if complexity > 10 {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("High complexity: %d nodes", complexity))
 	}
 
 	result.Score = 1.0 // Base score for valid syntax
 	return nil
 }
 
+// L2 取数窗口：与 L3 的快速回测同一段（2023 全年）。旧实现用 provider 的
+// 「样本数据」，HTTP 化后没有这条腿 —— 取数由 core 的因子计算端点完成。
+const (
+	l2StartDate = "2023-01-01"
+	l2EndDate   = "2024-01-01"
+)
+
 // validateL2 performs quick evaluation validation.
+//
+// QT-17 S3-c-4：表达式求值不再在 agent 进程内做（那要 data provider）。
+// 现在由 core 的 `POST /api/factor/compute` 按符号 × 区间返回因子值，
+// NaN 比例与方差检查留在本仓（它们是判定逻辑，不是 DSL 语义）。
 func (a *ValidateAgent) validateL2(ctx context.Context, result *ValidationResult) error {
-	if a.dataProvider == nil {
-		result.Warnings = append(result.Warnings, "No data provider available for L2 validation")
-		return fmt.Errorf("no data provider")
+	if a.factorSampler == nil {
+		result.Warnings = append(result.Warnings, "No factor sampler available for L2 validation")
+		return fmt.Errorf("no factor sampler")
 	}
 
-	a.evaluator = expression.NewEvaluator(a.dataProvider)
-
-	expr, err := a.parser.Parse(result.Formula)
-	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("Parse error: %v", err))
-		return err
-	}
-
-	// Evaluate on sample data
-	evalResult, err := a.evaluator.Evaluate(expr.AST, 0)
+	values, err := a.factorSampler.ComputeFactor(ctx, client.ComputeFactorRequest{
+		Formula:   result.Formula,
+		Symbols:   a.defaultStockPool,
+		StartDate: l2StartDate,
+		EndDate:   l2EndDate,
+	})
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("Evaluation error: %v", err))
 		return err
@@ -287,8 +315,8 @@ func (a *ValidateAgent) validateL2(ctx context.Context, result *ValidationResult
 	// Check for NaN/Inf in results
 	nanCount := 0
 	totalCount := 0
-	for _, values := range evalResult {
-		for _, v := range values {
+	for _, series := range values {
+		for _, v := range series {
 			totalCount++
 			if math.IsNaN(v) || math.IsInf(v, 0) {
 				nanCount++
@@ -306,7 +334,7 @@ func (a *ValidateAgent) validateL2(ctx context.Context, result *ValidationResult
 	}
 
 	// Check result variance
-	variance := computeVariance(evalResult)
+	variance := computeVariance(values)
 	if variance == 0 {
 		result.Errors = append(result.Errors, "Zero variance in factor values")
 	} else if variance < 1e-10 {
@@ -425,19 +453,6 @@ func (a *ValidateAgent) validateL4(ctx context.Context, result *ValidationResult
 
 	result.Passed = len(result.Errors) == 0 && result.Score > 0
 	return nil
-}
-
-// estimateComplexity counts AST nodes.
-func estimateComplexity(node expression.Node) int {
-	if node == nil {
-		return 0
-	}
-
-	count := 1
-	for _, child := range node.Children() {
-		count += estimateComplexity(child)
-	}
-	return count
 }
 
 // computeVariance calculates the sample (n-1) variance of all finite

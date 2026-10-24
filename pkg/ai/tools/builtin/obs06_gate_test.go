@@ -3,6 +3,10 @@
 // validate_factor 此前 Parse 成功即 valid=true，不校验算子名 —— 于是
 // `CROSS(MA(close,5), MA(close,20))`（两个算子都不存在）被判「合法」。
 // 本测试直接调 ValidateFactorTool.Execute 钉住修复。
+//
+// QT-17 S3-c-4 后：闸门实现在 core（`POST /api/expression/validate`），
+// 本测试用替身喂 **core 的那份判定**，验证工具原样映射成 L1 失败；真实
+// 一致性由 env-gated 的 TestExpressionValidate_ParityWithCore 对拍。
 package builtin
 
 import (
@@ -15,7 +19,7 @@ import (
 
 func runValidate(t *testing.T, expr string) map[string]interface{} {
 	t.Helper()
-	res, err := NewValidateFactorTool().Execute(context.Background(), map[string]interface{}{
+	res, err := newValidateTool(t).Execute(context.Background(), map[string]interface{}{
 		"expression": expr,
 	})
 	require.NoError(t, err, "闸门不通过不应返回 Go error（是 valid=false 的校验结果）")

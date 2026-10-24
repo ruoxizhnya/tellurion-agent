@@ -82,8 +82,8 @@ func newIntegrationRegistry(t *testing.T) (*tools.Registry, *httpTestFactorPool)
 	t.Helper()
 	reg := tools.NewRegistry()
 
-	// L1 gate tool — self-contained (no external deps).
-	require.NoError(t, reg.Register(builtin.NewValidateFactorTool()))
+	// L1 gate tool — HTTP-backed (core's expression endpoints), stubbed here.
+	require.NoError(t, reg.Register(builtin.NewValidateFactorTool(newExpressionStub(t))))
 
 	// Gene pool tools — backed by an in-memory mock.
 	pool := &httpTestFactorPool{}

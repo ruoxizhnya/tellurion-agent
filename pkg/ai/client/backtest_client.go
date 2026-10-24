@@ -21,14 +21,38 @@ import (
 // 判据用 errors.Is(err, ErrBacktestFailed)，不要去比错误文案。
 var ErrBacktestFailed = errors.New("backtest failed")
 
+// authSettings 是与 core 通信时的凭证设置（QT-17 S3-c-4 起被多个客户端共用：
+// BacktestClient / ExpressionClient 都要以入站调用者身份打 analysis-service）。
+type authSettings struct {
+	bearerToken           string
+	tokenFromContext      bool
+	allowInsecureLoopback bool
+}
+
+// authorize 给请求挂上凭证；无凭证且未显式允许 loopback 开发时**不发请求**。
+func (a *authSettings) authorize(req *http.Request, baseURL string) error {
+	token := a.bearerToken
+	if token == "" && a.tokenFromContext {
+		token = BearerTokenFromContext(req.Context())
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+		return nil
+	}
+	if a.allowInsecureLoopback {
+		if isLoopbackURL(baseURL) {
+			return nil
+		}
+		return fmt.Errorf("WithInsecureLoopback 只允许 loopback 地址：baseURL %q 不是 loopback，拒绝无凭证调用", baseURL)
+	}
+	return fmt.Errorf("对 core 的请求没有凭证（默认 fail-closed）：用 WithBearerToken 配 JWT；本地 loopback 开发用 WithInsecureLoopback 显式开启")
+}
+
 // BacktestClient is an HTTP client for the backtest API
 type BacktestClient struct {
 	baseURL    string
 	httpClient *http.Client
-
-	bearerToken           string
-	tokenFromContext      bool
-	allowInsecureLoopback bool
+	auth       authSettings
 }
 
 // bearerTokenContextKey 是本包在 context 里携带「入站请求的 JWT」的键。
@@ -61,20 +85,22 @@ func BearerTokenFromContext(ctx context.Context) string {
 	return token
 }
 
-// Option configures a BacktestClient.
-type Option func(*BacktestClient)
+// Option configures a client's credential handling. Shared by every client
+// that talks to core analysis-service, so `WithBearerToken` etc. apply the
+// same way to BacktestClient and ExpressionClient.
+type Option func(*authSettings)
 
 // WithBearerToken 让客户端以 `Authorization: Bearer <token>` 调 core（QT-50 ④ 的
 // JWT 消费面）。token 由装配方持有 / 转发，本包不签发、不刷新。
 func WithBearerToken(token string) Option {
-	return func(c *BacktestClient) { c.bearerToken = strings.TrimSpace(token) }
+	return func(a *authSettings) { a.bearerToken = strings.TrimSpace(token) }
 }
 
 // WithInsecureLoopback 显式开启「无凭证的本地开发」模式（REV-01-A ③-2）。
 // 只对 loopback 地址生效：非 loopback 的 baseURL 即使开了这个开关也会被拒绝 ——
 // 「本地开发」不该变成「对远端悄悄降级成匿名调用」。
 func WithInsecureLoopback() Option {
-	return func(c *BacktestClient) { c.allowInsecureLoopback = true }
+	return func(a *authSettings) { a.allowInsecureLoopback = true }
 }
 
 // WithTokenFromContext 开启「按请求转发入站 JWT」（QT-17 S3-c-3）。
@@ -82,7 +108,7 @@ func WithInsecureLoopback() Option {
 // 优先级：静态 token（WithBearerToken）> ctx 里的 token > loopback 开发模式。
 // 三者都没有时仍然 fail-closed —— 不降级成匿名调用。
 func WithTokenFromContext() Option {
-	return func(c *BacktestClient) { c.tokenFromContext = true }
+	return func(a *authSettings) { a.tokenFromContext = true }
 }
 
 // NewBacktestClient creates a new backtest client.
@@ -100,7 +126,7 @@ func NewBacktestClient(baseURL string, opts ...Option) *BacktestClient {
 		},
 	}
 	for _, opt := range opts {
-		opt(c)
+		opt(&c.auth)
 	}
 	return c
 }
@@ -534,21 +560,7 @@ func (c *BacktestClient) newAPIRequest(ctx context.Context, method, path string,
 }
 
 func (c *BacktestClient) authorize(req *http.Request) error {
-	token := c.bearerToken
-	if token == "" && c.tokenFromContext {
-		token = BearerTokenFromContext(req.Context())
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-		return nil
-	}
-	if c.allowInsecureLoopback {
-		if isLoopbackURL(c.baseURL) {
-			return nil
-		}
-		return fmt.Errorf("WithInsecureLoopback 只允许 loopback 地址：baseURL %q 不是 loopback，拒绝无凭证调用", c.baseURL)
-	}
-	return fmt.Errorf("对 core 的请求没有凭证（默认 fail-closed）：用 WithBearerToken 配 JWT；本地 loopback 开发用 WithInsecureLoopback 显式开启")
+	return c.auth.authorize(req, c.baseURL)
 }
 
 func isLoopbackURL(raw string) bool {

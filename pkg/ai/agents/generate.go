@@ -8,22 +8,23 @@ import (
 	"sync"
 
 	"tellurion-agent/pkg/ai"
+	"tellurion-agent/pkg/ai/client"
 )
 
 // GenerateAgent generates trading strategy code from natural language descriptions.
 type GenerateAgent struct {
 	llm *ai.Client
 
-	// availability 是字段可用性地图（来自 expression.FieldAvailability 的
-	// 真库探测）。nil = 尚未探测（提示词退回能力层全集）。
+	// catalog 是 core 表达式目录的快照（`GET /api/expression/catalog`）。
+	// nil = 尚未注入（提示词如实说明目录不可用）。
 	// 与 ResearchAgent 同构：由调用方注入，本包不替调用方决定数据源。
-	availability map[string]bool
+	catalog *client.ExpressionCatalog
 }
 
-// SetAvailability 注入字段可用性地图（OBS-08 切片 2）。
-// 不注入则提示词不做可用性过滤（行为与切片 2 之前一致）。
-func (a *GenerateAgent) SetAvailability(avail map[string]bool) {
-	a.availability = avail
+// SetCatalog 注入 core 的表达式目录快照（OBS-08 切片 2，QT-17 S3-c-4）。
+// 不注入则提示词如实说明目录不可用（不凭记忆编字段清单）。
+func (a *GenerateAgent) SetCatalog(catalog *client.ExpressionCatalog) {
+	a.catalog = catalog
 }
 
 // NewGenerateAgent creates a new generate agent.
@@ -85,7 +86,7 @@ Output ONLY valid JSON:
   ],
   "factors": ["ts_mean(close, 20)", "ts_std(close, 60)"],
   "logic": "Buy when price > moving average"
-}`, description, factorDSLSyntax(a.availability), strategyDomainGuidance())
+}`, description, factorDSLSyntax(a.catalog), strategyDomainGuidance())
 
 	messages := []ai.ChatMessage{
 		{Role: "system", Content: "You are a quantitative strategy developer. Output ONLY valid JSON."},

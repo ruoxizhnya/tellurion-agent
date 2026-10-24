@@ -9,20 +9,26 @@
 // 台账原建议是「生成器改查 AvailableOperators()」。但这里的算子名是**完整
 // 表达式模板**的一部分（含嵌套结构与参数关系），不可能从一张扁平算子清单
 // 派生——硬改等于为了护栏重写业务。真正的危害是「产出过不了闸门」，所以
-// 护栏就钉在这一层：所有模板产出必须 Parse + Validate 通过。这既覆盖算子
-// 名漂移，也顺带覆盖参数个数、字段、标量位（K3a）等一切闸门约束。
+// 护栏就钉在这一层：所有模板产出必须过 core 的 Parse + Validate。
+//
+// QT-17 S3-c-4：闸门实现在 core（`POST /api/expression/validate`），用例
+// env-gated（设 ANALYSIS_URL 才跑）——不再 import core 的 parser。
 package yaml
 
 import (
+	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"tellurion-agent/pkg/ai/intent"
-	"tellurion/pkg/expression"
 )
 
 // TestDefaultSignalExpressionPassesGate 遍历全部策略类型 × 若干回看窗口，
-// 断言生成器产出的表达式都能过闸门。
+// 断言生成器产出的表达式都能过 core 闸门。
 func TestDefaultSignalExpressionPassesGate(t *testing.T) {
+	core := liveExpressionClient(t)
+
 	types := []intent.StrategyType{
 		intent.StrategyTypeMomentum,
 		intent.StrategyTypeMeanReversion,
@@ -45,14 +51,7 @@ func TestDefaultSignalExpressionPassesGate(t *testing.T) {
 				t.Errorf("策略类型 %q 未产出表达式（预期除 custom 外都应给出）", st)
 				continue
 			}
-			expr, err := expression.NewParser().Parse(formula)
-			if err != nil {
-				t.Errorf("策略类型 %q (lb=%d) 产出无法解析的表达式 %q: %v", st, lb, formula, err)
-				continue
-			}
-			if err := expr.Validate(); err != nil {
-				t.Errorf("策略类型 %q (lb=%d) 产出的表达式过不了闸门 %q: %v", st, lb, formula, err)
-			}
+			requireCoreGate(t, core, "策略类型 "+string(st)+" 默认表达式", formula)
 		}
 	}
 }
@@ -71,13 +70,17 @@ func TestDefaultSignalExpressionCustomGivesNone(t *testing.T) {
 }
 
 // TestDefaultSignalExpressionUsesRegisteredOperatorsOnly 是算子名层面的双重
-// 保险：抽出产出表达式里所有函数调用名，断言都在注册表中。
+// 保险：抽出产出表达式里所有函数调用名，断言都在 core 目录里。
 // （TestDefaultSignalExpressionPassesGate 已通过闸门覆盖此点，但本测试在
-// 注册表改名时给出的报错更直接——点名是哪个算子不在注册表。）
+// 算子改名时给出的报错更直接——点名是哪个算子不在目录。）
 func TestDefaultSignalExpressionUsesRegisteredOperatorsOnly(t *testing.T) {
-	registered := make(map[string]bool, 32)
-	for _, op := range expression.AvailableOperators() {
-		registered[op] = true
+	core := liveExpressionClient(t)
+	catalog, err := core.Catalog(context.Background(), nil)
+	require.NoError(t, err, "fetch expression catalog from core")
+
+	registered := make(map[string]bool, len(catalog.Operators))
+	for _, op := range catalog.Operators {
+		registered[op.Name] = true
 	}
 
 	types := []intent.StrategyType{
@@ -93,14 +96,14 @@ func TestDefaultSignalExpressionUsesRegisteredOperatorsOnly(t *testing.T) {
 		}
 		for _, name := range extractCalledNames(formula) {
 			if !registered[name] {
-				t.Errorf("策略类型 %q 的模板用了未注册的算子 %q（表达式 %q）", st, name, formula)
+				t.Errorf("策略类型 %q 的模板用了 core 目录里没有的算子 %q（表达式 %q）", st, name, formula)
 			}
 		}
 	}
 }
 
 // extractCalledNames 从表达式里抽出所有 `name(` 形式的调用名。
-// 只做词法抽取（够用即可）：不解析语法，因为本测试只关心「名字是否在注册表」。
+// 只做词法抽取（够用即可）：不解析语法，因为本测试只关心「名字是否在目录」。
 func extractCalledNames(formula string) []string {
 	var out []string
 	seen := make(map[string]bool)

@@ -4,57 +4,65 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
 	"tellurion-agent/pkg/ai"
-	"tellurion/pkg/expression"
+	"tellurion-agent/pkg/ai/client"
 )
 
 // factorDSLSyntax 生成研究提示词里的「Factor Expression DSL Syntax」段。
 //
-// OBS-08：字段与算子的清单**从注册表派生**（pkg/expression 是唯一事实源），
-// 不再硬编码。硬编码的代价是双向的 —— 2026-10-09 实测该段曾广告 `market_cap`
+// OBS-08：字段与算子的清单**从 core 的表达式目录派生**（`GET
+// /api/expression/catalog` 是唯一事实源），不再硬编码、也不再读本仓
+// 曾经编译依赖的 `tellurion/pkg/expression`（QT-17 S3-c-4）。
+// 硬编码的代价是双向的 —— 2026-10-09 实测该段曾广告 `market_cap`
 // （provider 永不可供的幻影字段，会让 AI 产出必然过不了闸门的表达式），
 // 同时漏掉 `ps`/`roa`/`revenue`/`profit` 与 9 个算子
 // （`ts_max`/`ts_min`/`ts_sum`/`ts_ewma`/`ts_rma`/`ts_kalman`/`cs_neutralize`/
 // `neg`/`exp` 与全部比较算子），让 AI 白白少用已有能力。
-// factorDSLSyntax 渲染提示词里的 DSL 语法段（算子与字段清单一律**从注册表
-// 派生**，不硬编码）。
 //
-// avail 是字段可用性地图（来自 expression.FieldAvailability 的真库探测）：
-//   - 非 nil 时：只把**有数据**的字段列进「可用」，并把「已登记但源表为空」
-//     的字段单列一段、明确禁止使用 —— 这是 OBS-08 切片 2 的落点；
-//   - nil 时：未做可用性探测，退回能力层全集（不列「不可用」段）。
+// catalog 是 core 目录快照：
+//   - 非 nil 时：可用字段按来源列进「可用」，`unavailable` 的字段单列一段、
+//     明确禁止使用 —— 这是 OBS-08 切片 2 的落点；
+//   - nil 时：未注入目录，只如实说明「目录不可用」，不凭记忆编清单。
 //
 // ─── 为什么要单列「不可用」而不是干脆不提 ──────────────────────────
 // 实测 stock_fundamentals / stock_sector_map 均为 0 行，于是 pe/pb/ps/roe/
-// roa/revenue/profit/sector 这 8 个字段语法合法、过闸门、provider 也认，
+// roa/revenue/profit 这些字段语法合法、过闸门、provider 也认，
 // **但求值必然拿不到数据**。只把它们从清单里删掉，AI 会因为「记得有这些
 // 字段」而反复尝试；明确标注「已知但当前无数据、别用」，才能让它一次就绕开。
-func factorDSLSyntax(avail map[string]bool) string {
+func factorDSLSyntax(catalog *client.ExpressionCatalog) string {
+	if catalog == nil {
+		const missing = "(not available — inject GET /api/expression/catalog before prompting)"
+		return "- Data fields: " + missing + "\n" +
+			"- Time-series ops: " + missing + "\n" +
+			"- Cross-sectional ops: " + missing + "\n" +
+			"- Math ops: " + missing + "\n" +
+			"- Arithmetic / comparison: " + missing
+	}
+
 	var tsOps, csOps, mathOps, binOps []string
-	for _, op := range expression.AvailableOperators() { // 已按字典序
-		switch {
-		case expression.IsTimeSeriesOp(op):
-			tsOps = append(tsOps, op)
-		case expression.IsCrossSectionalOp(op):
-			csOps = append(csOps, op)
-		case expression.IsMathOp(op):
-			mathOps = append(mathOps, op)
-		default:
-			binOps = append(binOps, op)
+	for _, op := range catalog.Operators { // core 已按字典序
+		switch op.Category {
+		case "ts":
+			tsOps = append(tsOps, op.Name)
+		case "cs":
+			csOps = append(csOps, op.Name)
+		case "unary":
+			mathOps = append(mathOps, op.Name)
+		default: // binary / 未知类别：不臆造分组，归到算术比较段
+			binOps = append(binOps, op.Name)
 		}
 	}
 
-	fields := expression.AvailableDataFieldsWith(avail)
+	fields, unusable := promptFields(catalog)
 	out := "- Data fields: " + strings.Join(fields, ", ") + "\n"
-	if avail != nil {
-		if unusable := unavailableDataFields(avail); len(unusable) > 0 {
-			out += "- UNUSABLE NOW (registered, but their source table is EMPTY — " +
-				"do NOT use them; any formula using them yields no data): " +
-				strings.Join(unusable, ", ") + "\n"
-		}
+	if len(unusable) > 0 {
+		out += "- UNUSABLE NOW (registered, but their source table is EMPTY — " +
+			"do NOT use them; any formula using them yields no data): " +
+			strings.Join(unusable, ", ") + "\n"
 	}
 	out += "- Time-series ops: " + strings.Join(tsOps, ", ") + "\n" +
 		"- Cross-sectional ops: " + strings.Join(csOps, ", ") + "\n" +
@@ -63,32 +71,60 @@ func factorDSLSyntax(avail map[string]bool) string {
 	return out
 }
 
-// unavailableDataFields 返回「已登记但当前无数据」的数据字段（升序）。
-// avail 为 nil 时返回空（未探测 = 不做不可用判断）。
-func unavailableDataFields(avail map[string]bool) []string {
-	if avail == nil {
-		return nil
+// promptFields 把目录拆成（可用字段, 当前无数据字段），两段都升序。
+//
+// `source=group`（sector 这类 cs_neutralize 分组标签）不是数据字段，不列。
+// `unknown`（core 没装可用性探测）不冒充不可用 —— 列进可用段。
+func promptFields(catalog *client.ExpressionCatalog) (usable, unusable []string) {
+	for _, f := range catalog.Fields {
+		if f.Source == "group" {
+			continue
+		}
+		if f.Status == "unavailable" {
+			unusable = append(unusable, f.Name)
+			continue
+		}
+		usable = append(usable, f.Name)
 	}
-	out := make([]string, 0)
-	for _, f := range expression.AvailableDataFields() {
-		if !avail[f] {
-			out = append(out, f)
+	sort.Strings(usable)
+	sort.Strings(unusable)
+	return usable, unusable
+}
+
+// fieldUsable 报告某个字段在目录快照下是否可当作「有数据」使用。
+//
+// 目录为 nil（未探测）时一律视为可用 —— 与旧 SetAvailability(nil) 的语义一致：
+// 没探测 ≠ 不可用。probed 且 unavailable 才是明确不可用。
+func fieldUsable(catalog *client.ExpressionCatalog, name string) bool {
+	if catalog == nil {
+		return true
+	}
+	for _, f := range catalog.Fields {
+		if f.Name == name {
+			return f.Status != "unavailable"
 		}
 	}
-	return out
+	return false
 }
 
 // ResearchAgent generates factor hypotheses and validates them
 type ResearchAgent struct {
 	llm *ai.Client
 
-	// availability 是字段可用性地图（来自 expression.FieldAvailability 的
-	// 真库探测）。nil = 尚未探测（提示词退回能力层全集）。
+	// catalog 是 core 表达式目录的快照（`GET /api/expression/catalog`）。
+	// nil = 尚未注入（提示词如实说明目录不可用）。
 	//
-	// 之所以做成**可注入**而非构造时直连 DB：本包（AI 侧）不该替调用方决定
-	// 数据源，且 ResearchAgent 当前**零生产构造点**（只有测试在用），留注入
-	// 口比在构造函数里塞一个 pool 更轻。
-	availability map[string]bool
+	// 之所以做成**可注入**而非构造时直连：本包（AI 侧）不该替调用方决定
+	// 数据源；调用方从 analysis-service 取一次目录注入即可。
+	catalog *client.ExpressionCatalog
+
+	// validator 用于 ValidateFormula（同样是注入的 HTTP 客户端）。
+	validator FormulaValidator
+}
+
+// FormulaValidator 是公式校验的最小面（`*client.ExpressionClient` 满足）。
+type FormulaValidator interface {
+	Validate(ctx context.Context, expression string) (*client.ExpressionValidation, error)
 }
 
 // NewResearchAgent creates a new research agent
@@ -98,12 +134,17 @@ func NewResearchAgent() *ResearchAgent {
 	}
 }
 
-// SetAvailability 注入字段可用性地图（OBS-08 切片 2）。
+// SetCatalog 注入 core 的表达式目录快照（OBS-08 切片 2，QT-17 S3-c-4）。
 //
-// 调用方应在生成假设前用 expression.FieldAvailability(ctx, probe) 探测一次
-// 并注入；不注入则提示词不做可用性过滤（行为与切片 2 之前一致）。
-func (a *ResearchAgent) SetAvailability(avail map[string]bool) {
-	a.availability = avail
+// 调用方应在生成假设前取一次 `GET /api/expression/catalog` 并注入；
+// 不注入则提示词如实说明目录不可用（不凭记忆编字段清单）。
+func (a *ResearchAgent) SetCatalog(catalog *client.ExpressionCatalog) {
+	a.catalog = catalog
+}
+
+// SetValidator 注入公式校验器（core 的 `POST /api/expression/validate`）。
+func (a *ResearchAgent) SetValidator(v FormulaValidator) {
+	a.validator = v
 }
 
 // FactorHypothesis represents a generated factor hypothesis
@@ -126,7 +167,7 @@ func (a *ResearchAgent) GenerateHypothesis(ctx context.Context, topic string) (*
 	// Quality 示例依赖基本面字段；源表为空时它反而是**误导**（提示词自己
 	// 示范了一个必然拿不到数据的写法），故不可用则换成明确的跳过说明。
 	qualityExample := "- Quality: roe / pe"
-	if a.availability != nil && (!a.availability["roe"] || !a.availability["pe"]) {
+	if !fieldUsable(a.catalog, "roe") || !fieldUsable(a.catalog, "pe") {
 		qualityExample = "- Quality: (SKIP — fundamental fields have no data right now; prefer price/volume factors)"
 	}
 
@@ -155,7 +196,7 @@ Output ONLY valid JSON:
   "category": "momentum",
   "formula": "ts_pct_change(close, 20)",
   "rationale": "explanation"
-}`, topic, factorDSLSyntax(a.availability), qualityExample)
+}`, topic, factorDSLSyntax(a.catalog), qualityExample)
 
 	messages := []ai.ChatMessage{
 		{Role: "system", Content: "You are a quantitative research analyst. Output ONLY valid JSON."},
@@ -229,19 +270,24 @@ func parseFactorHypothesisJSON(resp string) (FactorHypothesis, error) {
 	}, nil
 }
 
-// ValidateFormula validates a factor formula by parsing it
-func (a *ResearchAgent) ValidateFormula(formula string) (*expression.Expression, error) {
-	parser := expression.NewParser()
-	expr, err := parser.Parse(formula)
+// ValidateFormula validates a factor formula via core's static gate.
+//
+// QT-17 S3-c-4：判定的唯一实现是 `POST /api/expression/validate`（Parse +
+// Expression.Validate）。本方法只把「服务没答」与「公式不合法」分开：
+// 前者是 error，后者也是 error（带 core 的阶段与原因），绝不返回一个
+// 看似合法的空壳对象。
+func (a *ResearchAgent) ValidateFormula(ctx context.Context, formula string) (*client.ExpressionValidation, error) {
+	if a.validator == nil {
+		return nil, fmt.Errorf("formula validation unavailable: no expression validator configured")
+	}
+	verdict, err := a.validator.Validate(ctx, formula)
 	if err != nil {
 		return nil, fmt.Errorf("formula validation failed: %w", err)
 	}
-
-	if err := expr.Validate(); err != nil {
-		return nil, fmt.Errorf("expression validation failed: %w", err)
+	if !verdict.Valid {
+		return nil, fmt.Errorf("expression validation failed at stage %q: %s", verdict.Stage, verdict.Error)
 	}
-
-	return expr, nil
+	return verdict, nil
 }
 
 // generateFallbackHypothesis creates a simple hypothesis when LLM fails

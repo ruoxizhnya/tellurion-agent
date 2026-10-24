@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -17,6 +18,14 @@ func TestNewResearchAgent(t *testing.T) {
 
 func TestResearchAgent_ValidateFormula(t *testing.T) {
 	agent := NewResearchAgent()
+	// QT-17 S3-c-4：校验走 core 的表达式端点，这里用替身喂判定。
+	agent.SetValidator(&stubValidator{
+		invalid: map[string]string{
+			"":        "expression is required",
+			"close +": "unexpected end of expression",
+		},
+		inputs: map[string][]string{"close": {"close"}, "ts_mean(close, 20)": {"close"}},
+	})
 
 	tests := []struct {
 		name    string
@@ -32,15 +41,25 @@ func TestResearchAgent_ValidateFormula(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			expr, err := agent.ValidateFormula(tt.formula)
+			verdict, err := agent.ValidateFormula(context.Background(), tt.formula)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateFormula() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if !tt.wantErr && expr == nil {
-				t.Error("Expected non-nil expression")
+			if !tt.wantErr && verdict == nil {
+				t.Error("Expected non-nil verdict")
 			}
 		})
 	}
+}
+
+// TestResearchAgent_ValidateFormula_NoValidatorFailsClosed：没注入校验器时
+// 不许本地猜一个「合法」结论。
+func TestResearchAgent_ValidateFormula_NoValidatorFailsClosed(t *testing.T) {
+	agent := NewResearchAgent()
+	verdict, err := agent.ValidateFormula(context.Background(), "close")
+	require.Error(t, err)
+	require.Nil(t, verdict)
+	assert.Contains(t, err.Error(), "no expression validator")
 }
 
 func TestGenerateFallbackHypothesis(t *testing.T) {

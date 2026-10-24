@@ -3,6 +3,8 @@ package builtin
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,12 +19,12 @@ import (
 // ═══════════════════════════════════════════════════════════════════════
 
 func TestValidateFactorTool_Name(t *testing.T) {
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	assert.Equal(t, "validate_factor", tt.Name())
 }
 
 func TestValidateFactorTool_Description(t *testing.T) {
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	desc := tt.Description()
 	assert.NotEmpty(t, desc)
 	// Description starts with "Validate" (capital V) — case-sensitive match.
@@ -31,7 +33,7 @@ func TestValidateFactorTool_Description(t *testing.T) {
 }
 
 func TestValidateFactorTool_Parameters(t *testing.T) {
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	params := tt.Parameters()
 	require.Len(t, params, 1)
 	assert.Equal(t, "expression", params[0].Name)
@@ -40,7 +42,7 @@ func TestValidateFactorTool_Parameters(t *testing.T) {
 }
 
 func TestValidateFactorTool_OutputSchema(t *testing.T) {
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	schema := tt.OutputSchema()
 	assert.Equal(t, "object", schema.Type)
 	require.NotEmpty(t, schema.Fields)
@@ -64,7 +66,7 @@ func TestValidateFactorTool_OutputSchema(t *testing.T) {
 }
 
 func TestValidateFactorTool_Execute_ValidExpression(t *testing.T) {
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	args := map[string]interface{}{
 		"expression": "ts_rank(close, 20)",
 	}
@@ -104,7 +106,7 @@ func TestValidateFactorTool_Execute_ValidExpression(t *testing.T) {
 }
 
 func TestValidateFactorTool_Execute_ComplexExpression(t *testing.T) {
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	args := map[string]interface{}{
 		"expression": "(close - ts_mean(close, 20)) / ts_std(close, 20)",
 	}
@@ -120,7 +122,7 @@ func TestValidateFactorTool_Execute_ComplexExpression(t *testing.T) {
 
 func TestValidateFactorTool_Execute_InvalidSyntax(t *testing.T) {
 	// Missing closing paren — syntax error.
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	args := map[string]interface{}{
 		"expression": "ts_rank(close, 20",
 	}
@@ -162,7 +164,7 @@ func TestValidateFactorTool_Execute_EmptyFormula(t *testing.T) {
 	// would also reject it. Verify the parser path returns valid=false.
 	// Actually requireString rejects empty strings with ErrInvalidArgs,
 	// so this exercises the arg-validation path, not the parser path.
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	args := map[string]interface{}{
 		"expression": "",
 	}
@@ -173,7 +175,7 @@ func TestValidateFactorTool_Execute_EmptyFormula(t *testing.T) {
 }
 
 func TestValidateFactorTool_Execute_MissingExpression(t *testing.T) {
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	args := map[string]interface{}{}
 	_, err := tt.Execute(context.Background(), args)
 	require.Error(t, err)
@@ -182,7 +184,7 @@ func TestValidateFactorTool_Execute_MissingExpression(t *testing.T) {
 }
 
 func TestValidateFactorTool_Execute_WrongType(t *testing.T) {
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	args := map[string]interface{}{
 		"expression": 42,
 	}
@@ -193,7 +195,7 @@ func TestValidateFactorTool_Execute_WrongType(t *testing.T) {
 }
 
 func TestValidateFactorTool_RegisterInRegistry(t *testing.T) {
-	tt := NewValidateFactorTool()
+	tt := newValidateTool(t)
 	reg := tools.NewRegistry()
 	require.NoError(t, reg.Register(tt))
 
@@ -204,6 +206,61 @@ func TestValidateFactorTool_RegisterInRegistry(t *testing.T) {
 	info := reg.List()
 	require.Len(t, info, 1)
 	assert.Equal(t, "validate_factor", info[0].Name)
+}
+
+// TestValidateFactorTool_DelegatesVerdictToCore 钉住 QT-17 S3-c-4 的判据：
+// 工具不自己解析表达式，core 说 valid=false 就原样映射成 L1 失败（含阶段与
+// 原因），绝不「本地再判一次」或把服务故障当成合法。
+func TestValidateFactorTool_DelegatesVerdictToCore(t *testing.T) {
+	tt, stub := newStubValidateTool(t)
+
+	res, err := tt.Execute(context.Background(), map[string]interface{}{
+		// 语法上能 parse，但 core 的算子闸门不认（OBS-06 的现场）。
+		"expression": "CROSS(MA(close, 5), MA(close, 20))",
+	})
+	require.NoError(t, err, "core's invalid verdict is a result, not a tool error")
+	m := res.(map[string]interface{})
+	assert.False(t, m["valid"].(bool))
+	assert.False(t, m["passed"].(bool))
+	assert.Equal(t, GateReasonSyntaxError, m["reason"])
+	assert.Contains(t, m["error"].(string), "CROSS")
+	assert.Equal(t, int32(1), stub.validateCalls, "exactly one coarse validate call")
+
+	// 失败建议必须附上目录里的字段状态：不可用字段被点名，且不消失。
+	rec := m["recommendation"].(string)
+	assert.Contains(t, rec, "close", "usable fields should be advertised")
+	assert.Contains(t, rec, "当前无数据", "unavailable fields must be flagged")
+	assert.Contains(t, rec, "pe", "unavailable field `pe` must not disappear from the hint")
+	assert.NotContains(t, rec, "sector", "group labels are not data fields")
+}
+
+// TestValidateFactorTool_ServiceFailureIsToolError：core 不可用 ≠ 表达式不合法。
+func TestValidateFactorTool_ServiceFailureIsToolError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream down", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	tt := NewValidateFactorTool(client.NewExpressionClient(srv.URL, client.WithInsecureLoopback()))
+	res, err := tt.Execute(context.Background(), map[string]interface{}{"expression": "close"})
+	require.Error(t, err, "a 503 must not be reported as valid=false")
+	assert.Nil(t, res)
+	assert.Contains(t, err.Error(), "unavailable")
+}
+
+// TestValidateFactorTool_CatalogUnavailableIsStated：目录拉不到时只给基础
+// 建议并明确说明清单缺失，不编造字段。
+func TestValidateFactorTool_CatalogUnavailableIsStated(t *testing.T) {
+	tt, stub := newStubValidateTool(t)
+	stub.catalogErr = true
+
+	res, err := tt.Execute(context.Background(), map[string]interface{}{
+		"expression": "ts_rank(close, 20",
+	})
+	require.NoError(t, err)
+	rec := res.(map[string]interface{})["recommendation"].(string)
+	assert.Contains(t, rec, "语法错误")
+	assert.Contains(t, rec, "字段目录暂不可用")
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -422,7 +479,7 @@ func TestComputeFactorICTool_RegisterInRegistry(t *testing.T) {
 // This catches integration regressions early (e.g. a parser change that
 // breaks both tools simultaneously).
 func TestPipeline_ValidateThenComputeIC(t *testing.T) {
-	validateTool := NewValidateFactorTool()
+	validateTool := newValidateTool(t)
 	srv := newFactorTestServer()
 	defer srv.close()
 	icTool := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))

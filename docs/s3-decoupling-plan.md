@@ -165,6 +165,16 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 > - **破坏验证**：把 `http_runner.go` 的 `req.StrategyParams = strategyParams` 临时改成丢弃参数 ⇒ `TestHTTPBacktestRunner_SubmitsIndexAndParams` 红（`strategy_params` 缺失）；逐字节还原（SHA256 一致）后同一用例绿。
 > - **未取到的证据（如实）**：本机无 PG（`127.0.0.1:5432` 拒绝连接）且 data-service 未起，**未跑真库 A/B 指标对拍**（Sharpe / 总收益 / 交易数）。现有证据是请求形状+响应逐字段映射的单测；端到端腿 `TestData01_IndexUniverse_EndToEndBacktest` 已改为打活的 `ANALYSIS_URL`，有库环境可直接取证。
 
+> **S3-c-4 施工记录（expression 校验 / 目录 HTTP 化，2026-10-25，commit 随本行落）**：
+> - **范围**：`tellurion/pkg/expression` 的 4 个生产文件（`tools/builtin/factor_tools.go`、`agents/validate.go`、`agents/research.go`、`pipeline/discovery.go`）与 6 个测试文件全部清零。静态校验接 `POST /api/expression/validate`（core 内 Parse + `Expression.Validate` 同一条实现），字段/算子清单接 `GET /api/expression/catalog`。
+> - **判定归属**：`validate_factor` 把 core 的 `{valid,inputs,ast,error,stage}` 原样映射成 L1 GateDecision；`valid=false` 是结果，非 200 / 传输失败是 **Go error**（服务没答 ≠ 公式不合法，fail-closed）。
+> - **OBS-08 保留**：失败建议的字段清单改从目录派生；`unavailable`（源表为空）与 `field_not_registered` 都**保留为结构化条目**并点名禁用（`TestValidateFactorTool_DelegatesVerdictToCore` 断言 `pe` 不消失、`sector` 不被当数据字段）。目录拉不到时建议里明说「字段目录暂不可用」，不编清单。
+> - **研究/策略提示词**：`factorDSLSyntax` 改为吃 `client.ExpressionCatalog`（按 core 的 `category` 分组 ts/cs/unary/binary；字段排除 `source=group`）。未注入目录时如实输出 `not available`，不凭记忆编字段。
+> - **`ValidateAgent`**：L1 通过注入的 `ExpressionValidator` 走 HTTP；L2 不再持有 evaluator/data provider —— 改为 `FactorSampler`（`*client.FactorClient`）打 core 的 `POST /api/factor/compute`，NaN 比例与方差判定留在本仓。**如实登记的行为变化**：① L2 取数从「进程内 sample provider」改为「默认票池 × 2023 全年」；② L1 的「复杂度 >10 节点警告」删除（core 的判定响应不返回节点数）；③ `NewValidateAgent` / `NewDiscoveryPipeline` 的形参变化（`DataProvider` 移除，改注入 `ExpressionValidator` / `SetFactorSampler`）。
+> - **测试策略**：单测用替身喂 **core 的判定**（请求形状 + 映射 + hint 保留）；目录/闸门的一致性改 **env-gated**：设 `ANALYSIS_URL` 后 `TestExpressionValidate_ParityWithCore`、`TestDefaultSignalExpressionPassesGate`、`TestMutationCandidates*` 打真 core，未设时 `t.Skip`（**skip 不算通过**）。
+> - **验收（真实输出）**：`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./... -count=1` → 全部 `ok`（`cmd/ai 0.558s`、`pkg/ai/agents 0.236s`、`pkg/ai/client 0.420s`、`pkg/ai/tools/builtin 0.249s`、`pkg/ai/yaml 0.177s`，无 FAIL）。`grep '"tellurion/pkg/expression"'` **零命中**（生产与测试）。core 实现包 import 面：生产 10 → **6 处 / 7 → 3 文件**，测试 19 → **12 处 / 9 → 3 文件**；合计 **29 处 / 16 文件 → 18 处 / 6 文件**。
+> - **破坏验证**：把 `factor_tools.go` 的 `if !verdict.Valid {` 临时改成 `if false {` ⇒ `TestValidateFactorTool_DelegatesVerdictToCore` / OBS-06 / OBS-08 三条红（invalid 被当成通过）；逐字节还原（SHA256 一致）后同一组用例绿。
+
 ### S3-d｜装配收尾 + 测试腿清零 + 删 `replace`
 
 - `bootstrap`：工具腿（`logging` / `observability` / `httpclient` / `httpserver.ApplyGinMode`）换 kit；服务生命周期（Router 组装 / 启动 / 优雅退出）本仓自持；引擎与 store 装配腿删除。**core `bootstrap` 的 import 在这一批才彻底消失**（S3-a/b 期间它还留着引擎装配调用）。

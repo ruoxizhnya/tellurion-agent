@@ -10,8 +10,6 @@ package agents
 import (
 	"strings"
 	"testing"
-
-	"tellurion/pkg/expression"
 )
 
 func TestStrategyDomainGuidanceKeepsKeyKnowledge(t *testing.T) {
@@ -37,21 +35,27 @@ func TestStrategyDomainGuidanceKeepsKeyKnowledge(t *testing.T) {
 	}
 }
 
-// TestStrategyPromptIncludesDSLSyntax 策略生成提示词必须带上从注册表派生的
-// DSL 语法段（原先只有两个硬编码示例 factor，AI 无从知道能用什么）。
+// TestStrategyPromptIncludesDSLSyntax 策略生成提示词必须带上从 core 目录派生的
+// DSL 语法段（QT-17 S3-c-4：字段/算子清单来自 GET /api/expression/catalog，
+// 不再是本仓硬编码或 import 注册表）。
 func TestStrategyPromptIncludesDSLSyntax(t *testing.T) {
-	got := factorDSLSyntax(nil) // 生成侧与研究侧共用同一段派生语法
-	for _, op := range expression.AvailableOperators() {
-		if !strings.Contains(got, op) {
-			t.Errorf("策略提示词的 DSL 段缺少算子 %q", op)
+	catalog := allAvailableCatalog()
+	got := factorDSLSyntax(catalog) // 生成侧与研究侧共用同一段派生语法
+
+	for _, op := range catalog.Operators {
+		if !strings.Contains(got, op.Name) {
+			t.Errorf("策略提示词的 DSL 段缺少算子 %q", op.Name)
 		}
 	}
-	for _, f := range expression.AvailableDataFields() {
-		if !strings.Contains(got, f) {
-			t.Errorf("策略提示词的 DSL 段缺少字段 %q", f)
+	for _, f := range catalog.Fields {
+		if f.Source == "group" {
+			continue
+		}
+		if !strings.Contains(got, f.Name) {
+			t.Errorf("策略提示词的 DSL 段缺少字段 %q", f.Name)
 		}
 	}
 	// 幻影字段不得出现（OBS-08：广告不存在的字段 = AI 必然产出过不了闸门的表达式）。
 	// 清单单一来源 + 过时自检见 research_prompt_test.go 的 assertNoPhantomAdvertised。
-	assertNoPhantomAdvertised(t, got)
+	assertNoPhantomAdvertised(t, got, catalog)
 }

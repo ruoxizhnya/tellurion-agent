@@ -3,24 +3,24 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/expression"
 )
 
 // ─── ValidateFactorTool ────────────────────────────────────────────────
 //
-// L1 validation gate: checks that a factor expression parses successfully
-// under the expression DSL grammar **and passes the operator/field gate**
-// (`expression.Expression.Validate`). Does NOT compute values — that is
-// the job of factor.compute / compute_factor_ic. Cheap (<1ms), so an
-// agent should always call this before committing to a longer compute.
+// L1 validation gate: delegates static validation (Parse + operator/field
+// gate) to core's `POST /api/expression/validate` (QT-69 / QT-17 S3-c-4).
+// The local parser/evaluator is gone: the DSL grammar and its fail-closed
+// gate have exactly one implementation, in core. This method does NOT
+// compute values — that is the job of factor.compute / compute_factor_ic.
 //
-// OBS-06: parsing alone is not enough. `CROSS(MA(close,5), MA(close,20))`
-// parses (both are just function-call syntax) but both operators are
-// unknown. The gate is **fail-closed**: any operator name not in the
-// registry, any unknown data field, any arity mismatch → valid=false.
+// OBS-06 semantics are preserved by delegation: parsing alone is not
+// enough. `CROSS(MA(close,5), MA(close,20))` parses (function-call
+// syntax) but both operators are unknown; core's gate returns valid=false.
 //
 // Tool name: "validate_factor"
 // Input: expression (required)
@@ -30,25 +30,28 @@ import (
 // GateDecision (see gate.go). They let Hermes uniformly check "did this
 // gate pass?" without parsing tool-specific fields. For L1:
 //   - level    = "L1"
-//   - passed   = valid (parse + gate result)
+//   - passed   = valid (core's parse + gate verdict)
 //   - reason   = "passed" or "syntax_error"
 //   - recommendation = LLM-facing actionable hint (Chinese)
 //
-// Note on error semantics: a parse failure OR a gate failure is NOT
-// returned as a Go error from Execute — it's a successful validation
-// result with valid=false. The agent reads the `valid` flag and decides
-// whether to retry. Tool-level errors (missing args) are still returned
-// as ErrInvalidArgs.
-type ValidateFactorTool struct{}
+// Error semantics: core's valid=false is a RESULT, not a Go error. A
+// transport failure / non-200 (core unreachable, 401, 503) IS a Go error —
+// "the service did not answer" is not "the expression is invalid", and
+// silently returning valid=false would let a broken dialect look like a
+// broken formula.
+type ValidateFactorTool struct {
+	c *client.ExpressionClient
+}
 
 var _ tools.Tool = (*ValidateFactorTool)(nil)
 
-// NewValidateFactorTool constructs a ValidateFactorTool. No dependencies
-// are injected because expression.Parser carries per-call mutable state
-// (tokens, pos) and is not safe for concurrent use across goroutines.
-// Instead, Execute creates a fresh Parser per call — cheap and safe.
-func NewValidateFactorTool() *ValidateFactorTool {
-	return &ValidateFactorTool{}
+// NewValidateFactorTool constructs a ValidateFactorTool backed by c.
+// Panics if c is nil — wiring bug, fail loud at startup.
+func NewValidateFactorTool(c *client.ExpressionClient) *ValidateFactorTool {
+	if c == nil {
+		panic("builtin: NewValidateFactorTool called with nil ExpressionClient")
+	}
+	return &ValidateFactorTool{c: c}
 }
 
 func (t *ValidateFactorTool) Name() string { return "validate_factor" }
@@ -91,49 +94,35 @@ func (t *ValidateFactorTool) Execute(ctx context.Context, args map[string]interf
 		return nil, err
 	}
 
-	// Fresh parser per call: expression.Parser holds mutable tokens/pos
-	// state on the receiver, so a shared instance would race across
-	// concurrent HTTP requests. NewParser is allocation-cheap.
-	parser := expression.NewParser()
-	parsed, err := parser.Parse(expr)
+	verdict, err := t.c.Validate(ctx, expr)
 	if err != nil {
-		// Parse failure is a validation result, not a tool error. The
-		// agent inspects valid=false and the error string to retry.
+		// 服务没答 ≠ 表达式不合法：fail-closed，不伪造 valid=false。
+		return nil, fmt.Errorf("validate_factor: expression validation service unavailable: %w", err)
+	}
+
+	if !verdict.Valid {
 		passed := false
 		return map[string]interface{}{
 			"valid":          false,
 			"inputs":         []string{},
 			"ast":            "",
-			"error":          err.Error(),
+			"error":          verdict.Error,
 			"level":          "L1",
 			"passed":         passed,
 			"reason":         gateReasonL1(passed),
-			"recommendation": l1FailureRecommendation(),
+			"recommendation": t.l1FailureRecommendation(ctx),
 		}, nil
 	}
 
-	// OBS-06：Parse 成功 ≠ 合法。必须再跑语法 + 算子闸门
-	// （expression.Expression.Validate）。fail-closed —— 未登记算子 /
-	// 未知字段 / 参数个数不符，一律不通过。
-	if err := parsed.Validate(); err != nil {
-		passed := false
-		return map[string]interface{}{
-			"valid":          false,
-			"inputs":         []string{},
-			"ast":            "",
-			"error":          err.Error(),
-			"level":          "L1",
-			"passed":         passed,
-			"reason":         gateReasonL1(passed),
-			"recommendation": l1FailureRecommendation(),
-		}, nil
+	inputs := append([]string(nil), verdict.Inputs...)
+	if inputs == nil {
+		inputs = []string{}
 	}
-
 	passed := true
 	return map[string]interface{}{
 		"valid":          true,
-		"inputs":         parsed.Inputs,
-		"ast":            parsed.AST.String(),
+		"inputs":         inputs,
+		"ast":            verdict.AST,
 		"error":          "",
 		"level":          "L1",
 		"passed":         passed,
@@ -149,8 +138,91 @@ func (t *ValidateFactorTool) Execute(ctx context.Context, args map[string]interf
 //
 // 只改文本内容 —— JSON 输出字段结构（valid/inputs/ast/error/level/
 // passed/reason/recommendation）保持不变。
-func l1FailureRecommendation() string {
-	return gateRecommendationL1(false) + " " + expression.AvailableFieldsHint()
+//
+// QT-17 S3-c-4：字段清单改为从 core 的 `GET /api/expression/catalog` 取。
+// 目录拿不到时只给基础建议并**明确说明**清单缺失，不拿过期/凭空清单糊弄。
+func (t *ValidateFactorTool) l1FailureRecommendation(ctx context.Context) string {
+	rec := gateRecommendationL1(false)
+	catalog, err := t.c.Catalog(ctx, nil)
+	if err != nil {
+		return rec + " （字段目录暂不可用，无法附上合法字段清单）"
+	}
+	if hint := fieldsHint(catalog); hint != "" {
+		rec += " " + hint
+	}
+	return rec
+}
+
+// 字段状态 / 来源字面量与 core `cmd/analysis/handlers_expression.go` 一致。
+const (
+	fieldStatusAvailable   = "available"
+	fieldStatusUnavailable = "unavailable"
+	fieldStatusUnknown     = "unknown"
+
+	fieldSourceGroup = "group"
+)
+
+// fieldsHint 把目录渲染成「（可用字段：market: …；fundamentals: …）」。
+//
+// 语义要点（OBS-08 切片 2）：
+//   - `unavailable` 的字段**不能从清单里消失** —— 已登记但源表为空时，
+//     必须在提示里点名「当前无数据、别用」，否则 AI 会反复尝试注定失败的公式；
+//   - `unknown`（core 没装可用性探测）不等于不可用，列进可用清单；
+//   - `source=group` 是 cs_neutralize 的分组标签，不是数据字段，不列。
+func fieldsHint(c *client.ExpressionCatalog) string {
+	if c == nil {
+		return ""
+	}
+
+	bySource := map[string][]string{}
+	var unusable []string
+	for _, f := range c.Fields {
+		if f.Source == fieldSourceGroup {
+			continue
+		}
+		switch f.Status {
+		case fieldStatusUnavailable:
+			unusable = append(unusable, f.Name)
+		default: // available / unknown（未探测 ≠ 不可用）
+			bySource[f.Source] = append(bySource[f.Source], f.Name)
+		}
+	}
+
+	// 来源顺序固定：market → fundamentals → activity → 其余按名字排序，
+	// 保证同一份目录每次渲染一致（提示词可断言、diff 可读）。
+	order := []string{"market", "fundamentals", "activity"}
+	seen := map[string]bool{}
+	for _, src := range order {
+		seen[src] = true
+	}
+	others := make([]string, 0, len(bySource))
+	for src := range bySource {
+		if !seen[src] {
+			others = append(others, src)
+		}
+	}
+	sort.Strings(others)
+	order = append(order, others...)
+
+	parts := make([]string, 0, len(order))
+	for _, src := range order {
+		fields := bySource[src]
+		if len(fields) == 0 {
+			continue
+		}
+		sort.Strings(fields)
+		parts = append(parts, src+": "+strings.Join(fields, ", "))
+	}
+
+	hint := ""
+	if len(parts) > 0 {
+		hint = "（可用字段：" + strings.Join(parts, "；") + "）"
+	}
+	if len(unusable) > 0 {
+		sort.Strings(unusable)
+		hint += "（当前无数据、不要使用：" + strings.Join(unusable, ", ") + "）"
+	}
+	return hint
 }
 
 // ─── ComputeFactorICTool ───────────────────────────────────────────────

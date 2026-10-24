@@ -38,11 +38,19 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
 ### 研究域 / 因子假设读取
 - `research.profile` / `research.conclusion` / `research.question` 与 `factor_hypothesis` 的**读面已切 `ai.*`**（自有 `aistore`）；`factor_hypothesis` 的 builtin 种子启动时 `ON CONFLICT DO NOTHING` 镜像播种。研究域三表**目前没有写入方**（core 侧也无研究域 handler，真库 0 行）——将来接写时直写 `ai.*`，不得落 legacy `research.*`。
 
+### 表达式校验与目录（QT-17 S3-c-4）
+- `validate_factor` 工具（L1 闸门）把表达式发到 core 的 `POST /api/expression/validate`，把 `{valid,inputs,ast,error,stage}` 原样映射成 GateDecision；`valid=false` 是判定，非 200 是工具错误。
+- 失败建议里的合法字段清单来自 `GET /api/expression/catalog`；`unavailable`（源表为空 / 未登记）字段**保留在目录里并点名禁用**，不会从数组消失。目录拉不到时建议明说清单缺失。
+- 研究与策略生成的 DSL 语法段同样从 catalog 派生（按 core 的算子 category 分组；`source=group` 不是数据字段，不列）。
+- L2 的因子值由 core 的 `POST /api/factor/compute` 按默认票池 × 2023 全年算出；NaN 比例与方差判定留在本仓。本仓进程内**没有** DSL parser / evaluator。
+
 ## 3. 失败模式（每一处 fail-closed 都要能指名）
 
 | 失败点 | 症状 | 兜底 |
 |---|---|---|
 | core 回测不可达 / 5xx | attempt 失败 | 记录失败原因；不重试（重试只会把超时叠成更长的超时） |
+| 表达式校验不可达 / 非 200 | `validate_factor` 返回工具错误 | **不**降级成 `valid=false`（服务没答 ≠ 公式不合法）；也不本地解析兜底 |
+| 目录不可达 | 失败建议缺少字段清单 | 建议里明说「字段目录暂不可用」；不编造字段名 |
 | 回测请求缺凭证 | 客户端 fail-closed，请求不发出 | 显式报「没有凭证」；不降级成匿名调用 |
 | SSE 断线 | ui 看不到进度 | 只停推、不取消探索；客户端重连拿快照 |
 | 双写不一致 | 切读后数据缺 | 双写期已结束；停写前已做一次全量回填 + 行级对拍（0 差异），此后旧表零增长 |
