@@ -2,9 +2,9 @@ package main
 
 import (
 	"net/http"
-	"tellurion/pkg/httpserver"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ruoxizhnya/tellurion-kit/httpserver"
 	"tellurion-agent/pkg/ai/pipeline"
 )
 

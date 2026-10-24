@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"tellurion/pkg/data/source"
+	"github.com/ruoxizhnya/tellurion-contracts/dataprotocol"
 )
 
 func TestSentimentFactor_HotSearchRank1(t *testing.T) {
@@ -110,24 +110,24 @@ func TestTopBuzzSymbols(t *testing.T) {
 
 func TestHotSearchFromPoints(t *testing.T) {
 	now := time.Now()
-	points := []source.UnifiedDataPoint{
+	points := []dataprotocol.UnifiedDataPoint{
 		{
 			Symbol:    "A",
 			TradeTime: now,
-			DataType:  source.DataTypeHotSearch,
+			DataType:  dataprotocol.DataTypeHotSearch,
 			Data:      map[string]interface{}{"rank": float64(5), "keyword": "test", "heat": 100.0},
 		},
 		{
 			Symbol:    "B",
 			TradeTime: now,
-			DataType:  source.DataTypeNews,
+			DataType:  dataprotocol.DataTypeNews,
 			Data:      map[string]interface{}{"title": "earnings beat", "sentiment": 0.7},
 		},
 		{
 			// Wrong data type should be ignored.
 			Symbol:    "C",
 			TradeTime: now,
-			DataType:  source.DataTypeOHLCDaily,
+			DataType:  dataprotocol.DataTypeOHLCDaily,
 			Data:      map[string]interface{}{},
 		},
 	}

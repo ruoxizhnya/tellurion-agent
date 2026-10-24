@@ -17,6 +17,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/ruoxizhnya/tellurion-contracts/engine"
+	"github.com/ruoxizhnya/tellurion-kit/sandbox/runner"
+	"github.com/ruoxizhnya/tellurion-kit/sandbox/staticcheck"
 	"github.com/spf13/viper"
 	"tellurion-agent/pkg/ai"
 	"tellurion-agent/pkg/ai/client"
@@ -26,8 +28,6 @@ import (
 	"tellurion-agent/pkg/copilot"
 	"tellurion/pkg/backtest"
 	"tellurion/pkg/bootstrap"
-	"tellurion/pkg/sandbox/runner"
-	"tellurion/pkg/sandbox/staticcheck"
 )
 
 // ── 来自 core pkg/bootstrap/copilot.go（AI 拆仓阶段 2 随迁，逐字搬运）──

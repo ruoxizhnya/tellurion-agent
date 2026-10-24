@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"tellurion/pkg/data/source"
+	"github.com/ruoxizhnya/tellurion-contracts/dataprotocol"
 )
 
 func TestSectorRotationFactor_Mapping(t *testing.T) {
@@ -90,11 +90,11 @@ func TestIsSectorRowValid(t *testing.T) {
 
 func TestSectorRowsFromPoints_FilterByDataType(t *testing.T) {
 	now := time.Now()
-	points := []source.UnifiedDataPoint{
-		{Symbol: "BK0001", DataType: source.DataTypeSectors, TradeTime: now, Data: map[string]interface{}{
+	points := []dataprotocol.UnifiedDataPoint{
+		{Symbol: "BK0001", DataType: dataprotocol.DataTypeSectors, TradeTime: now, Data: map[string]interface{}{
 			"sector_code": "BK0001", "sector_name": "白酒", "change_pct": 0.05,
 		}},
-		{Symbol: "ignored", DataType: source.DataTypeCapitalFlow, TradeTime: now, Data: map[string]interface{}{}},
+		{Symbol: "ignored", DataType: dataprotocol.DataTypeCapitalFlow, TradeTime: now, Data: map[string]interface{}{}},
 	}
 	rows := SectorRowsFromPoints(points)
 	if len(rows) != 1 {

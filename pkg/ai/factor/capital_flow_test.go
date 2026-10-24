@@ -5,16 +5,16 @@ import (
 	"testing"
 	"time"
 
-	"tellurion/pkg/data/source"
+	"github.com/ruoxizhnya/tellurion-contracts/dataprotocol"
 )
 
 func TestCapitalFlowFromPoints(t *testing.T) {
 	now := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
-	points := []source.UnifiedDataPoint{
+	points := []dataprotocol.UnifiedDataPoint{
 		{
 			Symbol:    "600519.SH",
 			TradeTime: now,
-			DataType:  source.DataTypeCapitalFlow,
+			DataType:  dataprotocol.DataTypeCapitalFlow,
 			Data: map[string]interface{}{
 				"period":      "5d",
 				"main_net":    1.5e8,
@@ -26,7 +26,7 @@ func TestCapitalFlowFromPoints(t *testing.T) {
 			// Wrong data type should be ignored.
 			Symbol:    "999999",
 			TradeTime: now,
-			DataType:  source.DataTypeOHLCDaily,
+			DataType:  dataprotocol.DataTypeOHLCDaily,
 			Data:      map[string]interface{}{},
 		},
 	}

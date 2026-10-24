@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"tellurion/pkg/data/source"
+	"github.com/ruoxizhnya/tellurion-contracts/dataprotocol"
 )
 
 // SectorRow is a normalized sector snapshot: change_pct on a given
@@ -21,10 +21,10 @@ type SectorRow struct {
 // SectorRowsFromPoints projects sectors UnifiedDataPoints into typed
 // rows. The eastmoney_sectors adapter emits DataTypeSectors records
 // with these fields.
-func SectorRowsFromPoints(points []source.UnifiedDataPoint) []SectorRow {
+func SectorRowsFromPoints(points []dataprotocol.UnifiedDataPoint) []SectorRow {
 	out := make([]SectorRow, 0, len(points))
 	for _, p := range points {
-		if p.DataType != source.DataTypeSectors {
+		if p.DataType != dataprotocol.DataTypeSectors {
 			continue
 		}
 		out = append(out, SectorRow{

@@ -1,4 +1,4 @@
-package drift
+﻿package drift
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"tellurion/pkg/statistics"
+	"github.com/ruoxizhnya/tellurion-kit/statistics"
 )
 
 // Detector performs concept drift detection on strategy performance metrics.

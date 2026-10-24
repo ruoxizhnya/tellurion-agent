@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"tellurion/pkg/httpserver"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
+	"github.com/ruoxizhnya/tellurion-kit/httpserver"
 	"tellurion-agent/pkg/ai"
 	aicausal "tellurion-agent/pkg/ai/causal"
 	"tellurion-agent/pkg/ai/client"

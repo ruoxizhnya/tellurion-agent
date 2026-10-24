@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"tellurion/pkg/data/source"
+	"github.com/ruoxizhnya/tellurion-contracts/dataprotocol"
 )
 
 // HotSearchRow is a normalized hot-search / news record from
@@ -21,11 +21,11 @@ type HotSearchRow struct {
 }
 
 // HotSearchFromPoints projects xueqiu hot_search / news records.
-func HotSearchFromPoints(points []source.UnifiedDataPoint) []HotSearchRow {
+func HotSearchFromPoints(points []dataprotocol.UnifiedDataPoint) []HotSearchRow {
 	out := make([]HotSearchRow, 0, len(points))
 	for _, p := range points {
 		switch p.DataType {
-		case source.DataTypeHotSearch:
+		case dataprotocol.DataTypeHotSearch:
 			out = append(out, HotSearchRow{
 				Symbol:    p.Symbol,
 				TradeTime: p.TradeTime,
@@ -33,7 +33,7 @@ func HotSearchFromPoints(points []source.UnifiedDataPoint) []HotSearchRow {
 				Keyword:   stringField(p.Data, "keyword"),
 				Heat:      floatField(p.Data, "heat"),
 			})
-		case source.DataTypeNews:
+		case dataprotocol.DataTypeNews:
 			out = append(out, HotSearchRow{
 				Symbol:    p.Symbol,
 				TradeTime: p.TradeTime,

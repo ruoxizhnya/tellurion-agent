@@ -92,13 +92,20 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 
 **为什么单列且不急**：删档要走 ODR（本仓 AGENTS §6「删档 → 一条 ODR」），且 `pkg/ai/agents/doc.go` 目前写的「pipeline 在用这些 agent」与实测不符——先订正文案再删，不要拿"死代码"当免 ODR 的理由。**本文件只登记，不执行删除。**
 
-### S3-a｜纯机械换源（0 跨仓依赖，可立即开工）
+### S3-a｜纯机械换源（0 跨仓依赖，可立即开工）✅ 完成（2026-10-25）
 
 - 包：`statistics` → kit；`httpserver` → kit；`observability` → kit；`sandbox/runner` → kit；`sandbox/staticcheck` → kit；`data/source` → contracts/dataprotocol。
 - 规模：6 包 / 14 个生产文件 / 52 处符号引用。
 - 依据：kit `v0.1.0` 已含全部五个 kit 目标包（含 `sandbox/staticcheck`），contracts `v0.6.0` 已含 `dataprotocol`；两者都已在 `go.mod`，**不需要任何发版**；data/source 在 core 侧已是 contracts 别名（形状零变化）。
 - 门：`go build/vet/test ./...` 绿；kit 与 core 同名函数逐个对拍（空输入、常量序列、超时）。
 - 为什么先做：零行为变化、零外部等待，做完立刻把 40% 的 import 面消掉。
+
+> **施工记录（2026-10-25，commit 随本行落）**：
+> - 已换源 **5 个包**：`statistics`（5 文件：`drift/detector.go`、`agents/validate.go`、`metrics/turnover.go`、`metrics/ic.go`、`validation/redundancy.go`）、`httpserver`（3 文件：`handlers_explore.go` / `handlers_copilot.go` / `handlers_pipeline.go`）、`sandbox/runner` + `sandbox/staticcheck`（同 `builders.go`，另 `copilot_test.go` 静态检查腿）、`data/source`（3 生产 + 3 测试：`factor/sentiment.go` / `sector_rotation.go` / `capital_flow.go`，import 改 `contracts/dataprotocol` 且符号前缀同步改名）。
+> - **`observability` 未在本批换源（如实登记，不是遗漏）**：唯一调用点是 `cmd/ai/main.go:136` 的 `observability.Handler(m)`，而 `m` 来自 `bootstrap.InitMetrics`（core 类型 `*tellurion/pkg/observability.Metrics`）。kit `Handler` 形参是 `*kit/observability.Metrics`，两个结构体均带私有 `registry`，**不能隐式转换**；若本地另建 kit `Metrics`，`/metrics` 会丢掉 core `Metrics.Register()` 已注册的 14 个族（含 `backtest_duration_seconds` / `llm_tokens_total` / `http_client_requests_total` 等），违反本批「零行为变化」。因此 `observability` 与 `bootstrap` 工具腿（`InitLogger` / `InitMetrics` / `HTTPClient`）一起留到 **S3-d**，届时一次性换 kit。
+> - **对拍取证**（临时 harness，不进仓库）：`statistics` 的 `Mean` / `SampleVariance` / `SampleStdDev` / `PopulationStdDev` / `Pearson` / `Spearman` 在空切片、单元素、常量序列、随机序列上与 core 逐值一致；`staticcheck.CheckOrError` 4 组样本返回文案一致；`httpserver` 的 `Fail` / `Error` 状态码与响应体 `{error,code}` 逐字段一致（5xx 原文只进日志）；`sandbox/runner` 在 300ms 超时下与 core 同返回 `ErrTimeout`。
+> - **破坏验证**：把 `validation/redundancy.go` 的 `statistics.Pearson` 取反 → `TestRedundancy_NegativeCorrelationIsFlagged` 红；逐字节还原后绿。`go build ./... && go vet ./... && go test ./...` 全绿。
+> - import 面：本批清掉 17 处 core import（生产 13 + 测试 4），core 实现包 import 59 → 42；`observability` 1 处留 S3-d。
 
 ### S3-b｜本仓内去重（无跨仓依赖）
 

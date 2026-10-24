@@ -18,7 +18,7 @@ import (
 	"sort"
 	"time"
 
-	"tellurion/pkg/data/source"
+	"github.com/ruoxizhnya/tellurion-contracts/dataprotocol"
 )
 
 // CapitalFlowRow is a normalized capital-flow record. The ETL pipeline
@@ -46,10 +46,10 @@ type CapitalFlowRow struct {
 // This indirection lets the factor consume either freshly-fetched data
 // (from the multi-source registry) or replayed data (from storage) with
 // the same code path.
-func CapitalFlowFromPoints(points []source.UnifiedDataPoint) []CapitalFlowRow {
+func CapitalFlowFromPoints(points []dataprotocol.UnifiedDataPoint) []CapitalFlowRow {
 	out := make([]CapitalFlowRow, 0, len(points))
 	for _, p := range points {
-		if p.DataType != source.DataTypeCapitalFlow {
+		if p.DataType != dataprotocol.DataTypeCapitalFlow {
 			continue
 		}
 		row := CapitalFlowRow{

@@ -3,7 +3,7 @@ package metrics
 import (
 	"math"
 
-	"tellurion/pkg/statistics"
+	"github.com/ruoxizhnya/tellurion-kit/statistics"
 )
 
 // ICCalculator computes Information Coefficient metrics.

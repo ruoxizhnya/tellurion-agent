@@ -3,7 +3,7 @@ package metrics
 import (
 	"math"
 
-	"tellurion/pkg/statistics"
+	"github.com/ruoxizhnya/tellurion-kit/statistics"
 )
 
 // TurnoverCalculator computes portfolio turnover metrics.

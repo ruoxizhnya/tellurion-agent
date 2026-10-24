@@ -1,4 +1,4 @@
-package validation
+﻿package validation
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"sort"
 
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
-	"tellurion/pkg/statistics"
+	"github.com/ruoxizhnya/tellurion-kit/statistics"
 )
 
 // 冗余校验器：这条新策略，跟已有的那些是不是同一件事。
