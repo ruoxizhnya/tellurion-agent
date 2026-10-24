@@ -154,6 +154,17 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 > - **破坏验证**：把 `strategy_client.go` 响应封装标签 `json:"strategies"` 改成 `json:"items"` ⇒ `TestStrategyClient_ListStrategies_RequestShape` / `_FieldsFlowThrough` / `TestStrategyClient_ResponseMatchesCoreListWithDBShape` 三条红（`"[]" should have N item(s)`）；从备份逐字节还原（SHA256 `031D3C16…1681ECAC` 与改前一致）后同一组用例绿。
 > - **边界**：`grep '"tellurion/pkg/strategy"'` 在**注册表工具**生产代码零命中；但 `strategy` 包仍有 **2 个生产文件**（`pkg/ai/pipeline/pipeline.go`、`pkg/ai/yaml/loader.go`，用的是类型/工厂注册面）与 5 个测试文件，属 S3-c 的后续段（不虚报为已清）。core 实现包 import 面：38 → **36 处**（清掉生产 1 + 测试 1），分布 **20 文件**（生产 8 文件 14 处、测试 12 文件 22 处；`prompts.go` 3 处伪命中与 `repoguard` 4 处伪命中不计）。
 
+> **S3-c-3 施工记录（backtest / walk-forward HTTP 化，2026-10-25，commit 随本行落）**：
+> - **动手前证伪了一条前提**：`POST /api/backtest` 能收 `strategy_params` 不等于 agent 的表达式策略能被执行 —— core 的 analysis 二进制**没有导入** `pkg/strategy/expression`（`go list -deps ./cmd/analysis | grep -c` 实测 **0**），`expression_template` 不在注册表里；DB 策略只进目录、不可执行（引擎只走 `DefaultRegistry.NewInstance`）。用户授权后在 **core `cmd/analysis/main.go` 加一行空导入**（core commit `faec551`），这是 S3-c-3 的第五个交接件（原 §5 只列了四条）。
+> - **提交形状**：pipeline 不再在本地注册策略。YAML 的 expression 段经 `yaml.ResolveExpression` 映射成 `strategy: expression_template` + `strategy_params`（键名与 core `ExpressionStrategy.Parameters()` 逐字一致；无 expression 段时不发 `signal_expr`，让 core 用清单默认值）。YAML 里的 `strategy.name` 降为实验日志标签。
+> - **装配删除**：`cmd/ai/main.go` 删掉 `BuildBacktestEngine` / `BuildRiskManager` / `BuildExecutionTrader` / `InitStore` / `newEngine` / `pgProvider` / `dataAdapter` / `wfEngine`；`builders.go` 删 `StrategyEngineAdapter` / `WalkForwardEngineAdapter` / `buildBacktestRequest`（指数识别迁到 `cmd/ai/http_runner.go`）。新增 `HTTPBacktestRunner` / `HTTPWalkForwardRunner`（`cmd/ai/http_runner.go`）。
+> - **凭证**：回测端点至少 trader。`client.BacktestClient` 新增 `WithTokenFromContext` + `WithBearerTokenInContext`：handler 把入站 JWT 放进请求 ctx，客户端转发；静态 token > ctx token > loopback 开发模式，三者皆无时 fail-closed。异步链路（copilot `context.WithoutCancel`、explore 的独立 ctx）显式保留该值。
+> - **`domain.WalkForwardParams` 没有 json tag**（实测）：线上键是 `TrainDays` 等 PascalCase。客户端**直接序列化契约类型**，不自定义 snake_case 镜像 —— core 用同一类型解码，拼错键名会被静默忽略并回落默认窗口。
+> - **如实登记的行为变化**：① pipeline 的注册阶段变成解析阶段，非法 DSL 表达式的失败点从 Stage 3 后移到 Stage 5（core 回测入口）；本仓不再本地解析 DSL。② `strategy.get` 之外，`backtest.run` / `walk_forward_validate` 工具仍按调用方给的名字跑 core 已注册策略（语义不变）。③ copilot 生成代码后按名字回测的既有行为不变（那个名字从来不在 core 注册表里，旧进程内引擎同样报 not found）。
+> - **验收（真实输出）**：`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./... -count=1` → 全部 `ok`（`cmd/ai 0.556s`、`pkg/ai/client 0.491s`、`pkg/ai/pipeline 4.864s`，无 FAIL）。生产代码 `grep '"tellurion/pkg/backtest'` **零命中**；`marketdata` 同步清零。core 实现包 import 面：生产 14 → **10 处 / 8 → 7 文件**（清 `backtest` 2 + `marketdata` 1 + `strategy` 1），测试 22 → **19 处 / 12 → 9 文件**；合计 **36 处 / 20 文件 → 29 处 / 16 文件**。
+> - **破坏验证**：把 `http_runner.go` 的 `req.StrategyParams = strategyParams` 临时改成丢弃参数 ⇒ `TestHTTPBacktestRunner_SubmitsIndexAndParams` 红（`strategy_params` 缺失）；逐字节还原（SHA256 一致）后同一用例绿。
+> - **未取到的证据（如实）**：本机无 PG（`127.0.0.1:5432` 拒绝连接）且 data-service 未起，**未跑真库 A/B 指标对拍**（Sharpe / 总收益 / 交易数）。现有证据是请求形状+响应逐字段映射的单测；端到端腿 `TestData01_IndexUniverse_EndToEndBacktest` 已改为打活的 `ANALYSIS_URL`，有库环境可直接取证。
+
 ### S3-d｜装配收尾 + 测试腿清零 + 删 `replace`
 
 - `bootstrap`：工具腿（`logging` / `observability` / `httpclient` / `httpserver.ApplyGinMode`）换 kit；服务生命周期（Router 组装 / 启动 / 优雅退出）本仓自持；引擎与 store 装配腿删除。**core `bootstrap` 的 import 在这一批才彻底消失**（S3-a/b 期间它还留着引擎装配调用）。

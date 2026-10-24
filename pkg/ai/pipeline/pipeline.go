@@ -18,7 +18,6 @@ import (
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
 	"tellurion-agent/pkg/aistore"
-	"tellurion/pkg/strategy"
 )
 
 // Stage represents a pipeline stage
@@ -76,6 +75,23 @@ type Result struct {
 // (adapters, mocks, compile-time assertions) continues to work
 // unchanged because Go type aliases are transparent.
 type BacktestRunner = contracts.BacktestRunner
+
+// StrategyParamsRunner 是**可选**扩展：能在一次回测里携带 run 级策略参数
+// （QT-20 `strategy_params`）的实现。
+//
+// 为什么不做成 contracts.BacktestRunner 的必选方法：那份契约在
+// tellurion-contracts 仓，改它要发版且会波及所有实现；而「表达式策略」
+// 只有 pipeline 这一条链路需要参数。runner 不实现本接口时退回普通的
+// RunBacktest（只能按名字跑 core 已注册的策略），行为与 S3-c-3 之前一致。
+type StrategyParamsRunner interface {
+	RunBacktestWithParams(
+		ctx context.Context,
+		strategyName string,
+		strategyParams map[string]any,
+		stockPool []string,
+		startDate, endDate string,
+	) (*domain.BacktestResult, error)
+}
 
 // ExperimentSink 是实验日志的落点（P1-1b）。
 //
@@ -353,22 +369,21 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 	result.YAMLConfig = yamlConfig
 	p.log(result, "YAML configuration generated successfully")
 
-	// Stage 3: Build + register the strategy that will actually execute.
+	// Stage 3: Resolve the strategy that will actually execute.
 	//
-	// P0-5：这一步此前**完全缺失**。回测拿 parsedIntent.StrategyName 去
-	// registry 里找策略，而那个名字从来没被注册过 —— 编译出来的 Go 代码
-	// 产物又被 os.RemoveAll 删掉，于是回测必然 strategy not found。
+	// P0-5 的原始缺陷是「回测拿一个从未存在的名字去查策略」。QT-17 S3-c-3
+	// 之后本仓不再有注册表：YAML 的表达式段被映射成 core 内置
+	// `expression_template` 的 strategy_params，由 core 按 QT-20 的
+	// 「清单默认 ⊕ 覆写」生效。YAML 里的 strategy.name 只作为日志标签。
 	//
-	// 执行载体是 YAML → ExpressionStrategy（确定性底座），不是 LLM 写的
-	// 那段 Go 代码。这与 ADR-023 一致：AI 是操作仪器的实验员，不是造仪
-	// 器的生成器。
-	p.log(result, "Stage 3/5: Building and registering strategy...")
-	s, cfg, err := p.buildAndRegister(yamlConfig)
+	// 执行载体仍是表达式（ADR-024），不是 LLM 写的那段 Go 代码。
+	p.log(result, "Stage 3/5: Resolving strategy for core-side execution...")
+	resolved, cfg, err := p.resolveStrategy(yamlConfig)
 	if err != nil {
-		p.fail(result, StageRegister, fmt.Sprintf("Strategy registration failed: %v", err))
+		p.fail(result, StageRegister, fmt.Sprintf("Strategy resolution failed: %v", err))
 		return err
 	}
-	p.log(result, fmt.Sprintf("Strategy registered: name=%s", s.Name()))
+	p.log(result, fmt.Sprintf("Strategy resolved: label=%s run_as=%s", resolved.Label, resolved.RunName))
 
 	// 回测区间/universe 既是回测输入，也是参数向量的一部分 —— 回放时要知道
 	// 「在哪个区间、哪批票上试的」。提到 Stage 5 之外算，日志和回测共用同一份。
@@ -383,7 +398,7 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 	if len(universe) == 0 {
 		universe = parseUniverse(parsedIntent.Universe)
 	}
-	p.recordWhatWasTried(ctx, expID, result, parsedIntent, s, cfg, startDate, endDate, universe)
+	p.recordWhatWasTried(ctx, expID, result, parsedIntent, resolved.Label, cfg, startDate, endDate, universe)
 
 	// Stage 4: Optional artifact —— LLM 写一段 Go 代码并编译校验。
 	// 产物不加载、不执行，只留在结果里供人审阅，所以失败不阻断。
@@ -393,7 +408,7 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 	// Stage 5: Backtest (if runner provided)
 	if runner != nil {
 		p.log(result, "Stage 5/5: Running backtest...")
-		btResult, err := p.runBacktest(ctx, s.Name(), universe, startDate, endDate, runner, result)
+		btResult, err := p.runBacktest(ctx, resolved, universe, startDate, endDate, runner, result)
 		if err != nil {
 			p.fail(result, StageBacktest, fmt.Sprintf("Backtest failed: %v", err))
 			return err
@@ -409,25 +424,17 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 	return nil
 }
 
-// buildAndRegister 把 YAML 配置构建成可执行策略并注册进全局 registry。
+// resolveStrategy 把 YAML 解析成「提交给 core 的策略引用 + 参数」。
 //
-// 这是 P0-5 的修复点：回测按名字查 registry，所以「生成」之后必须有
-// 「注册」，否则名字对不上任何东西。ExecuteFromYAML 复用同一份逻辑。
-//
-// 注册的是**工厂**而不是共享实例（QT-65）：core QT-11 之后执行路径只经
-// Registry.NewInstance 取每 run 一份的新实例，共享实例会被 fail-closed
-// 拒成 ErrSharedStrategy。yaml.LoadAndRegister 负责同名重登记——换掉工厂
-// 的 YAML 源，而不是把一份已配置实例塞回注册表。
-func (p *Pipeline) buildAndRegister(yamlStr string) (strategy.Strategy, *yamlgen.Config, error) {
-	cfg, err := yamlgen.ParseConfig(yamlStr)
-	if err != nil {
-		return nil, nil, fmt.Errorf("YAML parse failed: %w", err)
-	}
-	s, err := yamlgen.LoadAndRegister(yamlStr)
+// QT-17 S3-c-3：本仓不再注册策略（那是 core 进程内的事）。执行载体仍是
+// 表达式 —— YAML 的 expression 段成为 core 内置 expression_template 的
+// strategy_params，生效值由 core 按「清单默认 ⊕ 覆写」解析（QT-20）。
+func (p *Pipeline) resolveStrategy(yamlStr string) (*yamlgen.ResolvedStrategy, *yamlgen.Config, error) {
+	resolved, err := yamlgen.ResolveExpression(yamlStr)
 	if err != nil {
 		return nil, nil, err
 	}
-	return s, cfg, nil
+	return resolved, resolved.Config, nil
 }
 
 // generateCodeArtifact 让 LLM 生成一段 Go 代码，编译校验，把结果留在
@@ -480,35 +487,32 @@ func (p *Pipeline) ExecuteAsync(ctx context.Context, description string, runner 
 // to executable backtest without generating Go code (per ADR-015 §3
 // "AI as quant researcher"). The flow is:
 //
-//  1. Parse YAML → Config (for universe/dates) + LoadStrategy → Strategy
-//  2. Registration: register a factory for the strategy name; if the name was
-//     already registered through the YAML path, swap the factory's YAML source
-//     (re-register) instead of mutating a registered instance. The execution
-//     path obtains per-run instances via Registry.NewInstance.
-//  3. runner.RunBacktest(ctx, name, universe, startDate, endDate)
+//  1. Parse YAML → Config + ResolvedStrategy（展开成 core 的
+//     expression_template + strategy_params）
+//  2. runner.RunBacktestWithParams（runner 支持时）提交一次粗粒度回测；
+//     不支持的 runner 退回 RunBacktest(ctx, name, ...)
 //
 // Result.YAMLConfig is populated; GeneratedCode/BuildError are left
 // empty (no codegen occurred). If runner is nil, backtest is skipped
-// and the result is marked complete after registration — useful for
-// "load and register without running" callers.
+// and the result is marked complete after the YAML resolves — useful for
+// "resolve without running" callers.
 func (p *Pipeline) ExecuteFromYAML(ctx context.Context, yamlStr string, runner BacktestRunner) (*Result, error) {
 	result := p.StartJob("yaml-direct-execution")
 
-	// Stage 1: Parse YAML + build strategy.
-	p.log(result, "Stage 1/3: Parsing YAML and loading strategy...")
-	config, err := yamlgen.ParseConfig(yamlStr)
-	if err != nil {
+	// Stage 1: Parse YAML.
+	p.log(result, "Stage 1/3: Parsing YAML...")
+	if _, err := yamlgen.ParseConfig(yamlStr); err != nil {
 		p.fail(result, StageParse, fmt.Sprintf("YAML parse failed: %v", err))
 		return result, err
 	}
 	result.YAMLConfig = yamlStr
 
-	// Stage 2: Register or reconfigure (collision-safe).
-	// 复用 buildAndRegister —— 与 Execute 同一份注册逻辑（P0-5）。
-	p.log(result, "Stage 2/3: Registering strategy...")
-	s, config, err := p.buildAndRegister(yamlStr)
+	// Stage 2: Resolve into the core-side strategy reference.
+	// 复用 resolveStrategy —— 与 Execute 同一份逻辑（P0-5）。
+	p.log(result, "Stage 2/3: Resolving strategy for core-side execution...")
+	resolved, config, err := p.resolveStrategy(yamlStr)
 	if err != nil {
-		p.fail(result, StageRegister, fmt.Sprintf("Registration failed: %v", err))
+		p.fail(result, StageRegister, fmt.Sprintf("Strategy resolution failed: %v", err))
 		return result, err
 	}
 
@@ -524,7 +528,7 @@ func (p *Pipeline) ExecuteFromYAML(ctx context.Context, yamlStr string, runner B
 		if endDate == "" {
 			endDate = "2024-01-01"
 		}
-		btResult, err := p.runBacktest(ctx, s.Name(), universe, startDate, endDate, runner, result)
+		btResult, err := p.runBacktest(ctx, resolved, universe, startDate, endDate, runner, result)
 		if err != nil {
 			p.fail(result, StageBacktest, fmt.Sprintf("Backtest failed: %v", err))
 			return result, err
@@ -668,13 +672,30 @@ func (p *Pipeline) validateCompilation(code string, result *Result) error {
 	return nil
 }
 
-// runBacktest executes a backtest by strategy name.
+// runBacktest 提交一次回测。
 //
-// P0-5：name 必须来自**已注册**的策略（buildAndRegister 的返回值），
-// 而不是意图里那个从未注册过的字符串 —— 回测引擎是按名字去 registry
-// 里取策略的，名字没注册就等于 strategy not found。
-func (p *Pipeline) runBacktest(ctx context.Context, name string, universe []string, startDate, endDate string, runner BacktestRunner, result *Result) (*domain.BacktestResult, error) {
-	btResult, err := runner.RunBacktest(ctx, name, universe, startDate, endDate)
+// P0-5 的教训保持：名字必须是**能被执行的一方认识的**那个（现在是 core 的
+// expression_template），不是意图里那个只在本仓日志里有意义的标签。
+//
+// runner 实现 StrategyParamsRunner 时带上 strategy_params（表达式策略必须）；
+// 否则退回按名字回测 —— 那只能跑 core 已注册的具名策略。
+func (p *Pipeline) runBacktest(
+	ctx context.Context,
+	resolved *yamlgen.ResolvedStrategy,
+	universe []string,
+	startDate, endDate string,
+	runner BacktestRunner,
+	result *Result,
+) (*domain.BacktestResult, error) {
+	var (
+		btResult *domain.BacktestResult
+		err      error
+	)
+	if pr, ok := runner.(StrategyParamsRunner); ok {
+		btResult, err = pr.RunBacktestWithParams(ctx, resolved.RunName, resolved.Params, universe, startDate, endDate)
+	} else {
+		btResult, err = runner.RunBacktest(ctx, resolved.RunName, universe, startDate, endDate)
+	}
 	if err != nil {
 		result.BacktestError = err.Error()
 		return nil, err
@@ -748,7 +769,7 @@ func (p *Pipeline) openExperiment(ctx context.Context, result *Result, descripti
 //
 // 分两步写不是啰嗦，是顺序不能反：先落行（崩溃时有证据），参数确定后再补。
 // 到这一刻 YAML 已生成、策略已注册，表达式与回测区间才真正存在。
-func (p *Pipeline) recordWhatWasTried(ctx context.Context, id int64, result *Result, i *intent.Intent, s strategy.Strategy, cfg *yamlgen.Config, startDate, endDate string, universe []string) {
+func (p *Pipeline) recordWhatWasTried(ctx context.Context, id int64, result *Result, i *intent.Intent, strategyLabel string, cfg *yamlgen.Config, startDate, endDate string, universe []string) {
 	if id == 0 {
 		return
 	}
@@ -772,7 +793,7 @@ func (p *Pipeline) recordWhatWasTried(ctx context.Context, id int64, result *Res
 
 	if err := p.expSink.UpdateExperiment(ctx, id, aistore.ExperimentUpdate{
 		Params:       params,
-		StrategyName: s.Name(),
+		StrategyName: strategyLabel,
 		Expression:   cfg.Expression.Signal.Expression,
 	}); err != nil {
 		// 补写失败同样不阻断：主行已经在库里，只是参数粗一点。

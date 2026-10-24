@@ -16,16 +16,21 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
                         │  ② copilot：自然语言 → 代码 → 沙箱编译 → 回测
                         │  ③ pipeline / tools：编排与工具执行
                         ↓
-              core（进程内库：引擎 / 表达式 / 行情）—— 过渡期编译依赖
+              core analysis-service（HTTP 粗粒度：回测 / walk-forward /
+              表达式校验与目录 / 行情只读 / regime）—— 凭证从入站请求转发
                         ↓
               ai.*（本仓自持）/ run（结果）/ market（数据）
 ```
+
+> **QT-17 S3-c-3 起**：本仓进程内没有引擎。pipeline 把 YAML 的表达式段映射成
+> core 内置 `expression_template` 的 `strategy_params`，一次 `POST /api/backtest`
+> 提交；walk-forward 一次 `POST /api/walkforward`。逐 bar 调用为零。
 
 ## 2. 关键时序
 
 ### 探索一轮
 1. `POST /api/explore/runs` → 建 run（内存态）+ 返回 `runID`
-2. 后台 goroutine 跑 loop：每轮 attempt → 组策略 → 调 core 引擎回测
+2. 后台 goroutine 跑 loop：每轮 attempt → 组策略 → 一次 `POST /api/backtest`（core 的 `expression_template` + `strategy_params`）。异步 goroutine 的 ctx 必须保留入站 JWT（`WithBearerTokenInContext`），否则回测客户端 fail-closed
 3. 每次 attempt 落 `ai.experiments`（**QT-17 ④ 起单写**）：`main.go` 把 `*aistore.Store` 直接注入 pipeline / explore 的 sink，双写适配器已删除；legacy `public.experiments` **停写并冻结**在 30 行（历史行已回填归档，行级对拍 0 差异）。`parent_id` 因此直接在 `ai` 的 id 空间内自洽，不再需要 legacyID→aiID 映射
 4. ui 订阅 `GET .../stream`：每 tick 推 `progress`（快照与轮询端点同形状）
 5. 结束推 `complete`；`POST .../stop` 只停调度，不 cancel 正在跑的回测
@@ -37,7 +42,8 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
 
 | 失败点 | 症状 | 兜底 |
 |---|---|---|
-| 引擎 panic / trap | 整轮探索挂掉 | attempt 级隔离 + 记录失败原因 |
+| core 回测不可达 / 5xx | attempt 失败 | 记录失败原因；不重试（重试只会把超时叠成更长的超时） |
+| 回测请求缺凭证 | 客户端 fail-closed，请求不发出 | 显式报「没有凭证」；不降级成匿名调用 |
 | SSE 断线 | ui 看不到进度 | 只停推、不取消探索；客户端重连拿快照 |
 | 双写不一致 | 切读后数据缺 | 双写期已结束；停写前已做一次全量回填 + 行级对拍（0 差异），此后旧表零增长 |
 | 工具执行超时 | 卡住 pipeline | 每工具独立超时 + 归类为失败 |

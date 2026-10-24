@@ -9,13 +9,13 @@ package main
 // openapi 契约零改动。
 //
 // 依赖方向（拆仓后的不变量，repoguard/ai_boundary 盯）：本进程 import
-// core 的 pkg/*（引擎/存储/风控/表达式）—— 单向；core 侧对 pkg/ai 的
-// 引用在阶段 1 仍存在（BuildCopilot / BuildToolsRegistry），
-// 阶段 2 本文件与 pkg/ai 一起搬进 tellurion-agent 仓，core 归零。
+// core 的 pkg/* 单向；core 侧对 pkg/ai 的引用在阶段 1 仍存在
+// （BuildCopilot / BuildToolsRegistry），阶段 2 本文件与 pkg/ai 一起
+// 搬进 tellurion-agent 仓，core 归零。
 //
-// 回测行为与 analysis-service 的对等性：engine 装配（RiskManager /
-// MockTrader / Store / WF 工厂）与 analysis 的 main 逐项一致 ——
-// 同一个实验在两个进程跑出不同结果是不可接受的（可复现性）。
+// QT-17 S3-c-3 起本进程**不再装配回测引擎**：回测 / walk-forward / 表达式
+// 校验都走 core analysis-service 的 HTTP 粗粒度端点，"回测行为对等"由
+// 「同一个 core 进程执行」直接保证，而不是靠两份引擎装配逐项对齐。
 
 import (
 	"context"
@@ -32,10 +32,8 @@ import (
 	"tellurion-agent/pkg/ai/gene_pool"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/aistore"
-	"tellurion/pkg/backtest"
 	"tellurion/pkg/bootstrap"
 	corehttpserver "tellurion/pkg/httpserver"
-	"tellurion/pkg/marketdata"
 	"tellurion/pkg/observability"
 )
 
@@ -43,16 +41,6 @@ func main() {
 	logger := bootstrap.InitLogger()
 	m := bootstrap.InitMetrics(logger)
 	v := bootstrap.LoadConfig(logger, "config/ai-service.yaml")
-
-	// ── 引擎装配（与 analysis-service main 逐项对等）────────────────
-	engine, httpProvider := bootstrap.BuildBacktestEngine(v, logger)
-	riskManager := bootstrap.BuildRiskManager(v, logger)
-	engine.SetRiskManager(riskManager)
-	executionTrader := bootstrap.BuildExecutionTrader(v, logger)
-	engine.SetLiveTrader(executionTrader)
-
-	store := bootstrap.InitStore(v, logger)
-	engine.SetStore(store)
 
 	// QT-17 ②：实验/研究/假设域的自有 store（ai schema，幂等迁移 + 内置
 	// 假设种子）。DSN 与 core store 同源同键（database.*），只是落自己的表；
@@ -79,48 +67,33 @@ func main() {
 	// 不再经 bootstrap.InitAuth 借 core 连接池读 users 表。用户库留在 core。
 	authSvc := initTokenService(v, logger)
 
-	// walk-forward 的每个窗口必须拿到**独立**的 Engine 实例（引擎级缓存
-	// 是 per-instance 的，共享单例会让并发窗口互相污染 —— 与 analysis
-	// main 同一条注释、同一个坑）。
-	newEngine := func() (*backtest.Engine, error) {
-		eng, err := backtest.NewEngine(v, httpProvider, logger)
-		if err != nil {
-			return nil, err
-		}
-		eng.SetRiskManager(riskManager)
-		eng.SetLiveTrader(executionTrader)
-		eng.SetStore(store)
-		return eng, nil
-	}
+	// ── 回测 / walk-forward 只走 HTTP（QT-17 S3-c-3）───────────────
+	//
+	// 本进程不再装配 backtest.Engine / WalkForwardEngine：逐 bar 执行留 core，
+	// agent 一次请求覆盖整段区间（D24 粗粒度动作）。凭据按入站请求转发 ——
+	// 网关把用户的 Authorization 交给本进程，中间件放进 ctx，客户端只转发、
+	// 不签发。本地 loopback + 无凭证时由 WithInsecureLoopback 放行；其余
+	// 缺凭证的场景 fail-closed。
+	analysisURL := analysisAPIURL(v)
+	btClient := client.NewBacktestClient(
+		analysisURL,
+		client.WithTokenFromContext(),
+		client.WithInsecureLoopback(),
+	)
+	backtestRunner := NewHTTPBacktestRunner(btClient)
+	wfRunner := NewHTTPWalkForwardRunner(btClient)
 
-	pgProvider := marketdata.NewPostgresProvider(store, logger)
-	dataAdapter := marketdata.NewDataAdapter(nil, pgProvider, httpProvider, logger)
-	wfEngine := backtest.NewWalkForwardEngine(func() (*backtest.Engine, error) {
-		eng, err := newEngine()
-		if err != nil {
-			return nil, err
-		}
-		// 新引擎必须挂上 dataAdapter，否则多源回退路径不生效（与
-		// analysis 的 buildDataServices 同一条注释）。
-		eng.SetDataAdapter(dataAdapter)
-		eng.SetStore(store)
-		return eng, nil
-	}, store, logger)
-	logger.Info().Msg("Walk-forward engine initialized (tools-side)")
-
-	copilotService, copilotRunner := BuildCopilot(v, engine, logger)
+	copilotService := BuildCopilot(v, backtestRunner, logger)
 
 	factorPool := gene_pool.NewFactorPool(aiStore.Pool())
 	strategyPool := gene_pool.NewStrategyPool(aiStore.Pool())
-	wfRunner := NewWalkForwardEngineAdapter(wfEngine)
 
 	// factor.compute / factor.evaluate / compute_factor_ic 经 HTTP 打
 	// analysis-service 的 /api/factor/*（只在那里注册）。
-	analysisURL := analysisAPIURL(v)
 	toolsRegistry := BuildToolsRegistry(
 		v,
 		analysisURL,
-		copilotRunner,
+		backtestRunner,
 		wfRunner,
 		factorPool,
 		strategyPool,
@@ -142,7 +115,7 @@ func main() {
 	router.GET("/metrics", observability.Handler(m))
 
 	// ── 四族 AI 路由（自 analysis 迁入，路径不变）────────────────────
-	registerCopilotRoutes(router, copilotService, copilotRunner)
+	registerCopilotRoutes(router, copilotService, backtestRunner)
 
 	// P1-1b：实验日志落点。QT-17 ④ 已**停写** legacy public.experiments，
 	// 写路径只剩本仓自持的 ai.experiments —— aistore.Store 同时满足
@@ -153,10 +126,10 @@ func main() {
 	if aiStore != nil {
 		expSink = aiStore
 	}
-	registerPipelineRoutes(router, copilotRunner, expSink)
+	registerPipelineRoutes(router, backtestRunner, expSink)
 	// QT-17 ③：上市窗口改走 core 的 QT-67 只读端点（D24 第 7 类），
 	// 不再 import core 的 pkg/storage。
-	registerExploreRoutes(router, copilotRunner, expSink, client.NewReferenceDataClient(analysisURL))
+	registerExploreRoutes(router, backtestRunner, expSink, client.NewReferenceDataClient(analysisURL))
 
 	// AUD-02 (ODR-065 H5)：WithToolsAuth 按工具的审计副作用类做 per-tool
 	// RBAC —— save_factor / save_strategy 要 trader-or-admin，其余未分类
@@ -167,7 +140,9 @@ func main() {
 
 	sig := bootstrap.WaitForShutdown()
 	logger.Info().Str("signal", sig.String()).Msg("Shutdown signal received; beginning graceful drain")
-	bootstrap.GracefulShutdown(srv, nil, nil, store, logger)
+	// 本进程不再持有 core 的 job service / alert manager / store：
+	// GracefulShutdown 只负责 HTTP 优雅退出，aiStore 由 defer 自行收尾。
+	bootstrap.GracefulShutdown(srv, nil, nil, nil, logger)
 }
 
 // analysisAPIURL 解析 core analysis-service 的基址
@@ -242,6 +217,10 @@ func buildRouter(authSvc *kitauth.TokenService, v *viper.Viper, logger zerolog.L
 	router.Use(bootstrap.RequestLogger(logger))
 	if authSvc.Enabled() {
 		router.Use(authSvc.Middleware())
+		// 回测 / walk-forward / 表达式校验要打 core 的变更端点；以调用者
+		// 本人身份转发（本进程不签发 token）。显式放进请求 ctx，异步链路
+		// 由调用方用 context.WithoutCancel 保留值。
+		router.Use(forwardBearerToken())
 	} else if bootstrap.IsLoopbackHost(v.GetString("server.host")) {
 		// QT-50 ③-④：insecure 模式逐请求回环门。kit v0.1.0 的 httpserver
 		// 还没有 LoopbackOnly，这里直接复用 core 的同一份实现（单一真相；
@@ -249,4 +228,21 @@ func buildRouter(authSvc *kitauth.TokenService, v *viper.Viper, logger zerolog.L
 		router.Use(corehttpserver.LoopbackOnly())
 	}
 	return router
+}
+
+// forwardBearerToken 把入站 `Authorization: Bearer <jwt>` 放进请求 ctx，
+// 供 client.BacktestClient（WithTokenFromContext）转发给 core。
+//
+// 只放值、不做鉴权判断：鉴权已由 authSvc.Middleware 完成；这里缺失 token
+// 也不拒绝请求（工具/只读路径可能根本不打 core），真正需要凭证的调用会在
+// 客户端 fail-closed。
+func forwardBearerToken() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := bearerTokenFromHeader(c.GetHeader("Authorization"))
+		if token != "" {
+			c.Request = c.Request.WithContext(
+				client.WithBearerTokenInContext(c.Request.Context(), token))
+		}
+		c.Next()
+	}
 }

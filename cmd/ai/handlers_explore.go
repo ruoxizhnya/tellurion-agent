@@ -248,6 +248,10 @@ func (h *ExploreHandler) Start(c *gin.Context) {
 	// 凭证在返回前取出：gin 的 context 在 handler 返回后会被复用，不能带进 goroutine。
 	bearerToken := bearerTokenFromHeader(c.GetHeader("Authorization"))
 	ctx, cancel := context.WithCancel(context.Background())
+	// 回测改走 HTTP 后，每一轮尝试都要带上调用者的凭证（core 的
+	// /api/backtest 至少 trader）。值显式放回独立 ctx —— 不能带 gin 的
+	// 请求 ctx（响应一返回就被取消）。
+	ctx = client.WithBearerTokenInContext(ctx, bearerToken)
 
 	space := &search.SearchSpace{Params: []search.ParamDef{
 		// 参数名必须与意图参数同名，否则覆盖静默失效（见 P1-2b）。

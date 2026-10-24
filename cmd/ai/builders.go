@@ -11,11 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/ruoxizhnya/tellurion-contracts/engine"
 	"github.com/ruoxizhnya/tellurion-kit/sandbox/runner"
 	"github.com/ruoxizhnya/tellurion-kit/sandbox/staticcheck"
@@ -26,148 +24,10 @@ import (
 	"tellurion-agent/pkg/ai/tools/builtin"
 	"tellurion-agent/pkg/aistore"
 	"tellurion-agent/pkg/copilot"
-	"tellurion/pkg/backtest"
 	"tellurion/pkg/bootstrap"
 )
 
 // ── 来自 core pkg/bootstrap/copilot.go（AI 拆仓阶段 2 随迁，逐字搬运）──
-
-// ── universe → 回测请求的指数识别（DATA-01）────────────────────────────────
-
-// indexUniverseAliases 是「这不是股票代码，而是指数」的白名单。
-//
-// 用白名单而非「形状匹配」兜底：把一只真股票误判成指数，会让回测悄悄跑在
-// 一个完全不相干的票池上（而且看起来一切正常）—— 宁可漏判（退化成原来的
-// 行为：查不到、fail-loud），也不误判。
-//
-// 这里只负责**识别**，不做代码翻译：`csi300` → `000300.SH` 的翻译在 core
-// 侧（pkg/backtest/index_alias.go）一处生效，本仓不复制第二张映射表。
-var indexUniverseAliases = map[string]bool{
-	"csi300": true, "hs300": true, "沪深300": true,
-	"csi500": true, "zz500": true, "中证500": true,
-	"csi800": true, "zz800": true, "中证800": true,
-	"sse50": true, "sz50": true, "上证50": true,
-	// 已是 Tushare 指数代码的写法（注意与 600xxx/000xxx 股票代码区分：
-	// 指数代码是 000xxx.SH 系列，000001.SZ 这类是股票，不在表内）
-	"000300.sh": true, "000905.sh": true, "000906.sh": true, "000016.sh": true,
-}
-
-// looksLikeIndexCode 判断单个字符串是否为已知的指数标识。
-func looksLikeIndexCode(s string) bool {
-	key := strings.ToLower(strings.TrimSpace(s))
-	if key == "" {
-		return false
-	}
-	if indexUniverseAliases[key] {
-		return true
-	}
-	// 通用形态兜底：csi/zz + 数字（如 csi1000、zz1000）—— 仍属「像指数的写法」；
-	// 即使 core 侧暂未登记该指数，也会走 IndexCode 分支并因此查不到而 fail-loud，
-	// 而不是被当成一只股票静默丢掉。
-	for _, prefix := range []string{"csi", "zz"} {
-		if rest, ok := strings.CutPrefix(key, prefix); ok && rest != "" && allDigits(rest) {
-			return true
-		}
-	}
-	return false
-}
-
-func allDigits(s string) bool {
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return s != ""
-}
-
-// splitUniverseIndex 判断 universe 是否表示「指数」。
-//
-// 返回 (指数代码, 余下的股票代码, 是否指数)。判定条件刻意收紧到「只有一项、
-// 且该项是已知指数写法」—— 混合列表（指数 + 个股）语义不明，不做猜测。
-func splitUniverseIndex(pool []string) (string, []string, bool) {
-	if len(pool) != 1 {
-		return "", pool, false
-	}
-	if !looksLikeIndexCode(pool[0]) {
-		return "", pool, false
-	}
-	return strings.TrimSpace(pool[0]), nil, true
-}
-
-// buildBacktestRequest 把 universe 组装成回测请求：指数形态填 IndexCode
-// （由 core 展开真实成分股），否则照旧填 StockPool。
-//
-// 抽成纯函数是为了能被直接单测 —— 「universe: csi300 走 IndexCode」这条
-// 验收不能只靠读代码确认（DATA-01 ⑤）。
-func buildBacktestRequest(strategyName string, universe []string, startDate, endDate string) backtest.BacktestRequest {
-	req := backtest.BacktestRequest{
-		Strategy:  strategyName,
-		StartDate: startDate,
-		EndDate:   endDate,
-	}
-	if idx, rest, ok := splitUniverseIndex(universe); ok {
-		req.IndexCode = idx
-		req.StockPool = rest // 指数形态下为空
-	} else {
-		req.StockPool = universe
-	}
-	return req
-}
-
-// StrategyEngineAdapter 把 *backtest.Engine 适配成 copilot.BacktestRunner
-// （窄接口）。copilot / pipeline / explore 三族 handler 与 tools 门面的
-// backtest.run 都消费它 —— 零重复。
-type StrategyEngineAdapter struct {
-	engine *backtest.Engine
-}
-
-// NewStrategyEngineAdapter 构造引擎适配器。
-func NewStrategyEngineAdapter(engine *backtest.Engine) *StrategyEngineAdapter {
-	return &StrategyEngineAdapter{engine: engine}
-}
-
-// RunBacktest 实现 copilot.BacktestRunner。
-//
-// DATA-01：探索链路的 universe 默认写 `csi300` —— 它是**指数**不是股票代码。
-// 以前它整串被塞进 StockPool，于是被当成一只叫 "csi300" 的股票，进不了上市
-// 日历（core 以 Debug 级丢弃）⇒ 票池归零 ⇒ 回测 fail-loud invalid，看起来像
-// 「数据没灌」。现在识别成指数后改填 IndexCode，由 core 侧展开真实成分股。
-func (a *StrategyEngineAdapter) RunBacktest(
-	ctx context.Context,
-	strategyName string,
-	stockPool []string,
-	startDate, endDate string,
-) (*domain.BacktestResult, error) {
-	req := buildBacktestRequest(strategyName, stockPool, startDate, endDate)
-	resp, err := a.engine.RunBacktest(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	// DATA-01：此处原本逐字段手工拷贝，**漏了 UniverseMaxSize**（票池规模）
-	// 与 InvalidReasons（OBS-01 的无效原因）—— 两个都是引擎已经量出来的
-	// 事实，却在这一步被丢掉，于是 AI 侧看不到「票池到底多大」「为什么判无效」。
-	// 与归档卷 §八 #8（OBS-01-R2：三值丢在客户端边界）同型，位置不同。
-	//
-	// 只补这两个：它们直接支撑 DATA-01 ③2「真票池规模进 PoolSize」与 OBS-01
-	// 的 fail-loud 语义。Trades / PortfolioValues 等字段此前就未透传（大数组，
-	// 且 AI 侧消费者不读），不在本单范围，保持原行为。
-	return &domain.BacktestResult{
-		TotalReturn:     resp.TotalReturn,
-		AnnualReturn:    resp.AnnualReturn,
-		SharpeRatio:     resp.SharpeRatio,
-		SortinoRatio:    resp.SortinoRatio,
-		MaxDrawdown:     resp.MaxDrawdown,
-		WinRate:         resp.WinRate,
-		TotalTrades:     resp.TotalTrades,
-		WinTrades:       resp.WinTrades,
-		LoseTrades:      resp.LoseTrades,
-		AvgHoldingDays:  resp.AvgHoldingDays,
-		CalmarRatio:     resp.CalmarRatio,
-		UniverseMaxSize: resp.UniverseMaxSize,
-		InvalidReasons:  resp.InvalidReasons,
-	}, nil
-}
 
 // StaticCheckAdapter 实现 strategy.CodeChecker，委托给
 // internal/sandbox/staticcheck。S7-P1-2（ODR-043）：定义在装配根，
@@ -237,9 +97,9 @@ func (a *SandboxRunnerAdapter) IsTimeout(err error) bool {
 }
 
 // BuildCopilot 构造 Copilot service（S7-P1-2, ODR-043）：LLM client、
-// code checker、build executor 全部在装配根注入。返回 service 与委托给
-// 回测引擎的 BacktestRunner 适配器。
-func BuildCopilot(v *viper.Viper, engine *backtest.Engine, logger zerolog.Logger) (*copilot.CopilotService, copilot.BacktestRunner) {
+// code checker、build executor 全部在装配根注入。runner 由调用方注入 ——
+// QT-17 S3-c-3 起是 HTTP 适配器，本函数不再持有引擎。
+func BuildCopilot(v *viper.Viper, runner copilot.BacktestRunner, logger zerolog.Logger) *copilot.CopilotService {
 	copilotService := copilot.NewCopilotService().
 		WithLLMClient(ai.NewClient()).
 		WithCodeChecker(StaticCheckAdapter{}).
@@ -250,39 +110,7 @@ func BuildCopilot(v *viper.Viper, engine *backtest.Engine, logger zerolog.Logger
 		Bool("ai_configured", copilotService.IsConfigured()).
 		Str("working_dir", copilotService.WorkingDir()).
 		Msg("Copilot service initialized")
-	copilotRunner := NewStrategyEngineAdapter(engine)
-	return copilotService, copilotRunner
-}
-
-// WalkForwardEngineAdapter 把 *backtest.WalkForwardEngine 适配成
-// builtin.WalkForwardRunner（窄接口）。具体引擎的 RunWalkForward 收
-// Request struct，工具接口收散参 —— 桥接在装配根完成，工具层与引擎
-// DTO 解耦（S7-P3-4，Hermes Phase 1.7）。
-type WalkForwardEngineAdapter struct {
-	engine *backtest.WalkForwardEngine
-}
-
-// NewWalkForwardEngineAdapter 构造 walk-forward 适配器。
-func NewWalkForwardEngineAdapter(engine *backtest.WalkForwardEngine) *WalkForwardEngineAdapter {
-	return &WalkForwardEngineAdapter{engine: engine}
-}
-
-// RunWalkForward 实现 builtin.WalkForwardRunner。
-func (a *WalkForwardEngineAdapter) RunWalkForward(
-	ctx context.Context,
-	strategyName string,
-	stockPool []string,
-	startDate, endDate string,
-	params domain.WalkForwardParams,
-) (*domain.WalkForwardReport, error) {
-	req := backtest.WalkForwardRequest{
-		Strategy:          strategyName,
-		StockPool:         stockPool,
-		StartDate:         startDate,
-		EndDate:           endDate,
-		WalkForwardParams: params,
-	}
-	return a.engine.RunWalkForward(ctx, req)
+	return copilotService
 }
 
 // ── 来自 core pkg/bootstrap/tools.go（AI 拆仓阶段 2 随迁，逐字搬运）──

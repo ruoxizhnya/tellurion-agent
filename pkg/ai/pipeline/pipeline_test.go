@@ -16,55 +16,54 @@ import (
 	"tellurion-agent/pkg/ai/agents"
 	"tellurion-agent/pkg/ai/intent"
 	yamlgen "tellurion-agent/pkg/ai/yaml"
-	"tellurion/pkg/strategy"
 )
 
-// newInstanceRunner 模拟真实回测引擎的取用方式：只经 Registry.NewInstance
-// 拿每 run 一份的新实例，并真的调用一次 GenerateSignals。共享实例注册会在
-// 这里拿到 ErrSharedStrategy —— 这就是 QT-65 的破坏验证面。
-type newInstanceRunner struct {
-	Ran bool
+// paramsRecordingRunner 记录提交给执行方的策略引用与参数。
+//
+// HTTP 化之后「策略能不能求值」由 core 负责，本仓能钉住的是**提交形状**：
+// 名字必须是 core 注册的 expression_template，表达式必须随 strategy_params
+// 一起走（本仓不再有 registry 可查）。
+type paramsRecordingRunner struct {
+	Ran    bool
+	Name   string
+	Params map[string]any
 }
 
-func (r *newInstanceRunner) RunBacktest(ctx context.Context, strategyName string, stockPool []string, startDate, endDate string) (*domain.BacktestResult, error) {
-	s, err := strategy.GlobalNewInstance(strategyName)
-	if err != nil {
-		return nil, fmt.Errorf("engine strategy lookup failed: %w", err)
-	}
-	if _, err := s.GenerateSignals(ctx, risingBars(70), &domain.Portfolio{}); err != nil {
-		return nil, fmt.Errorf("engine signal generation failed: %w", err)
-	}
+func (r *paramsRecordingRunner) RunBacktest(ctx context.Context, strategyName string, stockPool []string, startDate, endDate string) (*domain.BacktestResult, error) {
+	r.Name = strategyName
 	r.Ran = true
 	return &domain.BacktestResult{TotalTrades: 2}, nil
 }
 
-// risingBars 造一段单调上涨的日线序列，供表达式策略求值。
-func risingBars(n int) map[string][]domain.OHLCV {
-	base := time.Now().AddDate(0, 0, -n)
-	bars := make([]domain.OHLCV, 0, n)
-	for i := 0; i < n; i++ {
-		p := 10 + float64(i)*0.5
-		bars = append(bars, domain.OHLCV{
-			Symbol: "600000.SH", Date: base.AddDate(0, 0, i),
-			Open: p, High: p, Low: p, Close: p, Volume: 1000,
-		})
-	}
-	return map[string][]domain.OHLCV{"600000.SH": bars}
+func (r *paramsRecordingRunner) RunBacktestWithParams(
+	ctx context.Context,
+	strategyName string,
+	strategyParams map[string]any,
+	stockPool []string,
+	startDate, endDate string,
+) (*domain.BacktestResult, error) {
+	r.Params = strategyParams
+	return r.RunBacktest(ctx, strategyName, stockPool, startDate, endDate)
 }
 
-// TestExecuteFromYAML_RegistersFactoryForEngine 是 QT-65 的回归腿：
-// ExecuteFromYAML 注册的必须是工厂，执行路径只经 Registry.NewInstance
-// 取实例。破坏验证：把注册改回 strategy.GlobalRegister，本用例当场红。
-func TestExecuteFromYAML_RegistersFactoryForEngine(t *testing.T) {
+// TestExecuteFromYAML_SubmitsExpressionTemplate 是 QT-17 S3-c-3 的回归腿：
+// 回测提交的必须是 core 能执行的 expression_template + 表达式参数。
+func TestExecuteFromYAML_SubmitsExpressionTemplate(t *testing.T) {
 	p := NewPipeline()
 	name := uniqueYAMLName(t)
-	runner := &newInstanceRunner{}
+	runner := &paramsRecordingRunner{}
 
 	res, err := p.ExecuteFromYAML(context.Background(), expressionYAMLForTest(name), runner)
 
 	require.NoError(t, err)
 	assert.Equal(t, StageComplete, res.Status)
-	assert.True(t, runner.Ran, "回测必须真的经 NewInstance 拿到策略并求值")
+	assert.True(t, runner.Ran, "回测必须真的被提交一次")
+	assert.Equal(t, yamlgen.RunStrategyName, runner.Name,
+		"提交的策略名必须是 core 注册的 %q（YAML 的 name 只是日志标签）", yamlgen.RunStrategyName)
+	require.NotNil(t, runner.Params)
+	assert.Equal(t, "cs_rank(close) > 0.8", runner.Params["signal_expr"])
+	assert.Equal(t, "equal", runner.Params["sizing_method"])
+	assert.Equal(t, 20, runner.Params["max_open_positions"])
 }
 
 // mockBacktestRunner is a test double for BacktestRunner
@@ -445,8 +444,12 @@ func TestPipeline_runBacktest(t *testing.T) {
 		StrategyName: "test_strategy",
 		Universe:     "csi300",
 	}
+	resolved := &yamlgen.ResolvedStrategy{
+		Label: i.StrategyName, RunName: yamlgen.RunStrategyName,
+		Params: map[string]any{"signal_expr": "close > 1"},
+	}
 
-	btResult, err := p.runBacktest(context.Background(), i.StrategyName, parseUniverse(i.Universe), "2022-01-01", "2024-01-01", runner, result)
+	btResult, err := p.runBacktest(context.Background(), resolved, parseUniverse(i.Universe), "2022-01-01", "2024-01-01", runner, result)
 	require.NoError(t, err)
 	assert.NotNil(t, btResult)
 	assert.Equal(t, 5, btResult.TotalTrades)
@@ -461,8 +464,9 @@ func TestPipeline_runBacktest_WithError(t *testing.T) {
 		StrategyName: "test_strategy",
 		Universe:     "csi300",
 	}
+	resolved := &yamlgen.ResolvedStrategy{Label: i.StrategyName, RunName: yamlgen.RunStrategyName}
 
-	btResult, err := p.runBacktest(context.Background(), i.StrategyName, parseUniverse(i.Universe), "2022-01-01", "2024-01-01", runner, result)
+	btResult, err := p.runBacktest(context.Background(), resolved, parseUniverse(i.Universe), "2022-01-01", "2024-01-01", runner, result)
 	assert.Error(t, err)
 	assert.Nil(t, btResult)
 	assert.NotEmpty(t, result.BacktestError)
@@ -476,12 +480,13 @@ func TestPipeline_runBacktest_NilRunner(t *testing.T) {
 		StrategyName: "test_strategy",
 		Universe:     "csi300",
 	}
+	resolved := &yamlgen.ResolvedStrategy{Label: i.StrategyName, RunName: yamlgen.RunStrategyName}
 
 	// The actual pipeline code doesn't check for nil runner before calling
 	// This test documents that behavior - it will panic
 	// In production, the caller should ensure runner is not nil
 	assert.Panics(t, func() {
-		p.runBacktest(context.Background(), i.StrategyName, parseUniverse(i.Universe), "2022-01-01", "2024-01-01", nil, result)
+		p.runBacktest(context.Background(), resolved, parseUniverse(i.Universe), "2022-01-01", "2024-01-01", nil, result)
 	})
 }
 
@@ -838,41 +843,32 @@ func TestPipeline_ExecuteFromYAML_HappyPath(t *testing.T) {
 	assert.Empty(t, result.BuildError)
 }
 
-// TestPipeline_ExecuteFromYAML_RegistrationCollision verifies that calling
-// ExecuteFromYAML twice with the same strategy name re-registers the factory
-// instead of erroring. This is the common AI iterative-tuning workflow: the
-// same name is re-run with tweaked expression params. QT-65 changed the
-// semantics from "reconfigure the registered instance in place" (invisible to
-// per-run instances) to "swap the factory's YAML source".
-func TestPipeline_ExecuteFromYAML_RegistrationCollision(t *testing.T) {
+// TestPipeline_ExecuteFromYAML_RepeatedRunUsesLatestExpression 锁住 AI 调参
+// 循环的语义：同一个策略名被反复执行时，每次提交的表达式必须是**这一次**
+// YAML 里的那份。
+//
+// 旧实现靠「同名重登记换工厂源」保证；HTTP 化之后每次请求自带
+// strategy_params，天然没有跨请求残留 —— 本用例防止有人把参数做成进程级
+// 缓存/单例。
+func TestPipeline_ExecuteFromYAML_RepeatedRunUsesLatestExpression(t *testing.T) {
 	p := NewPipeline()
 	name := uniqueYAMLName(t)
-	runner := &mockBacktestRunner{}
+	runner := &paramsRecordingRunner{}
 
-	// First call — registers the factory.
 	result1, err := p.ExecuteFromYAML(context.Background(), expressionYAMLForTest(name), runner)
 	require.NoError(t, err)
 	assert.Equal(t, StageComplete, result1.Status)
+	require.NotNil(t, runner.Params)
+	assert.Equal(t, "cs_rank(close) > 0.8", runner.Params["signal_expr"])
 
-	// Second call — same name, different expression. Must re-register, not error.
 	tuned := expressionYAMLWith(name, "close > 60")
 	result2, err := p.ExecuteFromYAML(context.Background(), tuned, runner)
 	require.NoError(t, err)
 	assert.Equal(t, StageComplete, result2.Status)
 	require.NotNil(t, result2.BacktestResult)
 
-	// The engine's view of the strategy must reflect the latest YAML.
-	inst, err := strategy.GlobalNewInstance(name)
-	require.NoError(t, err)
-	c := strategy.AsConfigurable(inst)
-	require.NotNil(t, c)
-	var expr string
-	for _, param := range c.Parameters() {
-		if param.Name == "signal_expr" {
-			expr, _ = param.Default.(string)
-		}
-	}
-	assert.Equal(t, "close > 60", expr, "重登记后新实例必须按最新 YAML 重建")
+	assert.Equal(t, "close > 60", runner.Params["signal_expr"],
+		"第二次提交的表达式必须来自第二次的 YAML，不能残留上一次的值")
 }
 
 // expressionYAMLWith builds a minimal expression YAML with a custom signal

@@ -31,10 +31,25 @@ type e2eMockRunner struct {
 }
 
 type e2eRunnerCall struct {
-	StrategyName string
-	StockPool    []string
-	StartDate    string
-	EndDate      string
+	StrategyName   string
+	StrategyParams map[string]any
+	StockPool      []string
+	StartDate      string
+	EndDate        string
+}
+
+func (m *e2eMockRunner) RunBacktestWithParams(
+	ctx context.Context,
+	strategyName string,
+	strategyParams map[string]any,
+	stockPool []string,
+	startDate, endDate string,
+) (*domain.BacktestResult, error) {
+	res, err := m.RunBacktest(ctx, strategyName, stockPool, startDate, endDate)
+	m.mu.Lock()
+	m.calls[len(m.calls)-1].StrategyParams = strategyParams
+	m.mu.Unlock()
+	return res, err
 }
 
 func (m *e2eMockRunner) RunBacktest(ctx context.Context, strategyName string, stockPool []string, startDate, endDate string) (*domain.BacktestResult, error) {
@@ -315,8 +330,13 @@ func TestE2E_Execute_FullFlow_WithMockLLM_AndRunner(t *testing.T) {
 		t.Fatalf("expected 1 recorded call, got %d", len(runner.calls))
 	}
 	call := runner.calls[0]
-	if call.StrategyName != result.Intent.StrategyName {
-		t.Errorf("expected strategy name %s, got %s", result.Intent.StrategyName, call.StrategyName)
+	// QT-17 S3-c-3：提交给执行方的是 core 注册的 expression_template，
+	// 意图里的名字只作为实验日志标签；表达式随 strategy_params 走。
+	if call.StrategyName != yamlgen.RunStrategyName {
+		t.Errorf("expected core-side strategy %s, got %s", yamlgen.RunStrategyName, call.StrategyName)
+	}
+	if call.StrategyParams["signal_expr"] == nil || call.StrategyParams["signal_expr"] == "" {
+		t.Errorf("expected signal_expr in strategy_params, got %v", call.StrategyParams)
 	}
 	// P0-5：日期取 YAML 配置里的值（生成器默认 2020-01-01 ~ 2024-01-01），
 	// 而不是 pipeline 里另一份硬编码的 2022-01-01。配置是唯一真相。

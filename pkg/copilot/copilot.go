@@ -244,7 +244,11 @@ func (s *CopilotService) Generate(ctx context.Context, params GenerateParams, ru
 	atomic.AddInt64(&s.generated, 1)
 
 	go func() {
-		s.run(context.Background(), jobID, params, runner)
+		// WithoutCancel 保留 ctx 里的值（QT-17 S3-c-3：入站请求的 JWT 由
+		// handler 放进 ctx，回测客户端要靠它转发给 core），同时保持旧的
+		// 生命周期语义 —— 作业不随响应返回而被取消。换成 Background() 会
+		// 把凭证一起丢掉，客户端只能 fail-closed。
+		s.run(context.WithoutCancel(ctx), jobID, params, runner)
 	}()
 
 	return result

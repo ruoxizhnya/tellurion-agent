@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-24
-verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切换落账
+last-verified: 2026-10-25
+verified-by: QT-17 S3-c-3 backtest / walk-forward HTTP 化落账（进程内引擎装配已删）
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -240,7 +240,7 @@ verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切�
 
 > **S3 前置状态（2026-10-25 实测）**：core `QT-50` 已 ✅（2026-10-24），真正的卡点在本仓：**15 个 core 实现包 / 22 个生产文件 / 19 个测试文件 / 59 处 import**（`go.mod` 注记的 64 处 / 43 文件含 2 个伪命中，见拆解清单 §0）。逐包归属、动作与子批顺序见 [`docs/s3-decoupling-plan.md`](s3-decoupling-plan.md)（B6）；此刻删 `replace` 仍编不过 ⇒ ② 去 `replace` 未做，须按 S3-a → S3-d 逐批清零后单独一笔提交。
 >
-> **S3 子批进度（2026-10-25）**：S3-a ✅（6 包换源，59 → 42 处）、S3-b ✅（`auth` + `strategy/monitor` 去重，42 → **39** 处：清 4 处、另新增 1 处 `tellurion/pkg/httpserver` 别名用于 insecure 回环门，理由见拆解清单 S3-b 施工记录）、S3-c-1 ✅（`risk` 工具 HTTP 化：接 `POST /api/risk/detect_regime` 粗粒度形状，删本地 `RiskManager` 构造，39 → **38** 处，生产 `pkg/risk` 零命中；如实登记输出删 `bars_analyzed`，见拆解清单 S3-c-1 施工记录）、S3-c-2 ✅（`strategy` 注册表 HTTP 化：`strategy.list` 接 `GET /api/strategies` 合并目录、`strategy.get` 改从 list 过滤，注册表工具生产代码不再 import `tellurion/pkg/strategy`，38 → **36** 处；`strategy` 包仍有 loader / pipeline 2 个生产文件的类型面，如实登记，见拆解清单 S3-c-2 施工记录）。剩余 S3-c 的 strategy 类型面 / expression / backtest 三段与 S3-d（装配收尾 + 删 replace）。当前实现包清单：`backtest` / `bootstrap` / `expression` / `httpserver` / `marketdata` / `observability` / `risk`(仅测试) / `storage`(仅测试) / `strategy`(注册表已清，剩 loader/pipeline 类型面) / `strategy/expression` / `strategy/examples`(仅测试)。
+> **S3 子批进度（2026-10-25）**：S3-a ✅（6 包换源，59 → 42 处）、S3-b ✅（`auth` + `strategy/monitor` 去重，42 → **39** 处：清 4 处、另新增 1 处 `tellurion/pkg/httpserver` 别名用于 insecure 回环门，理由见拆解清单 S3-b 施工记录）、S3-c-1 ✅（`risk` 工具 HTTP 化：接 `POST /api/risk/detect_regime` 粗粒度形状，删本地 `RiskManager` 构造，39 → **38** 处，生产 `pkg/risk` 零命中；如实登记输出删 `bars_analyzed`，见拆解清单 S3-c-1 施工记录）、S3-c-2 ✅（`strategy` 注册表 HTTP 化：`strategy.list` 接 `GET /api/strategies` 合并目录、`strategy.get` 改从 list 过滤，注册表工具生产代码不再 import `tellurion/pkg/strategy`，38 → **36** 处；`strategy` 包仍有 loader / pipeline 2 个生产文件的类型面，如实登记，见拆解清单 S3-c-2 施工记录）、**S3-c-3 ✅（2026-10-25，本次）**：backtest / walk-forward 全部走 HTTP，`cmd/ai` 的进程内引擎装配（`newEngine` / `pgProvider` / `dataAdapter` / `wfEngine`）已删；pipeline 改提交 `strategy=expression_template` + `strategy_params`。**动手前证伪一条前提**：core 的 analysis 二进制原先没导入 `pkg/strategy/expression`（`go list -deps` 实测 0），`expression_template` 不可执行；经授权在 core 加一行空导入（core `faec551`）。生产 import 14 → **10 处 / 8 → 7 文件**（清掉 `backtest` 2 + `marketdata` 1 + `strategy` 1），测试 22 → **19 处 / 12 → 9 文件**；合计 36 处 / 20 文件 → **29 处 / 16 文件**。如实登记：本机无 PG、未跑真库 A/B 指标对拍；非法 DSL 的失败点从 Stage 3 后移到 Stage 5。详见拆解清单 S3-c-3 施工记录。剩余 S3-c 的 strategy 类型面（`yaml/loader.go`）/ expression（4 个生产文件）与 S3-d（装配收尾 + 删 replace）。当前实现包清单：`bootstrap` / `expression` / `httpserver` / `observability` / `strategy` / `strategy/expression`（后两者仅在 `yaml/loader.go` 的旧 LoadStrategy/LoadAndRegister 路径，生产已无调用方，待 S3-d 删除）；测试侧 `backtest` / `marketdata` / `risk` / `storage` / `strategy/examples` 等随 S3-d 清零。
 
 ---
 

@@ -27,7 +27,38 @@ type BacktestClient struct {
 	httpClient *http.Client
 
 	bearerToken           string
+	tokenFromContext      bool
 	allowInsecureLoopback bool
+}
+
+// bearerTokenContextKey 是本包在 context 里携带「入站请求的 JWT」的键。
+//
+// QT-17 S3-c-3：回测从进程内改为 HTTP 后，agent 需要以**调用者本人**的身份
+// 打 core（POST /api/backtest 至少 trader）。token 由 HTTP handler 从入站
+// 请求取出放进 ctx，客户端只负责转发 —— 不签发、不刷新、不落盘。
+type bearerTokenContextKey struct{}
+
+// WithBearerTokenInContext 把入站请求的 JWT 放进 ctx，供 BacktestClient
+// （WithTokenFromContext）在发出请求时转发。
+//
+// 异步链路（copilot 的 goroutine、explore 的循环）必须显式把值带过去：
+// context.Background() 会丢掉它，客户端随即 fail-closed，而不是静默降级成
+// 匿名调用。
+func WithBearerTokenInContext(ctx context.Context, token string) context.Context {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, bearerTokenContextKey{}, token)
+}
+
+// BearerTokenFromContext 读出 WithBearerTokenInContext 放进来的 token。
+func BearerTokenFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	token, _ := ctx.Value(bearerTokenContextKey{}).(string)
+	return token
 }
 
 // Option configures a BacktestClient.
@@ -46,6 +77,14 @@ func WithInsecureLoopback() Option {
 	return func(c *BacktestClient) { c.allowInsecureLoopback = true }
 }
 
+// WithTokenFromContext 开启「按请求转发入站 JWT」（QT-17 S3-c-3）。
+//
+// 优先级：静态 token（WithBearerToken）> ctx 里的 token > loopback 开发模式。
+// 三者都没有时仍然 fail-closed —— 不降级成匿名调用。
+func WithTokenFromContext() Option {
+	return func(c *BacktestClient) { c.tokenFromContext = true }
+}
+
 // NewBacktestClient creates a new backtest client.
 //
 // 默认 **fail-closed**：没有凭证（WithBearerToken）且没有显式开启 loopback 开发模式时，
@@ -54,7 +93,10 @@ func NewBacktestClient(baseURL string, opts ...Option) *BacktestClient {
 	c := &BacktestClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			// 同步回测在 core 侧的预算是 10 分钟；walk-forward 是「N 个窗口
+			// 串行 × 每窗一次回测」，30 分钟是它的上界而不是目标。调用方的
+			// ctx 若更早结束，会先取消（这里只是兜底，防止挂死）。
+			Timeout: 30 * time.Minute,
 		},
 	}
 	for _, opt := range opts {
@@ -72,8 +114,16 @@ func NewBacktestClient(baseURL string, opts ...Option) *BacktestClient {
 type BacktestRequest struct {
 	Strategy  string   `json:"strategy"`
 	StockPool []string `json:"stock_pool,omitempty"`
-	StartDate string   `json:"start_date"`
-	EndDate   string   `json:"end_date"`
+	// IndexCode 是指数票池（DATA-01）：`universe: csi300` 不是股票代码，
+	// 放进 StockPool 会被当成一只叫 "csi300" 的股票。core 负责把人类写法
+	// 翻译成 Tushare 代码并展开成分股。
+	IndexCode string `json:"index_code,omitempty"`
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+	// StrategyParams 是 run 级参数覆写（QT-20）。pipeline 用它提交
+	// expression_template 的表达式与仓位/风控参数，生效值仍由 core 按
+	// 「清单默认 ⊕ 覆写」解析。
+	StrategyParams map[string]any `json:"strategy_params,omitempty"`
 }
 
 // BacktestResponse 承载 core 的**三种**响应形状（同一组契约的三种包装）：
@@ -397,6 +447,54 @@ func (c *BacktestClient) GetBacktestResult(ctx context.Context, jobID string) (*
 	return btResp.classify(true)
 }
 
+// WalkForwardRequest 是 `POST /api/walkforward` 的请求体。
+//
+// 字段逐条对齐 core 的 `walkforward.WalkForwardRequest`：**没有 index_code**
+// （该 DTO 是 core 自有类型，只收 stock_pool）；`strategy_params` 由 QT-68
+// 补齐，每个窗口的 train/test 两段原样带上它。
+type WalkForwardRequest struct {
+	Strategy          string                   `json:"strategy"`
+	StockPool         []string                 `json:"stock_pool,omitempty"`
+	StartDate         string                   `json:"start_date"`
+	EndDate           string                   `json:"end_date"`
+	StrategyParams    map[string]any           `json:"strategy_params,omitempty"`
+	WalkForwardParams domain.WalkForwardParams `json:"walk_forward_params"`
+}
+
+// RunWalkForward 提交一次 walk-forward（D24 第 8 类粗粒度动作，裁-12）。
+//
+// 响应是 core 的 `domain.WalkForwardReport` 原样 JSON（200）。错误语义：
+// 400（参数非法，点名键）、500（窗口执行失败）—— 两者都不在本仓改写文案。
+func (c *BacktestClient) RunWalkForward(ctx context.Context, reqBody WalkForwardRequest) (*domain.WalkForwardReport, error) {
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal walk-forward request: %w", err)
+	}
+
+	httpReq, err := c.newAPIRequest(ctx, http.MethodPost, "/api/walkforward", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("walk-forward request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("walk-forward API returned status %d: %s",
+			resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+
+	var report domain.WalkForwardReport
+	if err := json.NewDecoder(resp.Body).Decode(&report); err != nil {
+		return nil, fmt.Errorf("failed to decode walk-forward response: %w", err)
+	}
+	return &report, nil
+}
+
 // Health checks if the backtest service is healthy.
 // /health 是公开运维面，不适用 API 的凭证门槛（不走 newAPIRequest）。
 func (c *BacktestClient) Health(ctx context.Context) error {
@@ -436,8 +534,12 @@ func (c *BacktestClient) newAPIRequest(ctx context.Context, method, path string,
 }
 
 func (c *BacktestClient) authorize(req *http.Request) error {
-	if c.bearerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.bearerToken)
+	token := c.bearerToken
+	if token == "" && c.tokenFromContext {
+		token = BearerTokenFromContext(req.Context())
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 		return nil
 	}
 	if c.allowInsecureLoopback {
