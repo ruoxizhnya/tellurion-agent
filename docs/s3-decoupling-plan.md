@@ -130,6 +130,7 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 2. **strategy 注册表** ✅ 完成（2026-10-25）：接 `GET /api/strategies`（默认分支已合并注册表 ∪ DB 活跃项，`ListWithDB`）；`strategy.get` 改为从 list 结果过滤（`GET /{id}` 只查 DB）。**零 core 改动**，只需行为对拍。
 3. **backtest**：接 `POST /api/backtest` + `POST /api/walkforward`；删除 `cmd/ai` 的 `newEngine` / `pgProvider` / `dataAdapter` / `wfEngine` 装配。`/api/backtest` 运行时已能收 `strategy_ref` / `strategy_params`（绑定结构嵌入 `contracts.BacktestRequest`）；**walkforward 的 `strategy_params` 已由 core QT-68 ✅（2026-10-24）补齐**，且 `POST /api/walkforward` 已登记为 D24 第 8 类粗粒度动作（core 裁-12，2026-10-25）。
 4. **expression**：接 core 新端点（静态校验 + 目录），删除 parser/evaluator 依赖。**前置已满足**：QT-69 ✅（2026-10-24）落 `POST /api/expression/validate` + `GET /api/expression/catalog`（字段三态、探测 fail-closed）。
+- **不做本地兜底（2026-10-25 用户确认，硬约束）**：S3-c 四项一律 **fail-closed** —— core 不可达 / 5xx / 超时**直接报错**（错误文案点名端点与原因），**不保留** agent 侧本地实现副本、**不静默降级**到旧路径。理由：双实现必漂移，且会掩盖「core 没起来」这个真问题；与 core 裁-11（配置了但取不到即 run `failed` + `risk_rules_unavailable`）同口径。
 - 规模：4 包 / 10 个生产文件 / 92 处符号引用（`strategy` 3 + `expression` 4 + `backtest` 2 + `risk` 1）；S3-c-1 已清 `risk` 1 个生产文件 / 7 处符号引用；S3-c-2 已清 `strategy` 注册表 1 个生产文件 + 1 个测试文件（`strategy` 仍有 2 个生产文件：`pipeline/pipeline.go`、`yaml/loader.go`，属类型/配置面，不在 S3-c-2 范围）；剩余 `strategy` 类型/配置面、`expression`、`backtest`。
 - 门：用到的端点必须在 core `docs/openapi.yaml` 有登记（本仓已有 `TestClientEndpoints_AreRegisteredInCoreOpenAPI` 护栏，端点字面量自动纳入）；同参数同数据下，HTTP 回测与进程内回测的关键指标对拍（Sharpe / 总收益 / 交易数）。
 
