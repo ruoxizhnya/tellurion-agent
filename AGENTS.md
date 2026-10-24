@@ -43,7 +43,7 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 | 依赖 | 版本 | 说明 |
 |---|---|---|
 | `tellurion`（core） | `v0.1.0` + `replace ../tellurion` | **过渡期**，S3 拆掉；拆掉前本仓 R1 不成立 |
-| `github.com/ruoxizhnya/tellurion-contracts` | `v0.5.0` | 2026-10-24 发版（MINOR 443→447）：QT-22 `version_hash` canonical 六项（`StrategyVersionInput` + `DomainStrategyVersionHash`）；**G4 与 core 同批切**。⚠️ 本仓 `replace tellurion` 在册期间，core 的 contracts pin 参与本仓模块图——core 升本仓必须同批升，否则整仓 `go test` 报 `updates to go.mod needed` |
+| `github.com/ruoxizhnya/tellurion-contracts` | `v0.6.0` | 2026-10-24 发版（MINOR 447→465）：QT-40 X1a `dataprotocol/`（`UnifiedDataPoint` 七字段 + `ToJSON`/`DeduplicateKey` + 15 个 `DataType*` 常量）；**2026-10-25 与 core 同批切**（QT-17 ③ 改动同批 `go mod tidy`）。⚠️ 本仓 `replace tellurion` 在册期间，core 的 contracts pin 参与本仓模块图——core 升本仓必须同批升，否则整仓 `go test` 报 `updates to go.mod needed` |
 | `github.com/ruoxizhnya/tellurion-kit` | `v0.1.0` | 2026-10-23 已发版；`pkg/aistore` 用 `kit/db` 的迁移机制（QT-17 ①），连接池由调用方持有 |
 | `github.com/jackc/pgx/v5` | `v5.7.3` | `pkg/aistore` 直连 PG（连接池 / `ErrNoRows` 哨兵，QT-17 ①②）；随 `kit/db` 同版本，未单独升级 |
 
