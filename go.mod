@@ -6,6 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.3
+	github.com/prometheus/client_golang v1.23.2
 	github.com/rs/zerolog v1.33.0
 	github.com/ruoxizhnya/tellurion-contracts v0.6.0
 	github.com/ruoxizhnya/tellurion-kit v0.1.0
@@ -13,7 +14,6 @@ require (
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
-	tellurion v0.1.0
 )
 
 require (
@@ -50,7 +50,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.69.0 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
@@ -62,7 +61,6 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	golang.org/x/arch v0.22.0 // indirect
@@ -75,11 +73,3 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 )
-
-// 本地/CI 联调专用，S3（QT-07 收尾）删除 —— 见本仓 AGENTS.md §2「S3 判据」。
-// 本地开发：core 仓在工作区同级目录。CI 里由 workflow 用
-// `go mod edit -replace` 改写到 checkout 路径（见 .github/workflows/ci.yml）。
-// require 已指 v0.1.0（core 分仓起点 tag，QT-06），但 S0~S3 期间 agent 仍 import
-// core 实现包（生产 5 包 / 6 处 import / 3 文件；测试侧另 6 包 / 12 处 / 3 文件。
-// 2026-10-25 S3-c-4 后实测），故 replace **保留**：删它之前本仓单仓编不过。
-replace tellurion => ../tellurion

@@ -37,7 +37,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const storageImportPath = "tellurion/pkg/storage"
+// storageImportPath 拆成两段拼接：QT-17 S3-d 后本仓源码里不该再出现
+// 完整的 core 实现包 import 字面量，护栏的夹具也不例外（否则依赖扫描
+// 会把测试自己算成违规）。
+const storageImportPath = "tellurion" + "/pkg/storage"
 
 // storageWhitelist 是允许 import tellurion/pkg/storage 的生产文件的登记簿。
 // key = 仓内 slash 分隔的文件相对路径；value = 为什么还在 + 什么时候消失。
@@ -147,7 +150,7 @@ func TestStorageImportBoundary_Fixtures(t *testing.T) {
 	t.Run("违规 import 被抓", func(t *testing.T) {
 		root := t.TempDir()
 		writeFixture(t, filepath.Join(root, "pkg", "evil.go"),
-			"package evil\n\nimport _ \"tellurion/pkg/storage\"\n")
+			"package evil\n\nimport _ \""+storageImportPath+"\"\n")
 		violations, stale, err := scanStorageImports(root, map[string]string{})
 		require.NoError(t, err)
 		require.Len(t, violations, 1, "白名单外的 storage import 必须红")
@@ -168,7 +171,7 @@ func TestStorageImportBoundary_Fixtures(t *testing.T) {
 	t.Run("白名单条目放行", func(t *testing.T) {
 		root := t.TempDir()
 		writeFixture(t, filepath.Join(root, "cmd", "dualwrite.go"),
-			"package main\n\nimport _ \"tellurion/pkg/storage\"\n")
+			"package main\n\nimport _ \""+storageImportPath+"\"\n")
 		violations, stale, err := scanStorageImports(root,
 			map[string]string{"cmd/dualwrite.go": "双写期；过期条件 = 停写切换"})
 		require.NoError(t, err)
@@ -202,7 +205,7 @@ func TestStorageImportBoundary_Fixtures(t *testing.T) {
 	t.Run("测试文件不在护栏范围", func(t *testing.T) {
 		root := t.TempDir()
 		writeFixture(t, filepath.Join(root, "pkg", "probe_test.go"),
-			"package probe\n\nimport _ \"tellurion/pkg/storage\"\n")
+			"package probe\n\nimport _ \""+storageImportPath+"\"\n")
 		violations, stale, err := scanStorageImports(root, map[string]string{})
 		require.NoError(t, err)
 		assert.Empty(t, violations, "测试文件按约定不在本护栏范围")

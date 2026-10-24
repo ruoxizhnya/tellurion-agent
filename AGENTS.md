@@ -17,11 +17,11 @@ go test ./...
 go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 ```
 
-⚠️ **本仓目前不是单仓可构建（known-gap，对应 QT-07 的 S3 段）**：`go.mod` 里有 `replace tellurion => ../tellurion`，CI 也靠 checkout core 再改写 replace。这是**过渡期的唯一例外**，不是惯例：
+✅ **本仓单仓可构建（QT-17 S3-d，2026-10-25）**：`go.mod` 已无 `tellurion` require / `replace`，CI 只 checkout 本仓。R1/R2 成立：单独 checkout 跑上面三条即绿。
 
-- 不要在 `../tellurion` 之外再加任何仓外 `replace`；
-- 不要把实现从 core 抄进来"消除依赖"（那是把边界搞坏，不是修好）；
-- S3 的判据是：**删掉这个 replace 后 `go build ./...` 仍然绿**（依赖 QT-50 的 HTTP 粗粒度 + QT-17 的数据自持）。
+- 不要再加任何仓外 `replace`；
+- 不要把 core 的实现抄进来"消除依赖"（那是把边界搞坏，不是修好）；
+- 需要 core 的数据 / 计算 → 走它已登记的 HTTP 粗粒度端点（见 `docs/dataflow.md`）。
 
 ## 3. 边界（硬约束）
 
@@ -42,8 +42,7 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 
 | 依赖 | 版本 | 说明 |
 |---|---|---|
-| `tellurion`（core） | `v0.1.0` + `replace ../tellurion` | **过渡期**，S3 拆掉；拆掉前本仓 R1 不成立 |
-| `github.com/ruoxizhnya/tellurion-contracts` | `v0.6.0` | 2026-10-24 发版（MINOR 447→465）：QT-40 X1a `dataprotocol/`（`UnifiedDataPoint` 七字段 + `ToJSON`/`DeduplicateKey` + 15 个 `DataType*` 常量）；**2026-10-25 与 core 同批切**（QT-17 ③ 改动同批 `go mod tidy`）。⚠️ 本仓 `replace tellurion` 在册期间，core 的 contracts pin 参与本仓模块图——core 升本仓必须同批升，否则整仓 `go test` 报 `updates to go.mod needed` |
+| `github.com/ruoxizhnya/tellurion-contracts` | `v0.6.0` | 2026-10-24 发版（MINOR 447→465）：QT-40 X1a `dataprotocol/`（`UnifiedDataPoint` 七字段 + `ToJSON`/`DeduplicateKey` + 15 个 `DataType*` 常量）；**2026-10-25 与 core 同批切**（QT-17 ③ 改动同批 `go mod tidy`） |
 | `github.com/ruoxizhnya/tellurion-kit` | `v0.1.0` | 2026-10-23 已发版；`pkg/aistore` 用 `kit/db` 的迁移机制（QT-17 ①），连接池由调用方持有 |
 | `github.com/jackc/pgx/v5` | `v5.7.3` | `pkg/aistore` 直连 PG（连接池 / `ErrNoRows` 哨兵，QT-17 ①②）；随 `kit/db` 同版本，未单独升级 |
 

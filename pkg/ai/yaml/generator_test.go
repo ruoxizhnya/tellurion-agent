@@ -515,12 +515,13 @@ func TestGenerator_Generate_EmitsExpressionSection(t *testing.T) {
 	assert.Contains(t, yamlStr, "max_per_stock: 0.15")
 	assert.Contains(t, yamlStr, "max_open_positions: 25")
 
-	// Round-trip: the generated YAML must be parseable by LoadStrategy
-	// and produce a strategy whose Parameters match the original intent.
-	s, err := LoadStrategy(yamlStr)
+	// Round-trip: the generated YAML must still parse back into the same
+	// strategy identity and expression (QT-17 S3-d：本包不再在进程内把
+	// YAML 加载成 ExpressionStrategy —— 执行只在 core）。
+	cfg, err := ParseConfig(yamlStr)
 	require.NoError(t, err)
-	require.NotNil(t, s)
-	assert.Equal(t, "expr_from_intent", s.Name())
+	assert.Equal(t, "expr_from_intent", cfg.Strategy.Name)
+	assert.NotEmpty(t, cfg.Expression.Signal.Expression)
 }
 
 // TestGenerator_Generate_ExpressionWithSpecialChars verifies that an
@@ -578,8 +579,8 @@ func TestGenerator_Generate_NoExpressionParams(t *testing.T) {
 	require.NotEmpty(t, yamlStr)
 
 	// P0-5 契约变更：即便没给 signal_expr，也要按意图类型产出确定性的
-	// 默认表达式。否则生成的 YAML 加载不成策略（LoadStrategy 只认
-	// expression 类型），「一条意图 → 回测出结果」这条链路就断在这里。
+	// 默认表达式。否则生成的 YAML 没有可提交给 core 的执行内容，
+	// 「一条意图 → 回测出结果」这条链路就断在这里。
 	assert.Contains(t, yamlStr, "\nexpression:")
 	assert.Contains(t, yamlStr, "cs_rank(ts_pct_change(close, 20)) > 0.8")
 }

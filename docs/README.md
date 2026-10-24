@@ -32,7 +32,7 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）+ A4 impo
 | [`api-schema.md`](api-schema.md) | **对外接口唯一真相源** + 错误码 / 幂等 / 兼容 | 改接口的人 |
 | [`dataflow.md`](dataflow.md) | 数据流向、时序、fail-closed 点、不变量 | 改链路的人 |
 | [`archive/contracts-import-replacement-2026-10-23.md`](archive/contracts-import-replacement-2026-10-23.md) | S1 下游腿 agent 侧 import 全替清单（A4 产出 / B4 输入，**已执行并归档**） | 只读 |
-| [`s3-decoupling-plan.md`](s3-decoupling-plan.md) | S3 去 core 实现包 import 的 15 包拆解清单：三类归属、逐包动作、子批顺序、core 侧前置（B6 产出，待执行） | 做 S3 的人 |
+| [`s3-decoupling-plan.md`](s3-decoupling-plan.md) | S3 去 core 实现包 import 的 15 包拆解清单：三类归属、逐包动作、子批顺序、core 侧前置（B6 产出；**S3-a~d 已全部执行，2026-10-25**） | 查 S3 决策与施工记录时 |
 | [`TASKS.md`](TASKS.md) | 可执行任务（六字段） | 每个人 |
 | [`adr/`](adr/README.md) | 架构决策（只增不删） | 提变更的人 |
 | [`odr/`](odr/README.md) | 运行 / 治理决策（删档、审计、迁移、工具） | 做事的人 |

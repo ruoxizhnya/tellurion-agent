@@ -59,13 +59,15 @@ HTTP 面（:8086）
 ```
 contracts + kit
       ↑
-tellurion-agent  ──(过渡期，S3 删)── require + replace ../tellurion
-      └──(运行期 HTTP)──► core 的粗粒度 port
+tellurion-agent
+      └──(运行期 HTTP)──► core analysis-service 的粗粒度端点
 ```
+
+> QT-17 S3-d（2026-10-25）起编译期对 core **零依赖**（`go.mod` 无 require / replace）。
 
 ## 6. 关键决策
 
-- [`adr/0001-编译期依赖-core-是过渡态.md`](adr/0001-编译期依赖-core-是过渡态.md)
+- [`adr/0001-编译期依赖-core-是过渡态.md`](adr/0001-编译期依赖-core-是过渡态.md)（S3-d 已收口：过渡态结束）
 
 ## 7. 非目标（明确不做）
 
@@ -79,5 +81,5 @@ tellurion-agent  ──(过渡期，S3 删)── require + replace ../tellurion
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | QT-17 | `ai.*` 自持 + 双写对拍 + 停写 | 🔶 ① DDL + 迁移机制已落 `pkg/aistore`（2026-10-23）；② 自有 store / 双写 / 切读已落（2026-10-23）；**④ 停写已落（2026-10-24，ODR-001）**：写路径只剩 `ai.experiments`，旧表冻结；③ 仪器域只读 port 等 D24 第 7 类动作 |
-| S3 | 删 `replace ../tellurion`，改 HTTP | 进行中：S3-a/b 已落；S3-c-1/2/3/4 已落（risk / 策略目录 / 回测+walk-forward / 表达式校验与目录均 HTTP 化，进程内引擎与 DSL parser 已删）；S3-d（bootstrap/observability 换 kit、测试腿清零、删 replace）待做 |
+| S3 | 删 `replace ../tellurion`，改 HTTP | ✅ 2026-10-25：S3-a/b/c-1~4/d 全部落；`go.mod` 无 core require / replace，CI 单仓 checkout，`grep '"tellurion/'` 零命中 |
 | — | SSE 已上线（OPS-01-A ✅ 2026-10-15） | ✅ |

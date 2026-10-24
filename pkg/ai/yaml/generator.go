@@ -33,9 +33,9 @@ type Config struct {
 	Execution    ExecutionConfig    `yaml:"execution,omitempty"`
 	Optimization OptimizationConfig `yaml:"optimization,omitempty"`
 	// Expression carries the ExpressionStrategy-specific config. When
-	// present (non-zero), pkg/ai/yaml.LoadStrategy builds an
-	// ExpressionStrategy from it. This is distinct from the top-level
-	// Risk field: top-level Risk is engine-level stop-loss/take-profit;
+	// present (non-zero), ResolveExpression maps it to the strategy_params
+	// submitted to core's expression_template. This is distinct from the
+	// top-level Risk field: top-level Risk is engine-level stop-loss/take-profit;
 	// Expression.Risk is post-signal weight risk control.
 	// Added in S7-P3-2.
 	Expression ExpressionYAML `yaml:"expression,omitempty"`
@@ -233,8 +233,7 @@ func (g *Generator) intentToConfig(i *intent.Intent) Config {
 
 	// S7-P3-2: If the intent carries expression-strategy parameters
 	// (signal_expr, sizing_method, etc.), populate the Expression
-	// section so the generated YAML can be loaded directly by
-	// LoadStrategy without LLM codegen.
+	// section so ResolveExpression can submit it to core without LLM codegen.
 	if expr, ok := intentToExpressionConfig(i); ok {
 		config.Expression = expr
 	}
@@ -250,13 +249,13 @@ func (g *Generator) intentToConfig(i *intent.Intent) Config {
 // The mapping mirrors ExpressionStrategy.Parameters() in
 // pkg/strategy/expression/strategy.go. Only signal_expr is required to
 // trigger emission; other fields fall back to their zero values and
-// LoadStrategy/NewExpressionStrategy apply defaults downstream.
+// core's expression_template applies defaults downstream.
 // defaultSignalExpression 是「意图类型 → 默认信号表达式」的确定性映射。
 //
 // P0-5：这层映射此前完全缺失。Generator 只在 intent 自带 signal_expr
 // 参数时才产出 expression 段，而规则解析出来的 intent 只有一个语义标签
-// （momentum / breakout / ...），于是生成的 YAML 根本加载不成策略 ——
-// LoadStrategy 只认 expression 类型。整条实验链路就断在这里。
+// （momentum / breakout / ...），于是生成的 YAML 没有可提交给 core 的
+// 执行内容。整条实验链路就断在这里。
 //
 // 为什么做成确定性映射而不是让 LLM 每次现编：
 //  1. 映射写在生成的 YAML 里，人能审阅、能直接改参数；

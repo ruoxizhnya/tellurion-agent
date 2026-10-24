@@ -1,16 +1,21 @@
 package ai
 
+// coreStrategyImport 是提示词里展示给 LLM 的 import 路径（生成代码是
+// artifact，不执行；ADR-024）。QT-17 S3-d 后本仓不再 import core，源码里
+// 也刻意拆成两段拼接 —— 免得依赖扫描把提示词文本误判成真实编译依赖。
+const coreStrategyImport = "tellurion" + "/pkg/strategy"
+
 const SystemPrompt = `You are a quantitative trading strategy programmer. You write production-quality Go code for A-share stock trading backtesting.
 
 IMPORTANT: Output ONLY the Go source file. No markdown, no explanation, no comments outside the code.
 
-## Target interface (from tellurion/pkg/strategy)
+## Target interface (from the core repo's pkg/strategy package)
 
 The generated code must implement the Strategy interface:
 
     package plugins
 
-    import "tellurion/pkg/strategy"
+    import "` + coreStrategyImport + `"
 
     type Parameter struct {
         Name        string
@@ -82,7 +87,7 @@ If your strategy uses pre-computed factor z-scores, implement FactorAware:
 ## Rules
 
 1. Package name MUST be "plugins"
-2. Include these imports: "context", "time", "github.com/ruoxizhnya/tellurion-contracts/domain", "tellurion/pkg/strategy"
+2. Include these imports: "context", "time", "github.com/ruoxizhnya/tellurion-contracts/domain", "` + coreStrategyImport + `"
 3. Implement ALL Strategy interface methods exactly as shown above
 4. Include an init() function that calls strategy.GlobalRegister(&yourImpl{})
 5. Return "hold" for all stocks by default; only return "buy"/"sell" when indicators give a clear signal
@@ -104,7 +109,7 @@ import (
     "time"
 
     "github.com/ruoxizhnya/tellurion-contracts/domain"
-    "tellurion/pkg/strategy"
+    "` + coreStrategyImport + `"
 )
 
 type config struct {

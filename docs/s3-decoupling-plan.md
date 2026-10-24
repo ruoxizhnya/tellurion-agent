@@ -1,13 +1,13 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归属、动作与子批顺序（实测口径，未改代码）
+verified-by: S3-a~d 全部落地 —— 删 replace/require、单仓 build/vet/test 绿、core import 字面量归零
 ---
 
 # S3 去 core 实现包 import · 15 包拆解清单
 
 > **本文件回答**：删掉 `replace tellurion => ../tellurion` 之前，本仓还欠哪些活、先后怎么排、哪些根本不该搬。
-> **判据（唯一）**：删 `replace` 后 `go build ./...` 仍然绿（R1）。任何一包没有着落，这条就是红的。
+> **判据（唯一）**：删 `replace` 后 `go build ./...` 仍然绿（R1）。**2026-10-25 已满足**。
 > 上游依据：`tellurion-agent:docs/adr/0001-编译期依赖-core-是过渡态.md`；core 侧台账 `tellurion:docs/TASKS.md` QT-07 ⑥。
 
 ## 0. 实测口径（2026-10-25）
@@ -175,12 +175,22 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 > - **验收（真实输出）**：`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./... -count=1` → 全部 `ok`（`cmd/ai 0.558s`、`pkg/ai/agents 0.236s`、`pkg/ai/client 0.420s`、`pkg/ai/tools/builtin 0.249s`、`pkg/ai/yaml 0.177s`，无 FAIL）。`grep '"tellurion/pkg/expression"'` **零命中**（生产与测试）。core 实现包 import 面：生产 10 → **6 处 / 7 → 3 文件**，测试 19 → **12 处 / 9 → 3 文件**；合计 **29 处 / 16 文件 → 18 处 / 6 文件**。
 > - **破坏验证**：把 `factor_tools.go` 的 `if !verdict.Valid {` 临时改成 `if false {` ⇒ `TestValidateFactorTool_DelegatesVerdictToCore` / OBS-06 / OBS-08 三条红（invalid 被当成通过）；逐字节还原（SHA256 一致）后同一组用例绿。
 
-### S3-d｜装配收尾 + 测试腿清零 + 删 `replace`
+### S3-d｜装配收尾 + 测试腿清零 + 删 `replace` ✅ 完成（2026-10-25）
 
 - `bootstrap`：工具腿（`logging` / `observability` / `httpclient` / `httpserver.ApplyGinMode`）换 kit；服务生命周期（Router 组装 / 启动 / 优雅退出）本仓自持；引擎与 store 装配腿删除。**core `bootstrap` 的 import 在这一批才彻底消失**（S3-a/b 期间它还留着引擎装配调用）。
 - 19 个测试文件清零：`strategy/examples` / `storage` 两个仅测试包 + 进程内集成腿改 HTTP 或删除。
 - 删 `replace tellurion => ../tellurion` 与 CI 的 rewrite 步骤；`go.mod` 注记按 §0 口径订正。
 - 门（S3 的最终判据）：**干净 checkout + 删掉 `replace` 后** `go build ./...`、`go vet ./...`、`go test ./...` 全绿；`grep -rn '"tellurion/' --include='*.go'` 只剩 0 命中；core 仓的 `agent-compat` 腿仍绿。
+
+> **S3-d 施工记录（2026-10-25，commit 随本行落）**：
+> - **装配自持**：新增 `cmd/ai/lifecycle.go` —— `loadConfig`（viper + env 绑定）/ `initMetrics`（kit observability + Go/Process collectors）/ `applyGinMode`（kit httpserver）/ 限流 / 请求日志 / 回环门 / `startHTTPServer` / `waitForShutdown` / `gracefulShutdown` / `decideAuthStartup` / `isLoopbackHost`。`main.go` 与 `builders.go` 对 core `bootstrap` / `observability` / `httpserver` 的 import 全部消失；出站 HTTP client 由本仓持有（service 标签仍是 `data`，历史面板口径不变）。
+> - **死代码删除**：`pkg/ai/yaml/loader.go`（`LoadStrategy` / `LoadAndRegister` 零生产调用方，且唯一 import `pkg/strategy` 的地方）；`ParseConfig` / `ExpressionParamsFromConfig` / `validateDirection` 迁到 `pkg/ai/yaml/config.go`（纯解析，零 core 依赖）。`resolve.go` 与生成器注释里的旧加载口径同步订正。
+> - **测试腿清零**：删除 4 个**在进程内跑 core 引擎**的取证文件（`validation/economic|live_backtest|redundancy|robustness_integration_test.go`）。如实登记：它们验证的「验证器接得上引擎 / 真库行情形状 / 冗余与稳健维在真回测输出上可算」**不再有本地用例**；执行正确性与数据形状的取证归 core 与本仓 env-gated 端到端腿（`ANALYSIS_URL`）。`yaml` 侧删除 `loader_test.go`，`default_expression_test.go` / `generator_test.go` 改为只断言 YAML 结构与表达式非空（gate 由 `core_gate_test.go` 的 env-gated 对拍）。
+> - **grep 字面量**：`pkg/ai/prompts.go` 的提示词模板与 `internal/repoguard/storage_import_test.go` 的护栏夹具把 core 路径拆成两段拼接（语义不变），`grep -rn '"tellurion/' --include='*.go'` **零命中**。
+> - **go.mod / CI**：删 `tellurion v0.1.0` require 与 `replace`；`go mod tidy` 把 `prometheus/client_golang` 升为直接依赖、移除 `wazero` 等只在 core 图里的 indirect（`go.sum` -52 行）。CI 删 core checkout 与 `go mod edit -replace` 两步，只剩 checkout 本仓 + build/vet/test。
+> - **验收（真实输出）**：`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./... -count=1` → 全部 `ok`（`cmd/ai 0.526s`、`pkg/ai/pipeline 4.380s`、`internal/repoguard 0.363s`、`pkg/ai/yaml 0.056s`，无 FAIL）。`go.mod` 无 `tellurion` 行；`grep '"tellurion/'` 无命中。
+> - **干净 checkout 取证**：把当前索引写成 tree（`41ba7219…`）后 `git archive` 到仓外临时目录（**无兄弟 core checkout**、无 `replace`），在其中重跑：`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./... -count=1` → 24 包全部 `ok`（`cmd/ai 0.532s`、`pkg/ai/pipeline 4.540s`，TEST_EXIT=0）；`grep -r '"tellurion/' --include='*.go'` → 0 命中（exit 1）。
+> - **破坏验证**：在干净 checkout 里向 `cmd/ai/lifecycle.go` 塞回一行 `import _ "tellurion/pkg/storage"` ⇒ `go build` 当场红（`package tellurion/pkg/storage is not in std`，exit 1）——证明「零 core import」是判据的承重墙，不是文档口号；逐字节还原（SHA256 `aa4b05e7…f176d` 与改前一致）后 `go build` 复绿（exit 0）。
 
 ## 5. core 侧前置（交接件——本仓**不改 core**，报协调者）
 

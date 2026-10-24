@@ -8,10 +8,9 @@ package main
 // 对这四族路由做纯反代（cmd/analysis/handlers_ai_proxy.go），前端与
 // openapi 契约零改动。
 //
-// 依赖方向（拆仓后的不变量，repoguard/ai_boundary 盯）：本进程 import
-// core 的 pkg/* 单向；core 侧对 pkg/ai 的引用在阶段 1 仍存在
-// （BuildCopilot / BuildToolsRegistry），阶段 2 本文件与 pkg/ai 一起
-// 搬进 tellurion-agent 仓，core 归零。
+// 依赖方向（拆仓后的不变量，repoguard/ai_boundary 盯）：QT-17 S3-d 起本进程
+// 对 core **零编译依赖**（bootstrap / observability 已换 kit 或本仓自持），
+// 只经 HTTP 调 analysis-service；core 侧对 pkg/ai 的引用早在阶段 2 归零。
 //
 // QT-17 S3-c-3 起本进程**不再装配回测引擎**：回测 / walk-forward / 表达式
 // 校验都走 core analysis-service 的 HTTP 粗粒度端点，"回测行为对等"由
@@ -20,6 +19,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,20 +27,25 @@ import (
 	kitauth "github.com/ruoxizhnya/tellurion-kit/auth"
 	kitdb "github.com/ruoxizhnya/tellurion-kit/db"
 	kithttpserver "github.com/ruoxizhnya/tellurion-kit/httpserver"
+	kitlogging "github.com/ruoxizhnya/tellurion-kit/logging"
+	kitobservability "github.com/ruoxizhnya/tellurion-kit/observability"
 	"github.com/spf13/viper"
 	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/gene_pool"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/aistore"
-	"tellurion/pkg/bootstrap"
-	corehttpserver "tellurion/pkg/httpserver"
-	"tellurion/pkg/observability"
 )
 
 func main() {
-	logger := bootstrap.InitLogger()
-	m := bootstrap.InitMetrics(logger)
-	v := bootstrap.LoadConfig(logger, "config/ai-service.yaml")
+	// S3-d：配置 / 日志 / 指标 / 生命周期全部本仓自持（core bootstrap 退场）。
+	preLogger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+	v, err := loadConfig("config/ai-service.yaml")
+	if err != nil {
+		preLogger.Fatal().Err(err).Msg("Failed to read config file")
+	}
+	kitlogging.Init(v.GetString("logging.level"), v.GetString("logging.format"))
+	logger := kitlogging.Logger
+	m := initMetrics(logger)
 
 	// QT-17 ②：实验/研究/假设域的自有 store（ai schema，幂等迁移 + 内置
 	// 假设种子）。DSN 与 core store 同源同键（database.*），只是落自己的表；
@@ -102,7 +107,7 @@ func main() {
 		logger,
 	)
 
-	bootstrap.ApplyGinMode(v, logger)
+	applyGinMode(v, logger)
 	router := buildRouter(authSvc, v, logger)
 
 	// 健康探针（local-stack netstat 断言 + compose healthcheck 消费）。
@@ -112,7 +117,7 @@ func main() {
 			"status":  "ok",
 		})
 	})
-	router.GET("/metrics", observability.Handler(m))
+	router.GET("/metrics", kitobservability.Handler(m))
 
 	// ── 四族 AI 路由（自 analysis 迁入，路径不变）────────────────────
 	registerCopilotRoutes(router, copilotService, backtestRunner)
@@ -136,13 +141,13 @@ func main() {
 	// 一律 admin（fail-closed）。
 	NewToolsHandler(toolsRegistry, logger, WithToolsAuth(authSvc)).RegisterRoutes(router)
 
-	srv := bootstrap.StartHTTPServer(router, v, logger, "AI Service (ai-service)")
+	srv := startHTTPServer(router, v, logger, "AI Service (ai-service)")
 
-	sig := bootstrap.WaitForShutdown()
+	sig := waitForShutdown()
 	logger.Info().Str("signal", sig.String()).Msg("Shutdown signal received; beginning graceful drain")
-	// 本进程不再持有 core 的 job service / alert manager / store：
-	// GracefulShutdown 只负责 HTTP 优雅退出，aiStore 由 defer 自行收尾。
-	bootstrap.GracefulShutdown(srv, nil, nil, nil, logger)
+	// 本进程不持有 core 的 job service / alert manager / store：
+	// gracefulShutdown 只负责 HTTP 优雅退出，aiStore 由 defer 自行收尾。
+	gracefulShutdown(srv, logger)
 }
 
 // analysisAPIURL 解析 core analysis-service 的基址
@@ -168,14 +173,14 @@ var aiPublicPaths = []string{
 	"/metrics",
 }
 
-// initTokenService 构造 kit 的 token 服务，并执行 core 的启动门
-// （`bootstrap.DecideAuthStartup`：没有密钥就拒绝启动，唯一豁免是显式声明的
+// initTokenService 构造 kit 的 token 服务，并执行本仓的启动门
+// （`decideAuthStartup`：没有密钥就拒绝启动，唯一豁免是显式声明的
 // 本地/容器回环形态）。
 //
 // 与旧 `bootstrap.InitAuth` 的差别（S3-b 有意为之）：不持有连接池、不读写
 // users、不写 audit_logs —— 本进程只验证 token 签名与 claims。
 func initTokenService(v *viper.Viper, logger zerolog.Logger) *kitauth.TokenService {
-	d := bootstrap.DecideAuthStartup(
+	d := decideAuthStartup(
 		v.GetString("auth.jwt_secret"),
 		v.GetBool("auth.allow_insecure"),
 		v.GetString("server.host"),
@@ -206,26 +211,24 @@ func initTokenService(v *viper.Viper, logger zerolog.Logger) *kitauth.TokenServi
 // buildRouter 组装 HTTP 中间件链：recovery、CORS、限流、请求日志、鉴权。
 //
 // 为什么本仓自持而不是继续用 `bootstrap.BuildRouter`：后者形参是 core 的
-// `*auth.Service`（带连接池、audit 写库），S3-b 换 kit 后类型不再兼容。
-// 其余构件仍复用 core bootstrap 的实现（限流 / 请求日志 / 启动门），
-// 到 S3-d 随 router 自持一起换 kit。
+// `*auth.Service`（带连接池、audit 写库）。S3-d 起路由生命周期与限流/回环门
+// 全部由本仓持有，kit 只提供 CORS 与错误响应。
 func buildRouter(authSvc *kitauth.TokenService, v *viper.Viper, logger zerolog.Logger) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(kithttpserver.CORS(kithttpserver.AllowedOrigins(v)))
-	router.Use(bootstrap.NewRateLimiter(bootstrap.RateLimitPerMinute(v), time.Minute).Middleware())
-	router.Use(bootstrap.RequestLogger(logger))
+	router.Use(newRateLimiter(rateLimitPerMinute(v), time.Minute).Middleware())
+	router.Use(requestLogger(logger))
 	if authSvc.Enabled() {
 		router.Use(authSvc.Middleware())
 		// 回测 / walk-forward / 表达式校验要打 core 的变更端点；以调用者
 		// 本人身份转发（本进程不签发 token）。显式放进请求 ctx，异步链路
 		// 由调用方用 context.WithoutCancel 保留值。
 		router.Use(forwardBearerToken())
-	} else if bootstrap.IsLoopbackHost(v.GetString("server.host")) {
-		// QT-50 ③-④：insecure 模式逐请求回环门。kit v0.1.0 的 httpserver
-		// 还没有 LoopbackOnly，这里直接复用 core 的同一份实现（单一真相；
-		// S3-d 把 router 生命周期收进本仓时再决定是否上收 kit）。
-		router.Use(corehttpserver.LoopbackOnly())
+	} else if isLoopbackHost(v.GetString("server.host")) {
+		// insecure 模式逐请求回环门：启动期只判绑定网卡，同机进程 / 端口
+		// 转发仍能打到管理面，故运行期还要判来源（fail-closed）。
+		router.Use(loopbackOnly())
 	}
 	return router
 }

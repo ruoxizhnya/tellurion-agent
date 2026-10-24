@@ -48,7 +48,7 @@ var knownSizingMethods = map[string]bool{
 
 // ResolveExpression 把一份表达式策略 YAML 解析成「提交给 core 的请求形状」。
 //
-// 与旧 LoadStrategy 的差别（如实登记）：
+// 与旧本地加载路径的差别（如实登记）：
 //   - 不再在本地解析 DSL（那是 core 的执行路径），语法错误由 core 的
 //     expression 引擎在回测入口返回；本仓只校验 YAML 形状、方向、仓位方法；
 //   - 不再因为 strategy.name == "expression_template" 而拒绝 —— 本地注册表

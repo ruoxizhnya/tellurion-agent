@@ -24,7 +24,6 @@ import (
 	"tellurion-agent/pkg/ai/tools/builtin"
 	"tellurion-agent/pkg/aistore"
 	"tellurion-agent/pkg/copilot"
-	"tellurion/pkg/bootstrap"
 )
 
 // ── 来自 core pkg/bootstrap/copilot.go（AI 拆仓阶段 2 随迁，逐字搬运）──
@@ -182,7 +181,7 @@ func BuildToolsRegistry(
 	if dataServiceURL == "" {
 		dataServiceURL = "http://localhost:8081"
 	}
-	dataClient := builtin.NewDataSourceClient(dataServiceURL, bootstrap.HTTPClient)
+	dataClient := builtin.NewDataSourceClient(dataServiceURL, outboundHTTPClient)
 	if err := reg.Register(builtin.NewDataOHLCVTool(dataClient)); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register data.ohlcv tool")
 	}

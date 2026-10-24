@@ -6,32 +6,21 @@ on:
   pull_request:
 
 jobs:
-  # 单一 Go job：build + vet + test。agent 模块经 replace 依赖 core 仓
-  # （../tellurion），CI 里把 core checkout 进 workspace 并用
-  # `go mod edit -replace` 改写路径 —— 本地开发用工作区同级目录，两者不冲突。
+  # 单一 Go job：build + vet + test。
+  #
+  # QT-17 S3-d 起本仓对 core **零编译依赖**（go.mod 无 require / replace），
+  # CI 不再 checkout core、也不再改写 replace —— 单仓 checkout 即可构建
+  # （R1/R2）。
   test:
     name: Build / vet / test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # core 仓（replace 目标）。checkout 进 workspace 内的 core/，
-      # 随后把 replace 从 ../tellurion 改写到这个绝对路径。
-      - name: Checkout core module
-        uses: actions/checkout@v4
-        with:
-          repository: ruoxizhnya/tellurion
-          ref: main
-          path: core
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
           cache: true
-
-      - name: Rewrite replace to CI checkout path
-        run: |
-          go mod edit -replace tellurion=${{ github.workspace }}/core
 
       - name: Build
         run: go build ./...
@@ -41,5 +30,3 @@ jobs:
 
       - name: Test
         run: go test ./... -count=1
-        env:
-          TUSHARE_TOKEN: ""
