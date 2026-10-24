@@ -170,7 +170,7 @@ verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切�
 - **③ 要求**：
   ① agent 仓建 `ai` schema 的 DDL（表名以 core `pkg/storage/experiments.go` / `research.go` / `postgres.go` 的现有定义为准，逐表核对后迁移，**不凭类型名臆造表名**）与自己的 migrate 入口；
   ② agent 用 `kit/db` 建自己的 store，替换 12 处 `PostgresStore` 用法；
-  ③ **仪器域不迁**：`TradingCalendar` / `ListingWindow` 属 core，agent 改走 core 的**只读 port**（D10 §87「只读视图」通道）——**本单需同时补进 D24 的合法动作清单**（现六类里没有「交易日历/上市窗口查询」）——这是对**已裁决文档的增补**，开工前需用户确认第 7 类动作；**获确认后该动作的 endpoint + DTO + 鉴权随 QT-50 ③-③/④ 统一落 `docs/openapi.yaml` 并纳入路由表对拍**（勿另起手写 DTO，refactor-plan-review H2）；
+  ③ **仪器域不迁**：`TradingCalendar` / `ListingWindow` 属 core，agent 改走 core 的**只读 port**（D10 §87「只读视图」通道）——**第 7 类动作已于 2026-10-24 用户确认**（core 侧端点单号 QT-67，**已落地并推送：`2a4b076`**，本仓可开工消费）；该动作的 endpoint + DTO + 鉴权随 QT-50 ③-③/④ 统一落 `docs/openapi.yaml` 并纳入路由表对拍（勿另起手写 DTO，refactor-plan-review H2）；
   ④ 双写期：旧表与 `ai.*` 同时写 → 行数/校验和对拍 → 切读 → 停写；core 侧 `experiments.go` / `research.go` 定义标 deprecated 并登记删除期限；
   ⑤ 护栏：agent 禁止 import `pkg/storage`（AST）。
 - **④ 约束与非目标**：**不删 core 旧表**（保留只读一个周期）；不迁行情/回测结果/因子定义（仪器域）；不改 core 的实验 handler；不在本单做 HTTP 化（QT-50）。
@@ -184,7 +184,7 @@ verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切�
 > - **④ 双写开始（对拍期）**：`cmd/ai/experiment_dualwrite.go` 双写 `ai.experiments` + legacy `public.experiments`；两张表 BIGSERIAL 各自发号，适配器内记 legacyID→aiID 映射（进程内，重启即失，差异由对拍测试暴露）。**读面已切 `ai.*`**（research 三表 + factor_hypothesis）——实证：真库 `research.*` 0 行、`factor_hypothesis` 12 行全 builtin 种子且 agent 启动镜像播种收敛、experiments 本仓只写不读。**停写待办**：对拍零差异 → 停写 legacy（检查项见 `docs/db-schema.md` §5：`factor_genes` / `strategy_genes` 无写入方，将来接写必须直写 `ai.*`）。
 > - **⑤ 护栏**：`internal/repoguard/storage_import_test.go`——非测试 `.go` 禁 import `tellurion/pkg/storage`，白名单三条（`cmd/ai/main.go` 引擎仪器域装配 / `experiment_dualwrite.go` 双写期与 replace 同寿 / `handlers_explore.go` ListingWindow 仪器域待 D24 第 7 类 port），每条带理由+过期条件；**夹具正反取证**（违规→红 / 干净→绿 / 白名单放行 / 条目不再 import→红 / 条目文件消失→红 / 测试文件不在范围），真仓腿另查「白名单条目必须还活着」。
 > - **验收（真库腿已跑）**：`TEST_DATABASE_DSN` 下全量 `go test ./...` —— aistore / pipeline / loop / cmd / repoguard 全绿；`pkg/ai/validation` 5 例红为**既有跨仓回归**（core 未推 QT-11~13 注册表改构造函数，与本单正交，处置归 C4/推送前）。构建取证：core 工作树有另一会话的 QT-52 WIP 会污染 replace 链，本单在 core HEAD `865f7bf` 隔离 worktree 下完成 `go build`/`go vet`/`go test` 取证。
-> - **仍待**：③ 仪器域只读 port（D24 第 7 类动作，需用户确认）；S3 去 replace（依赖 QT-50，见下）；core 侧 deprecated 标记（交接件见下）。
+> - **仍待**：③ 仪器域只读 port（**QT-67 已于 2026-10-24 落地并推送 `2a4b076`，可开工消费**）；S3 去 replace（依赖 QT-17 ③ + QT-50，见下）；core 侧 deprecated 标记（交接件见下）。
 > **🔶 进度（2026-10-24，④ 停写切换，本次）**：见下行专节。
 >
 > #### ④ 停写切换（2026-10-24，ODR-001）
