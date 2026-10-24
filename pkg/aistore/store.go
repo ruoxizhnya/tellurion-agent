@@ -42,6 +42,12 @@ func NewStoreWithPool(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
+// Pool 返回底层 ai schema 连接池，供本仓其它 ai.* 数据访问层（如 gene_pool）
+// 复用同一句柄——它们不该再借 core 的 store.DB()。
+func (s *Store) Pool() *pgxpool.Pool {
+	return s.pool
+}
+
 // SeedBuiltins 在库里还没有记录时写入内置因子假设。启动路径调用；与 core
 // 的种子逻辑同款（ON CONFLICT DO NOTHING，不覆盖人写的假设）。
 func (s *Store) SeedBuiltins(ctx context.Context) error {

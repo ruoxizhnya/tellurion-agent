@@ -47,7 +47,7 @@ func (p *FactorPool) Save(ctx context.Context, gene *FactorGene) error {
 	}
 
 	query := `
-		INSERT INTO factor_genes (
+		INSERT INTO ai.factor_genes (
 			id, name, category, formula, description, rationale,
 			ic, ir, turnover, sharpe, fitness, generation,
 			parent_ids, status, created_at, updated_at
@@ -87,7 +87,7 @@ func (p *FactorPool) Get(ctx context.Context, id string) (*FactorGene, error) {
 		SELECT id, name, category, formula, description, rationale,
 			ic, ir, turnover, sharpe, fitness, generation,
 			parent_ids, status, created_at, updated_at
-		FROM factor_genes WHERE id = $1
+		FROM ai.factor_genes WHERE id = $1
 	`
 
 	row := p.pool.QueryRow(ctx, query, id)
@@ -134,7 +134,7 @@ func (p *FactorPool) List(ctx context.Context, category string, status string, m
 		SELECT id, name, category, formula, description, rationale,
 			ic, ir, turnover, sharpe, fitness, generation,
 			parent_ids, status, created_at, updated_at
-		FROM factor_genes
+		FROM ai.factor_genes
 		WHERE ($1 = '' OR category = $1)
 			AND ($2 = '' OR status = $2)
 			AND ic >= $3
@@ -157,7 +157,7 @@ func (p *FactorPool) ListByGeneration(ctx context.Context, generation int) ([]*F
 		SELECT id, name, category, formula, description, rationale,
 			ic, ir, turnover, sharpe, fitness, generation,
 			parent_ids, status, created_at, updated_at
-		FROM factor_genes
+		FROM ai.factor_genes
 		WHERE generation = $1
 		ORDER BY fitness DESC
 	`
@@ -173,7 +173,7 @@ func (p *FactorPool) ListByGeneration(ctx context.Context, generation int) ([]*F
 
 // UpdateStatus updates the status of a factor gene.
 func (p *FactorPool) UpdateStatus(ctx context.Context, id string, status string) error {
-	query := `UPDATE factor_genes SET status = $1, updated_at = $2 WHERE id = $3`
+	query := `UPDATE ai.factor_genes SET status = $1, updated_at = $2 WHERE id = $3`
 	_, err := p.pool.Exec(ctx, query, status, time.Now(), id)
 	if err != nil {
 		return fmt.Errorf("update status: %w", err)
@@ -184,7 +184,7 @@ func (p *FactorPool) UpdateStatus(ctx context.Context, id string, status string)
 // UpdateMetrics updates the metrics (IC, IR, etc.) of a factor gene.
 func (p *FactorPool) UpdateMetrics(ctx context.Context, id string, ic, ir, turnover, sharpe, fitness float64) error {
 	query := `
-		UPDATE factor_genes
+		UPDATE ai.factor_genes
 		SET ic = $1, ir = $2, turnover = $3, sharpe = $4, fitness = $5, updated_at = $6
 		WHERE id = $7
 	`
@@ -197,7 +197,7 @@ func (p *FactorPool) UpdateMetrics(ctx context.Context, id string, ic, ir, turno
 
 // Delete removes a factor gene from the pool.
 func (p *FactorPool) Delete(ctx context.Context, id string) error {
-	query := `DELETE FROM factor_genes WHERE id = $1`
+	query := `DELETE FROM ai.factor_genes WHERE id = $1`
 	_, err := p.pool.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("delete factor gene: %w", err)
@@ -207,7 +207,7 @@ func (p *FactorPool) Delete(ctx context.Context, id string) error {
 
 // Count returns the total number of factor genes.
 func (p *FactorPool) Count(ctx context.Context) (int, error) {
-	query := `SELECT COUNT(*) FROM factor_genes`
+	query := `SELECT COUNT(*) FROM ai.factor_genes`
 	var count int
 	err := p.pool.QueryRow(ctx, query).Scan(&count)
 	if err != nil {
@@ -218,7 +218,7 @@ func (p *FactorPool) Count(ctx context.Context) (int, error) {
 
 // CountByStatus returns the number of factor genes by status.
 func (p *FactorPool) CountByStatus(ctx context.Context, status string) (int, error) {
-	query := `SELECT COUNT(*) FROM factor_genes WHERE status = $1`
+	query := `SELECT COUNT(*) FROM ai.factor_genes WHERE status = $1`
 	var count int
 	err := p.pool.QueryRow(ctx, query, status).Scan(&count)
 	if err != nil {
@@ -234,7 +234,7 @@ func (p *FactorPool) GetTopFactors(ctx context.Context, n int) ([]*FactorGene, e
 
 // GetCategories returns all distinct factor categories.
 func (p *FactorPool) GetCategories(ctx context.Context) ([]string, error) {
-	query := `SELECT DISTINCT category FROM factor_genes ORDER BY category`
+	query := `SELECT DISTINCT category FROM ai.factor_genes ORDER BY category`
 	rows, err := p.pool.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("get categories: %w", err)

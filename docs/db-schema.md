@@ -1,14 +1,14 @@
 ---
 status: active
-last-verified: 2026-10-24
-verified-by: QT-17 ④ —— 停写 legacy public.experiments（写路径只剩 ai.experiments）+ 30 行历史回填归档，行级对拍 0 差异
+last-verified: 2026-10-25
+verified-by: QT-17 ⑤ —— 基因池读写切 ai.*（SQL 全限定 + 自持连接池），停写 core public.*
 ---
 
 # DB Schema — tellurion-agent
 
 > **所有权声明**：本仓**拥有 `ai` schema 的 DDL 与迁移**（目标态，QT-17）。
 
-**现状（QT-17 ④，2026-10-24；③ 2026-10-25）**：`ai` schema 七张表的 DDL 与迁移入口在本仓 [`pkg/aistore`](../pkg/aistore)（逐列对照 core 定义搬入，`parent_id` 自引用与外键改指 `ai.*`）；自有 `Store`（`kit/db` 连接池 + 启动迁移 + 内置种子）已装配进 `cmd/ai`。**写路径已停写 legacy**（QT-17 ④）：`cmd/ai/main.go` 直接把 `*aistore.Store` 注入 pipeline / explore 的 sink，双写适配器 `cmd/ai/experiment_dualwrite.go` 已整体删除；`public.experiments` 冻结在 30 行（2026-10-24 一次性回填归档进 `ai.experiments`，行级 `EXCEPT` 双向对拍 0 差异）。**读路径已切 `ai.*`**（research 域三表与 `factor_hypothesis`），仪器域日历/上市窗口走 core 的 QT-67 只读端点（QT-17 ③）。core 侧 DDL 唯一在 `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`（`experiments` :424、`factor_hypothesis` :575、`factor_genes` :930、`strategy_genes` :954、研究域 :361-398）——**旧表只保留不删**，core 侧导出符号已标 `Deprecated`，删除期限登记在 `tellurion:docs/TASKS.md` QT-05 ④（2027-01-31，S3 之后）。
+**现状（QT-17 ⑤，2026-10-25；④ 2026-10-24；③ 2026-10-25）**：`ai` schema 七张表的 DDL 与迁移入口在本仓 [`pkg/aistore`](../pkg/aistore)（逐列对照 core 定义搬入，`parent_id` 自引用与外键改指 `ai.*`）；自有 `Store`（`kit/db` 连接池 + 启动迁移 + 内置种子）已装配进 `cmd/ai`。**写路径已停写 legacy**（QT-17 ④）：`cmd/ai/main.go` 直接把 `*aistore.Store` 注入 pipeline / explore 的 sink，双写适配器 `cmd/ai/experiment_dualwrite.go` 已整体删除；`public.experiments` 冻结在 30 行（2026-10-24 一次性回填归档进 `ai.experiments`，行级 `EXCEPT` 双向对拍 0 差异）。**读路径已切 `ai.*`**（research 域三表与 `factor_hypothesis`），仪器域日历/上市窗口走 core 的 QT-67 只读端点（QT-17 ③）。core 侧 DDL 唯一在 `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`（`experiments` :424、`factor_hypothesis` :575、`factor_genes` :930、`strategy_genes` :954、研究域 :361-398）——**旧表只保留不删**，core 侧导出符号已标 `Deprecated`，删除期限登记在 `tellurion:docs/TASKS.md` QT-05 ④（2027-01-31，S3 之后）。**基因池读写已切 `ai.*`**（QT-17 ⑤，2026-10-25）：`pkg/ai/gene_pool` 的表引用全部显式限定 `ai.factor_genes` / `ai.strategy_genes`，连接池改为 `aistore.Store.Pool()`（自持句柄），不再借 core 的 `store.DB()` 按 `search_path` 落到 `public.*`。
 > 上级依据：`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §1 —— **DDL 只有一个 owner**，同一个 PG 实例、每服务一个 schema，将来拆库是"按 schema 搬走"而不是重写。
 > 本文件是本仓表结构的**唯一真相源**：代码里的建表语句与它不一致时，**改代码**；要改表结构，先改本文件（结构级变更还要立 ADR）。
 
@@ -20,8 +20,8 @@ verified-by: QT-17 ④ —— 停写 legacy public.experiments（写路径只剩
 |---|---|---|
 | `ai.experiments` | 实验记录 | **单写已切（QT-17 ④）**：写路径只剩 `ai.experiments`；旧表 `public.experiments` 停写、冻结 30 行（历史行已于 2026-10-24 回填归档，行级对拍 0 差异）。本仓只写不读 |
 | `ai.factor_hypothesis` | 内置/人写因子假设 | **读写均已切**（对照 core `public.factor_hypothesis`）；builtin 种子启动时 `ON CONFLICT DO NOTHING` 播种 |
-| `ai.factor_genes` | 因子基因池 | DDL 已落（对照 core `public.factor_genes`）；**读写尚未切**——`pkg/ai/gene_pool` 现以未限定表名写 core `public.factor_genes`（见 §5 待定 1） |
-| `ai.strategy_genes` | 策略基因池 | DDL 已落（对照 core `public.strategy_genes`）；**读写尚未切**——同 `factor_genes` |
+| `ai.factor_genes` | 因子基因池 | **读写已切（QT-17 ⑤）**：SQL 全部限定 `ai.factor_genes`，池为 `aistore` 自持；旧表 `public.factor_genes` 停写（真库 0 行，未产生过脏数据），保留不删 |
+| `ai.strategy_genes` | 策略基因池 | **读写已切（QT-17 ⑤）**：SQL 全部限定 `ai.strategy_genes`，池为 `aistore` 自持；旧表 `public.strategy_genes` 同上 |
 | `ai.research_profile` | 研究画像 | **读已切**（对照 core `research.profile`）；本仓只读不写，**全工作区不存在 `research.*` 的写入方**（2026-10-24 实测：core 侧无研究域 handler，真库 0 行） |
 | `ai.research_conclusion` | 研究结论 | **读已切**（对照 core `research.conclusion`）；本仓只读不写，写方不存在 |
 | `ai.research_question` | 研究问题 | **读已切**（对照 core `research.question`）；本仓只读不写，写方不存在 |
@@ -62,7 +62,7 @@ verified-by: QT-17 ④ —— 停写 legacy public.experiments（写路径只剩
 
 ## 5. 待定 / 已知未落项（如实登记，不写成已完成）
 
-1. **`factor_genes` / `strategy_genes` 仍写 core 旧表（2026-10-24 实测，本次新发现）**：`pkg/ai/gene_pool` 的 SQL 用**未限定表名**（`INSERT INTO factor_genes …`），按 `search_path`（`"$user", public`）解析到 `public.factor_genes` / `public.strategy_genes`；`cmd/ai/main.go` 又把 core 的 `store.DB()` 池注入两个 pool。真库当前两表各 0 行（`save_factor` / `save_strategy` 尚未被调过），所以尚未产生脏数据。**处置**：切换到 `ai.*` 属独立一小步（要先把池换成自有池并给 SQL 加 schema 限定 + 补对拍），不在 QT-17 ④ 的停写范围内，**未做**。下一次接写前必须先落这一步，否则会持续写别人的表。
+1. ✅ **已收口（QT-17 ⑤，2026-10-25）：基因池读写已切 `ai.*`**。本条原先记录的事故面——SQL 用未限定表名、经 core 的 `store.DB()` 按 `search_path` 落到 `public.*`——已消除：`pkg/ai/gene_pool` 的 18 处表引用全部写成 `ai.factor_genes` / `ai.strategy_genes`，`cmd/ai/main.go` 改注入 `aistore.Store.Pool()`。护栏两条：`TestSQL_TableRefsAreSchemaQualified`（静态，只解析字符串字面量）与 `TestPools_WriteOnlyAiSchema`（真库腿，写后 `public.*` 同 id 行必须为 0）。旧表 `public.factor_genes` / `public.strategy_genes` **保留不删**（切换前真库两表各 0 行，无脏数据），退役归 core QT-05 ④。
 2. **`research.*` 的「停写」是无操作**：全工作区不存在 `research.profile/conclusion/question` 的生产写入方（core 的 `pkg/storage/research.go` 只有读方法 `GetResearchProfile`，`tellurion:cmd/analysis` 无研究域 handler），真库 0 行。此前本文与 `docs/TASKS.md` 写的「写方在 core / core 侧停写是它的待办」**与代码事实不符**，已在本版订正。因此这三表不存在「停写」动作，只存在「将来接写时直写 `ai.*`」的约束。
 3. **`ai.research_*` 目前也没有写入方**：本仓只有 `aistore.GetResearchProfile`（读）；`research.profile` 工具的降级回退是 vault 镜像，不是写库。将来接写时直接写 `ai.*`。
 4. **core 侧 deprecated 标记与删除期限**：属 core 仓待办，本仓**不改** core。交接件见 `docs/TASKS.md` QT-17 的「core 侧交接件」小节（含要标记的符号清单与建议删除期限 2027-01-31，需协调者/core 确认）。

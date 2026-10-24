@@ -199,7 +199,7 @@ verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切�
 >
 > **未落 / 如实登记**：
 > - `research.*` 的「停写」是**无操作**：全工作区不存在其生产写入方（core `pkg/storage/research.go` 只有 `GetResearchProfile`，`cmd/analysis` 无研究域 handler；真库 0 行）。此前台账/`db-schema.md` 写的「写方在 core」**与代码事实不符**，已订正。
-> - `factor_genes` / `strategy_genes` **仍写 core `public.*`**（`pkg/ai/gene_pool` 用未限定表名，经 `search_path` 落到 `public`，池也是 core 的 `store.DB()`）；两表真库当前 0 行。切换属独立一步，**未做**，见 `docs/db-schema.md` §5 待定 1。
+> - `factor_genes` / `strategy_genes` **当时仍写 core `public.*`**（`pkg/ai/gene_pool` 用未限定表名，经 `search_path` 落到 `public`，池也是 core 的 `store.DB()`）；两表真库当前 0 行。**已于 2026-10-25 由 ⑤ 收口**（见下节），本条保留为当日的如实记录。
 > - `grep -r "pkg/storage"` **未归零**：生产代码 1 处（`handlers_explore.go`，等 D24 第 7 类动作），其余在 `_test.go` / 文档 / 护栏注释；整体归零依赖 S3 删 replace（QT-50）。
 
 > #### ③ 仪器域只读 port 消费（2026-10-25，QT-67）
@@ -213,6 +213,18 @@ verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切�
 > **验收取证（真实退出码）**：`gofmt -l`（改动的 7 个文件）→ 空；`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./cmd/ai/... ./pkg/ai/client/... ./internal/repoguard/... -count=1` → 全 `ok`，**0**。
 > **破坏验证**：临时新建 `cmd/ai/__storage_probe.go`（`import _ "tellurion/pkg/storage"`）→ `TestStorageImportBoundary` 当场红并点名 `cmd/ai/__storage_probe.go -> tellurion/pkg/storage`（**EXIT=1**）→ 删除探针后复跑 → **EXIT=0**，工作区零残留。
 > **仍未做（如实）**：`guard` 判据只覆盖「生产 .go 不 import storage」；`_test.go` 里的合法用法（如 `pkg/ai/validation/live_backtest_integration_test.go` 查仪器域）仍在护栏范围外，单独 `grep -r` 不会归零。整体归零仍等 S3 删 `replace`（QT-50）。
+
+> #### ⑤ 基因池读写切 `ai.*`（2026-10-25）
+>
+> **已落**：
+> 1. **SQL 全限定**：`pkg/ai/gene_pool/factor_pool.go` / `strategy_pool.go` 的 18 处表引用全部写成 `ai.factor_genes` / `ai.strategy_genes`（`grep -E "(FROM|INTO|UPDATE)\s+(factor|strategy)_genes"` 零命中）。
+> 2. **连接池自持**：`aistore.Store` 新增 `Pool()`；`cmd/ai/main.go` 的 `gene_pool.NewFactorPool/NewStrategyPool` 改注入 `aiStore.Pool()`，不再借 core 的 `store.DB()`（同一 `database.*` DSN，仅句柄归属变成本仓）。
+> 3. **护栏**：`pkg/ai/gene_pool/sql_scope_test.go` 的 `TestSQL_TableRefsAreSchemaQualified` 静态解析两个源文件的**字符串字面量**（注释不参与），裸表名即红；`pool_ai_schema_integration_test.go` 的 `TestPools_WriteOnlyAiSchema` 是真库对拍腿（CRUD 后 `ai.*` 有行、`public.*` 同 id 行必须为 0，旧表不存在也算通过）。
+>
+> **验收取证（真实退出码）**：`gofmt -l pkg/ai/gene_pool pkg/aistore cmd/ai` → 空；`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./pkg/ai/gene_pool/... ./pkg/aistore/... ./cmd/ai/... -count=1` → 全 `ok`，**0**。
+> **破坏验证**：把 `factor_pool.go` 一条 SQL 临时改回 `FROM factor_genes` → `TestSQL_TableRefsAreSchemaQualified` 当场红并点名 `factor_pool.go: 未限定 schema 的表引用 "factor_genes"`（**EXIT=1**）→ 逐字节还原 → 复绿（**EXIT=0**），工作区零残留。
+> **未做 / 环境限制（如实）**：真库腿 `TestPools_WriteOnlyAiSchema` 本机无法执行——本机无 PG 服务（`127.0.0.1:5432` 拒绝连接）且 Docker daemon 未起，故只证到「无 DSN 时显式 skip」，**未取到真库绿**。有库环境跑 `TEST_DATABASE_DSN=... go test ./pkg/ai/gene_pool -run TestPools_WriteOnlyAiSchema -count=1`。
+> **不在本单**：旧表 `public.factor_genes` / `public.strategy_genes` 不删（切换前真库各 0 行、无脏数据），退役随 core QT-05 ④（2027-01-31）。
 
 > #### core 侧交接件（QT-17 ④ 的另一半——本仓**不改 core**，报协调者）
 >

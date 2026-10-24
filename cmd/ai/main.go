@@ -103,8 +103,8 @@ func main() {
 
 	copilotService, copilotRunner := BuildCopilot(v, engine, logger)
 
-	factorPool := gene_pool.NewFactorPool(store.DB())
-	strategyPool := gene_pool.NewStrategyPool(store.DB())
+	factorPool := gene_pool.NewFactorPool(aiStore.Pool())
+	strategyPool := gene_pool.NewStrategyPool(aiStore.Pool())
 	wfRunner := NewWalkForwardEngineAdapter(wfEngine)
 
 	// factor.compute / factor.evaluate / compute_factor_ic 经 HTTP 打

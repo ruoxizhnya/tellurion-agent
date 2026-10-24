@@ -58,7 +58,7 @@ func (p *StrategyPool) Save(ctx context.Context, gene *StrategyGene) error {
 	}
 
 	query := `
-		INSERT INTO strategy_genes (
+		INSERT INTO ai.strategy_genes (
 			id, name, description, strategy_type, code, params,
 			factor_ids, parent_ids, total_return, sharpe, max_drawdown,
 			win_rate, fitness, generation, status, created_at, updated_at
@@ -98,7 +98,7 @@ func (p *StrategyPool) Get(ctx context.Context, id string) (*StrategyGene, error
 		SELECT id, name, description, strategy_type, code, params,
 			factor_ids, parent_ids, total_return, sharpe, max_drawdown,
 			win_rate, fitness, generation, status, created_at, updated_at
-		FROM strategy_genes WHERE id = $1
+		FROM ai.strategy_genes WHERE id = $1
 	`
 
 	row := p.pool.QueryRow(ctx, query, id)
@@ -155,7 +155,7 @@ func (p *StrategyPool) List(ctx context.Context, strategyType string, status str
 		SELECT id, name, description, strategy_type, code, params,
 			factor_ids, parent_ids, total_return, sharpe, max_drawdown,
 			win_rate, fitness, generation, status, created_at, updated_at
-		FROM strategy_genes
+		FROM ai.strategy_genes
 		WHERE ($1 = '' OR strategy_type = $1)
 			AND ($2 = '' OR status = $2)
 			AND fitness >= $3
@@ -178,7 +178,7 @@ func (p *StrategyPool) ListByGeneration(ctx context.Context, generation int) ([]
 		SELECT id, name, description, strategy_type, code, params,
 			factor_ids, parent_ids, total_return, sharpe, max_drawdown,
 			win_rate, fitness, generation, status, created_at, updated_at
-		FROM strategy_genes
+		FROM ai.strategy_genes
 		WHERE generation = $1
 		ORDER BY fitness DESC
 	`
@@ -194,7 +194,7 @@ func (p *StrategyPool) ListByGeneration(ctx context.Context, generation int) ([]
 
 // UpdateStatus updates the status of a strategy gene.
 func (p *StrategyPool) UpdateStatus(ctx context.Context, id string, status string) error {
-	query := `UPDATE strategy_genes SET status = $1, updated_at = $2 WHERE id = $3`
+	query := `UPDATE ai.strategy_genes SET status = $1, updated_at = $2 WHERE id = $3`
 	_, err := p.pool.Exec(ctx, query, status, time.Now(), id)
 	if err != nil {
 		return fmt.Errorf("update status: %w", err)
@@ -205,7 +205,7 @@ func (p *StrategyPool) UpdateStatus(ctx context.Context, id string, status strin
 // UpdateMetrics updates the performance metrics of a strategy gene.
 func (p *StrategyPool) UpdateMetrics(ctx context.Context, id string, totalReturn, sharpe, maxDrawdown, winRate, fitness float64) error {
 	query := `
-		UPDATE strategy_genes
+		UPDATE ai.strategy_genes
 		SET total_return = $1, sharpe = $2, max_drawdown = $3, win_rate = $4, fitness = $5, updated_at = $6
 		WHERE id = $7
 	`
@@ -218,7 +218,7 @@ func (p *StrategyPool) UpdateMetrics(ctx context.Context, id string, totalReturn
 
 // Delete removes a strategy gene from the pool.
 func (p *StrategyPool) Delete(ctx context.Context, id string) error {
-	query := `DELETE FROM strategy_genes WHERE id = $1`
+	query := `DELETE FROM ai.strategy_genes WHERE id = $1`
 	_, err := p.pool.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("delete strategy gene: %w", err)
@@ -228,7 +228,7 @@ func (p *StrategyPool) Delete(ctx context.Context, id string) error {
 
 // Count returns the total number of strategy genes.
 func (p *StrategyPool) Count(ctx context.Context) (int, error) {
-	query := `SELECT COUNT(*) FROM strategy_genes`
+	query := `SELECT COUNT(*) FROM ai.strategy_genes`
 	var count int
 	err := p.pool.QueryRow(ctx, query).Scan(&count)
 	if err != nil {
