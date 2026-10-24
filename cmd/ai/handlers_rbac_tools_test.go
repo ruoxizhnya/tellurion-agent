@@ -14,24 +14,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
+	kitauth "github.com/ruoxizhnya/tellurion-kit/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/auth"
 )
 
 // ── tools: per-tool RBAC ─────────────────────────────────────────────
 
 // tokenFor 与 analysis 侧 handlers_rbac_test.go 同名 helper 语义一致
 // （两包各自独立，允许同形重复 —— 测试 helper 不构成生产双真相）。
-func tokenFor(t *testing.T, svc *auth.Service, role auth.Role) string {
+func tokenFor(t *testing.T, svc *kitauth.TokenService, role string) string {
 	t.Helper()
-	tok, _, err := svc.IssueTokens(&auth.User{ID: 1, Username: string(role), Role: role})
+	tok, _, err := svc.IssueTokens(1, role, role)
 	require.NoError(t, err)
 	return tok
 }
 
-func toolsRBACRouter(t *testing.T, svc *auth.Service) *gin.Engine {
+func toolsRBACRouter(t *testing.T, svc *kitauth.TokenService) *gin.Engine {
 	t.Helper()
 	r := gin.New()
 	r.Use(svc.Middleware())
@@ -84,10 +84,10 @@ func callTool(t *testing.T, r *gin.Engine, name, token string) *httptest.Respons
 
 func TestTools_WriteTool_ViewerForbidden(t *testing.T) {
 	t.Parallel()
-	svc := auth.NewService(nil, auth.Config{JWTSecret: []byte("test")})
+	svc := kitauth.NewTokenService(kitauth.Config{JWTSecret: []byte("test")})
 	r := toolsRBACRouter(t, svc)
 
-	w := callTool(t, r, "save_factor", tokenFor(t, svc, auth.RoleViewer))
+	w := callTool(t, r, "save_factor", tokenFor(t, svc, RoleViewer))
 	assert.Equal(t, http.StatusForbidden, w.Code,
 		"viewer must not be able to run a write-side-effect tool; body=%s", w.Body.String())
 
@@ -101,10 +101,10 @@ func TestTools_WriteTool_ViewerForbidden(t *testing.T) {
 
 func TestTools_WriteTool_TraderAllowed(t *testing.T) {
 	t.Parallel()
-	svc := auth.NewService(nil, auth.Config{JWTSecret: []byte("test")})
+	svc := kitauth.NewTokenService(kitauth.Config{JWTSecret: []byte("test")})
 	r := toolsRBACRouter(t, svc)
 
-	w := callTool(t, r, "save_factor", tokenFor(t, svc, auth.RoleTrader))
+	w := callTool(t, r, "save_factor", tokenFor(t, svc, RoleTrader))
 	// The stub doesn't implement the real Tool interface contract for
 	// execution; what matters is that RBAC did NOT block it (i.e. the
 	// status is not 403).
@@ -114,10 +114,10 @@ func TestTools_WriteTool_TraderAllowed(t *testing.T) {
 
 func TestTools_ReadTool_ViewerAllowed(t *testing.T) {
 	t.Parallel()
-	svc := auth.NewService(nil, auth.Config{JWTSecret: []byte("test")})
+	svc := kitauth.NewTokenService(kitauth.Config{JWTSecret: []byte("test")})
 	r := toolsRBACRouter(t, svc)
 
-	w := callTool(t, r, "backtest.run", tokenFor(t, svc, auth.RoleViewer))
+	w := callTool(t, r, "backtest.run", tokenFor(t, svc, RoleViewer))
 	assert.NotEqual(t, http.StatusForbidden, w.Code,
 		"viewer must be allowed past RBAC on a read tool")
 }
@@ -126,7 +126,7 @@ func TestTools_ReadTool_ViewerAllowed(t *testing.T) {
 // tool with no row in the classification table must require admin.
 func TestTools_UnclassifiedTool_FailsClosed(t *testing.T) {
 	t.Parallel()
-	svc := auth.NewService(nil, auth.Config{JWTSecret: []byte("test")})
+	svc := kitauth.NewTokenService(kitauth.Config{JWTSecret: []byte("test")})
 
 	r := gin.New()
 	r.Use(svc.Middleware())
@@ -135,18 +135,18 @@ func TestTools_UnclassifiedTool_FailsClosed(t *testing.T) {
 	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(svc)).RegisterRoutes(r)
 
 	// trader is NOT enough for an unclassified tool.
-	w := callTool(t, r, "brand.new.unclassified", tokenFor(t, svc, auth.RoleTrader))
+	w := callTool(t, r, "brand.new.unclassified", tokenFor(t, svc, RoleTrader))
 	assert.Equal(t, http.StatusForbidden, w.Code,
 		"unclassified tool must fail closed to admin-only")
 
 	// admin gets through.
-	w = callTool(t, r, "brand.new.unclassified", tokenFor(t, svc, auth.RoleAdmin))
+	w = callTool(t, r, "brand.new.unclassified", tokenFor(t, svc, RoleAdmin))
 	assert.NotEqual(t, http.StatusForbidden, w.Code)
 }
 
 func TestTools_AuthDisabled_OpenAccess(t *testing.T) {
 	t.Parallel()
-	svc := auth.NewService(nil, auth.Config{})
+	svc := kitauth.NewTokenService(kitauth.Config{})
 	require.False(t, svc.Enabled())
 
 	r := gin.New()
@@ -164,11 +164,11 @@ func TestTools_AuthDisabled_OpenAccess(t *testing.T) {
 // (GET /api/tools) were not caught by the per-tool RBAC.
 func TestTools_ListEndpoint_NotGated(t *testing.T) {
 	t.Parallel()
-	svc := auth.NewService(nil, auth.Config{JWTSecret: []byte("test")})
+	svc := kitauth.NewTokenService(kitauth.Config{JWTSecret: []byte("test")})
 	r := toolsRBACRouter(t, svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tools", nil)
-	req.Header.Set("Authorization", "Bearer "+tokenFor(t, svc, auth.RoleViewer))
+	req.Header.Set("Authorization", "Bearer "+tokenFor(t, svc, RoleViewer))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code, "viewer must be able to list tools")

@@ -18,8 +18,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
+	kitauth "github.com/ruoxizhnya/tellurion-kit/auth"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/auth"
+)
+
+// 本仓的角色常量（QT-17 S3-b）。角色词表属于应用侧资产，kit/auth 只把
+// 角色当不透明字符串处理；用户库与角色定义留在 core，本进程只消费
+// token claims 里的 role 值。
+const (
+	RoleViewer = "viewer"
+	RoleTrader = "trader"
+	RoleAdmin  = "admin"
 )
 
 // ToolsHandler serves the /api/tools/* endpoints.
@@ -31,12 +40,12 @@ type ToolsHandler struct {
 	// /api/tools/:name. nil means "no role enforcement" — used by
 	// tests and by deployments that run with auth disabled.
 	//
-	// AUD-02 (ODR-065 H5): this must be a *Service, not a bare
+	// AUD-02 (ODR-065 H5): this must be a *TokenService, not a bare
 	// gin.HandlerFunc, because the role requirement depends on the
 	// tool being called — and the tool name is only known inside the
 	// handler (the route is /api/tools/:name, a wildcard, so no
 	// per-route middleware can express it).
-	authSvc *auth.Service
+	authSvc *kitauth.TokenService
 }
 
 // ToolsHandlerOption configures a ToolsHandler.
@@ -54,14 +63,14 @@ func WithToolsLogger(l zerolog.Logger) ToolsHandlerOption {
 //	write -> trader, admin
 //	admin -> admin
 //
-// When svc is disabled (no JWT secret), svc.RequireRole short-circuits
-// and nothing is enforced — matching the documented open-access mode.
+// When svc is disabled (no JWT secret), authorizeTool short-circuits and
+// nothing is enforced — matching the documented open-access mode.
 //
 // When this option is not passed at all (authSvc == nil), no RBAC is
 // applied either. That is intentionally the same behaviour as a
 // disabled service so the existing test constructors keep working;
-// production wiring in cmd/analysis/main.go always passes it.
-func WithToolsAuth(svc *auth.Service) ToolsHandlerOption {
+// production wiring in cmd/ai/main.go always passes it.
+func WithToolsAuth(svc *kitauth.TokenService) ToolsHandlerOption {
 	return func(h *ToolsHandler) { h.authSvc = svc }
 }
 
@@ -183,17 +192,17 @@ func (h *ToolsHandler) authorizeTool(c *gin.Context, name string) bool {
 		return true
 	}
 
-	var allowed []auth.Role
+	var allowed []string
 	switch tools.Classify(name) {
 	case tools.SideEffectRead:
-		allowed = []auth.Role{auth.RoleViewer, auth.RoleTrader, auth.RoleAdmin}
+		allowed = []string{RoleViewer, RoleTrader, RoleAdmin}
 	case tools.SideEffectWrite:
-		allowed = []auth.Role{auth.RoleTrader, auth.RoleAdmin}
+		allowed = []string{RoleTrader, RoleAdmin}
 	default: // SideEffectAdmin
-		allowed = []auth.Role{auth.RoleAdmin}
+		allowed = []string{RoleAdmin}
 	}
 
-	role, ok := auth.RoleFromContext(c)
+	role, ok := kitauth.RoleFromContext(c)
 	if !ok {
 		// No identity on the context. Either the global Middleware
 		// didn't run or the request bypassed it; either way we cannot
@@ -213,20 +222,16 @@ func (h *ToolsHandler) authorizeTool(c *gin.Context, name string) bool {
 	h.logger.Warn().
 		Str("tool", name).
 		Str("effect", tools.Classify(name).String()).
-		Str("have", string(role)).
+		Str("have", role).
 		Msg("tool execution denied by RBAC")
 
-	need := make([]string, len(allowed))
-	for i, r := range allowed {
-		need[i] = string(r)
-	}
 	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 		"error":  "insufficient role for tool " + name,
 		"code":   "INSUFFICIENT_ROLE",
 		"tool":   name,
 		"effect": tools.Classify(name).String(),
-		"have":   string(role),
-		"need":   need,
+		"have":   role,
+		"need":   allowed,
 	})
 	return false
 }

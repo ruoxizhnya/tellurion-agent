@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"tellurion/pkg/strategy/monitor"
+	"tellurion-agent/pkg/ai/monitor"
 )
 
 // 造一段每日表现序列。fn 决定收益率，权益按收益累积。

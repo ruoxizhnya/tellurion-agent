@@ -20,9 +20,13 @@ package main
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog"
+	kitauth "github.com/ruoxizhnya/tellurion-kit/auth"
 	kitdb "github.com/ruoxizhnya/tellurion-kit/db"
+	kithttpserver "github.com/ruoxizhnya/tellurion-kit/httpserver"
 	"github.com/spf13/viper"
 	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/gene_pool"
@@ -30,6 +34,7 @@ import (
 	"tellurion-agent/pkg/aistore"
 	"tellurion/pkg/backtest"
 	"tellurion/pkg/bootstrap"
+	corehttpserver "tellurion/pkg/httpserver"
 	"tellurion/pkg/marketdata"
 	"tellurion/pkg/observability"
 )
@@ -70,7 +75,9 @@ func main() {
 	}
 	defer aiStore.Close()
 
-	authSvc := bootstrap.InitAuth(v, store, logger)
+	// QT-17 S3-b：本进程只消费 token claims（kit/auth 解析 + 本仓角色常量），
+	// 不再经 bootstrap.InitAuth 借 core 连接池读 users 表。用户库留在 core。
+	authSvc := initTokenService(v, logger)
 
 	// walk-forward 的每个窗口必须拿到**独立**的 Engine 实例（引擎级缓存
 	// 是 per-instance 的，共享单例会让并发窗口互相污染 —— 与 analysis
@@ -124,7 +131,7 @@ func main() {
 	)
 
 	bootstrap.ApplyGinMode(v, logger)
-	router := bootstrap.BuildRouter(authSvc, v, logger)
+	router := buildRouter(authSvc, v, logger)
 
 	// 健康探针（local-stack netstat 断言 + compose healthcheck 消费）。
 	router.GET("/health", func(c *gin.Context) {
@@ -172,4 +179,75 @@ func analysisAPIURL(v *viper.Viper) string {
 		return u
 	}
 	return "http://localhost:8085"
+}
+
+// aiPublicPaths 是免鉴权路径。与 core 的 auth.PublicPaths() 逐字一致：
+// 本进程并不注册 /api/auth/* 这些路由，但反代/探针可能把请求打到这里，
+// 401 与 404 的区别会影响前端的鉴权姿势判断，故保持同一张表。
+var aiPublicPaths = []string{
+	"/api/auth/login",
+	"/api/auth/refresh",
+	"/api/auth/status",
+	"/api/auth/bootstrap",
+	"/health",
+	"/api/health",
+	"/metrics",
+}
+
+// initTokenService 构造 kit 的 token 服务，并执行 core 的启动门
+// （`bootstrap.DecideAuthStartup`：没有密钥就拒绝启动，唯一豁免是显式声明的
+// 本地/容器回环形态）。
+//
+// 与旧 `bootstrap.InitAuth` 的差别（S3-b 有意为之）：不持有连接池、不读写
+// users、不写 audit_logs —— 本进程只验证 token 签名与 claims。
+func initTokenService(v *viper.Viper, logger zerolog.Logger) *kitauth.TokenService {
+	d := bootstrap.DecideAuthStartup(
+		v.GetString("auth.jwt_secret"),
+		v.GetBool("auth.allow_insecure"),
+		v.GetString("server.host"),
+		v.GetString("auth.insecure_exposure"),
+	)
+	if d.Refuse {
+		logger.Fatal().Msg(d.Reason)
+	}
+
+	svc := kitauth.NewTokenService(kitauth.Config{
+		JWTSecret:       d.Secret,
+		AccessTokenTTL:  v.GetDuration("auth.access_token_ttl"),
+		RefreshTokenTTL: v.GetDuration("auth.refresh_token_ttl"),
+		Issuer:          v.GetString("auth.issuer"),
+		PublicPaths:     aiPublicPaths,
+	})
+	if svc.Enabled() {
+		logger.Info().
+			Int("access_ttl_sec", int(svc.AccessTTL().Seconds())).
+			Msg("auth: JWT enabled (token claims only; users live in core)")
+	} else {
+		logger.Warn().
+			Msg("auth: INSECURE open-access mode — NO authentication, loopback only, do not use outside local dev")
+	}
+	return svc
+}
+
+// buildRouter 组装 HTTP 中间件链：recovery、CORS、限流、请求日志、鉴权。
+//
+// 为什么本仓自持而不是继续用 `bootstrap.BuildRouter`：后者形参是 core 的
+// `*auth.Service`（带连接池、audit 写库），S3-b 换 kit 后类型不再兼容。
+// 其余构件仍复用 core bootstrap 的实现（限流 / 请求日志 / 启动门），
+// 到 S3-d 随 router 自持一起换 kit。
+func buildRouter(authSvc *kitauth.TokenService, v *viper.Viper, logger zerolog.Logger) *gin.Engine {
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(kithttpserver.CORS(kithttpserver.AllowedOrigins(v)))
+	router.Use(bootstrap.NewRateLimiter(bootstrap.RateLimitPerMinute(v), time.Minute).Middleware())
+	router.Use(bootstrap.RequestLogger(logger))
+	if authSvc.Enabled() {
+		router.Use(authSvc.Middleware())
+	} else if bootstrap.IsLoopbackHost(v.GetString("server.host")) {
+		// QT-50 ③-④：insecure 模式逐请求回环门。kit v0.1.0 的 httpserver
+		// 还没有 LoopbackOnly，这里直接复用 core 的同一份实现（单一真相；
+		// S3-d 把 router 生命周期收进本仓时再决定是否上收 kit）。
+		router.Use(corehttpserver.LoopbackOnly())
+	}
+	return router
 }

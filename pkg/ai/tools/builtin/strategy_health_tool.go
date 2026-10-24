@@ -7,8 +7,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"tellurion-agent/pkg/ai/drift"
+	"tellurion-agent/pkg/ai/monitor"
 	"tellurion-agent/pkg/ai/tools"
-	"tellurion/pkg/strategy/monitor"
 )
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -17,7 +17,7 @@ import (
 //
 // 回答：**这个策略是不是开始不行了？**
 //
-// pkg/ai/drift（概念漂移检测）和 pkg/strategy/monitor（策略健康监控）此前
+// pkg/ai/drift（概念漂移检测）和 pkg/ai/monitor（策略健康监控）此前
 // 是两个零调用方的孤儿包 —— 实现完整，但没人消费（TASKS P2-6）。这个工具
 // 把它们接起来：monitor 负责滚动指标与告警，drift 负责判断**收益序列的
 // 分布**有没有变（均值漂移 / 方差漂移 / 分布漂移）。

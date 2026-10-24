@@ -239,6 +239,8 @@ verified-by: QT-65 工厂注册收口（pipeline / yaml）+ QT-17 ④ 停写切�
 > - **删除前置**：S3（QT-50 完成、agent 删 `replace`）先落，否则 core 的 `storage` 包仍被 agent 的生产/测试代码引用。
 
 > **S3 前置状态（2026-10-25 实测）**：core `QT-50` 已 ✅（2026-10-24），真正的卡点在本仓：**15 个 core 实现包 / 22 个生产文件 / 19 个测试文件 / 59 处 import**（`go.mod` 注记的 64 处 / 43 文件含 2 个伪命中，见拆解清单 §0）。逐包归属、动作与子批顺序见 [`docs/s3-decoupling-plan.md`](s3-decoupling-plan.md)（B6）；此刻删 `replace` 仍编不过 ⇒ ② 去 `replace` 未做，须按 S3-a → S3-d 逐批清零后单独一笔提交。
+>
+> **S3 子批进度（2026-10-25）**：S3-a ✅（6 包换源，59 → 42 处）、S3-b ✅（`auth` + `strategy/monitor` 去重，42 → **39** 处：清 4 处、另新增 1 处 `tellurion/pkg/httpserver` 别名用于 insecure 回环门，理由见拆解清单 S3-b 施工记录）。剩余 S3-c（HTTP 化，四个 core 前置已全部就位）与 S3-d（装配收尾 + 删 replace）。当前实现包清单：`backtest` / `bootstrap` / `expression` / `httpserver` / `marketdata` / `observability` / `risk` / `storage`(仅测试) / `strategy` / `strategy/expression` / `strategy/examples`(仅测试)。
 
 ---
 

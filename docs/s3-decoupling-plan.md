@@ -107,7 +107,7 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 > - **破坏验证**：把 `validation/redundancy.go` 的 `statistics.Pearson` 取反 → `TestRedundancy_NegativeCorrelationIsFlagged` 红；逐字节还原后绿。`go build ./... && go vet ./... && go test ./...` 全绿。
 > - import 面：本批清掉 17 处 core import（生产 13 + 测试 4），core 实现包 import 59 → 42；`observability` 1 处留 S3-d。
 
-### S3-b｜本仓内去重（无跨仓依赖）
+### S3-b｜本仓内去重（无跨仓依赖）✅ 完成（2026-10-25）
 
 - 包：`strategy/monitor` → `pkg/ai/monitor`（本地纯函数）；`auth` → kit/auth + 本仓角色。
 - 规模：2 包 / 2 个生产文件 / 46 处符号引用。
@@ -115,12 +115,21 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 - 门：工具级用例（`monitor.strategy_health`、角色矩阵 viewer/trader/admin 三条）全绿。
 - 说明：**不需要任何发版**——kit 已提供 `auth` 中间件与 `RequireRole`。
 
+> **施工记录（2026-10-25，commit 随本行落）**：
+> - `strategy/monitor` → `pkg/ai/monitor`：整包迁入，**可执行逻辑与 core `pkg/strategy/monitor/monitor.go` 零差异**（`git diff --no-index` 仅 10 insertions / 4 deletions，全部是包注释、import 行、两处注释里的路径指代）；唯一实质改动是 `tellurion/pkg/statistics` → `kit/statistics`（S3-a 已对拍六个函数逐值一致）。调用点 `pkg/ai/tools/builtin/strategy_health_tool.go` 与其测试切到本仓包。
+> - `auth` → `kit/auth` + 本仓角色常量：删除 `cmd/ai/main.go` 的 `bootstrap.InitAuth(v, store, …)`（借 core 连接池读 `users`），改 `initTokenService` —— `bootstrap.DecideAuthStartup` 启动门保留，token 服务用 `kitauth.NewTokenService`，PublicPaths 与 core 的 `auth.PublicPaths()` 逐字一致；`bootstrap.BuildRouter`（形参是 core `*auth.Service`）换成本仓 `buildRouter`（kit CORS + core bootstrap 的限流/请求日志 + kit 中间件）。`handlers_tools.go` 与其 RBAC 测试改用 `*kitauth.TokenService` 与 `RoleViewer` / `RoleTrader` / `RoleAdmin` 三个本仓常量。
+> - **如实登记的行为变化（不是遗漏）**：① 本进程不再写 `audit_logs`（core 表；旧 `AuditMiddleware` 随 `InitAuth` 一起删除），审计写入此后只剩 analysis-service；② 本进程不再能自助建用户（用户库留 core 已决）。两者都是「只消费 token claims」这条裁决的直接后果。
+> - **遗留 1 处 core import**：`buildRouter` 的 insecure 形态仍调 `tellurion/pkg/httpserver.LoopbackOnly()` —— kit `v0.1.0` 没有这个中间件，而复制一份安全门会造成两份真相；S3-d 把 router 生命周期收进本仓时再决定「上收 kit」还是「本地自持」。
+> - **验收（真实输出）**：`go test ./pkg/ai/tools/builtin -run StrategyHealth -count=1` → 7/7 PASS；`go test ./cmd/ai -run TestTools_ -count=1` → 6/6 PASS（viewer 禁 write / trader 放行 / viewer 可 read / 未分类 fail-closed 到 admin / disabled open-access / list 不设卡）。
+> - **破坏验证**：把 `pkg/ai/monitor/monitor.go` 的 `dd := (peak - e) / peak` 改成 `(e - peak) / peak` ⇒ `TestStrategyHealthTool_ComputesRollingDrawdown` 红（`"0" is not greater than "0"`，消息「后段持续下跌，滚动回撤必须为正」）；逐字节还原后绿。
+> - **边界**：`grep -rn '"tellurion/pkg/auth"'` 与 `'"tellurion/pkg/strategy/monitor"'` 均**零命中**。core 实现包 import 面：本批前 42 → **39 处**（清掉生产 2 + 测试 2，新增 1 处 `tellurion/pkg/httpserver` 别名，见上）；分布为 **23 个文件 / 10 个包**（生产 10 文件、测试 13 文件）。`go build ./... && go vet ./... && go test ./...` 全绿。
+
 ### S3-c｜HTTP 化（依赖 core 端点；子序按「端点已具备 → 端点待补」）
 
-1. **risk**：直接接 `POST /api/risk/detect_regime`（零 core 改动）。代价：请求体是内联 OHLCV，token 省不回来。**可选优化**（记入 core 交接件）：加 `symbol + date range` 的粗粒度形状，避免 agent 先取数再回传。
+1. **risk**：直接接 `POST /api/risk/detect_regime`。core 的**粗粒度形状已落地**（QT-70 ✅ 2026-10-24：`symbol + start_date + end_date` 由服务端取数，未接线 503 / 无行 404），agent 不必先把 OHLCV 拉进上下文再回传。零 core 改动。
 2. **strategy 注册表**：接 `GET /api/strategies`（默认分支已合并注册表 ∪ DB 活跃项，`ListWithDB`）；`strategy.get` 改为从 list 结果过滤（`GET /{id}` 只查 DB）。**零 core 改动**，只需行为对拍。
-3. **backtest**：接 `POST /api/backtest` + `POST /api/walkforward`；删除 `cmd/ai` 的 `newEngine` / `pgProvider` / `dataAdapter` / `wfEngine` 装配。`/api/backtest` 运行时已能收 `strategy_ref` / `strategy_params`（绑定结构嵌入 `contracts.BacktestRequest`），**walkforward 的请求体仍是 core 自有类型，需 core 补 `strategy_params`**。
-4. **expression**：接 core 新端点（静态校验 + 目录），删除 parser/evaluator 依赖。前置：端点先落地。
+3. **backtest**：接 `POST /api/backtest` + `POST /api/walkforward`；删除 `cmd/ai` 的 `newEngine` / `pgProvider` / `dataAdapter` / `wfEngine` 装配。`/api/backtest` 运行时已能收 `strategy_ref` / `strategy_params`（绑定结构嵌入 `contracts.BacktestRequest`）；**walkforward 的 `strategy_params` 已由 core QT-68 ✅（2026-10-24）补齐**，且 `POST /api/walkforward` 已登记为 D24 第 8 类粗粒度动作（core 裁-12，2026-10-25）。
+4. **expression**：接 core 新端点（静态校验 + 目录），删除 parser/evaluator 依赖。**前置已满足**：QT-69 ✅（2026-10-24）落 `POST /api/expression/validate` + `GET /api/expression/catalog`（字段三态、探测 fail-closed）。
 - 规模：4 包 / 10 个生产文件 / 92 处符号引用（`strategy` 3 + `expression` 4 + `backtest` 2 + `risk` 1）。
 - 门：用到的端点必须在 core `docs/openapi.yaml` 有登记（本仓已有 `TestClientEndpoints_AreRegisteredInCoreOpenAPI` 护栏，端点字面量自动纳入）；同参数同数据下，HTTP 回测与进程内回测的关键指标对拍（Sharpe / 总收益 / 交易数）。
 
@@ -133,12 +142,14 @@ verified-by: B6 拆解（QT-17 S3 前置）—— 15 个 core 实现包逐包归
 
 ## 5. core 侧前置（交接件——本仓**不改 core**，报协调者）
 
-| # | 需要 core 做什么 | 卡住哪一批 | 备注 |
+| # | 需要 core 做什么 | 卡住哪一批 | 状态 / 备注 |
 |---|---|---|---|
-| 1 | `POST /api/walkforward` 的请求体补 `strategy_params`（现为 core 自有 `WalkForwardRequest`，只有策略名），并登记 `x-agent-coarse-action` | S3-c-3 | 8 条粗粒度动作里没有 walkforward；`/api/backtest` 侧无需改代码（已嵌入 contracts 结构） |
-| 2 | openapi 为 `/api/backtest` 补登 `strategy_ref` / `strategy_params` | S3-c-3（文档项） | 运行时已接受，属文档缺口，不阻塞代码 |
-| 3 | 表达式端点：`POST /api/expression/validate` + `GET /api/expression/catalog`（算子 / 字段 / 阈值） | S3-c-4 | 当前 openapi 无任何表达式端点；目录要能表达「字段不可用 ≠ 空」 |
-| 4 | `POST /api/risk/detect_regime` 的粗粒度形状（`symbol + start_date + end_date`，引擎内部取数） | S3-c-1（可选） | 不做也能过 S3，只是 token 成本回到切换前 |
+| 1 | `POST /api/walkforward` 的请求体补 `strategy_params`，并登记 `x-agent-coarse-action` | S3-c-3 | ✅ QT-68（2026-10-24）补参数面；`x-agent-coarse-action: submit_walkforward` 由 core 裁-12 于 2026-10-25 落地 |
+| 2 | openapi 为 `/api/backtest` 补登 `strategy_ref` / `strategy_params` | S3-c-3（文档项） | ✅ 随 QT-68 落地；运行时早已接受，属文档缺口 |
+| 3 | 表达式端点：`POST /api/expression/validate` + `GET /api/expression/catalog`（算子 / 字段 / 阈值） | S3-c-4 | ✅ QT-69（2026-10-24）；目录能表达「字段不可用 ≠ 空」（三态 + fail-closed 503） |
+| 4 | `POST /api/risk/detect_regime` 的粗粒度形状（`symbol + start_date + end_date`，引擎内部取数） | S3-c-1（可选） | ✅ QT-70（2026-10-24）；未接线 503 / 无行 404，内联形状优先 |
+
+> **结论**：S3-c 的四个 core 前置**全部就位**（2026-10-25 复核）。S3-c 不再有外部等待，只剩本仓改写与对拍。
 
 ## 6. 未决/已决一览（避免二次讨论）
 
