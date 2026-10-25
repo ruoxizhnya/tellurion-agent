@@ -41,7 +41,12 @@ func (testStaticCheckAdapter) CheckOrError(code string) error {
 // fire-and-forget) don't need to drain the goroutine because the mock
 // is concurrency-safe.
 func newCopilotWithMock(mock *ai.MockClient) *CopilotService {
-	return NewCopilotServiceWithLLM(mock).WithCodeChecker(testStaticCheckAdapter{})
+	// QT-32-A: the chain sink is a required dep too, so the shared
+	// helper injects a recording one. Tests that care about *what* landed
+	// on the chain read it back via recordingSink in copilot_chain_test.go.
+	return NewCopilotServiceWithLLM(mock).
+		WithCodeChecker(testStaticCheckAdapter{}).
+		WithChainSink(&recordingSink{})
 }
 
 func TestCopilotService_Generate_RecordsJob(t *testing.T) {
@@ -55,7 +60,7 @@ func TestCopilotService_Generate_RecordsJob(t *testing.T) {
 		Universe:    "csi300",
 		StartDate:   "2025-01-01",
 		EndDate:     "2025-12-31",
-	}, nil) // runner nil is fine — run() will short-circuit on build success without a runner
+	})
 
 	require.NotNil(t, res)
 	assert.NotEmpty(t, res.JobID)
@@ -146,7 +151,7 @@ func TestCopilotService_Stats_AtomicRead(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			svc.Generate(context.Background(), GenerateParams{Description: "x"}, nil)
+			svc.Generate(context.Background(), GenerateParams{Description: "x"})
 		}()
 	}
 	// Wait for all Generate calls to return (they're sync up to the
@@ -180,7 +185,7 @@ func TestCopilotService_Run_LLMFailurePath(t *testing.T) {
 	svc := newCopilotWithMock(mock)
 
 	res := svc.Generate(context.Background(),
-		GenerateParams{Description: "x"}, nil)
+		GenerateParams{Description: "x"})
 	require.NotNil(t, res)
 
 	// Wait for the goroutine to drain. Poll GetJob with a tight
@@ -239,7 +244,7 @@ func TestCopilotService_Run_MockCalledWithDescription(t *testing.T) {
 	svc := newCopilotWithMock(mock)
 
 	res := svc.Generate(context.Background(),
-		GenerateParams{Description: "momentum on CSI300"}, nil)
+		GenerateParams{Description: "momentum on CSI300"})
 
 	// Wait for the goroutine to call the LLM.
 	require.Eventually(t, func() bool {
@@ -251,29 +256,6 @@ func TestCopilotService_Run_MockCalledWithDescription(t *testing.T) {
 	// are out of scope for P0-1; see P0-4), but we don't assert on
 	// terminal status here — we only verify the LLM was called.
 	_ = svc.GetJob(res.JobID)
-}
-
-// ---- parseUniverse -------------------------------------------------------
-
-func TestParseUniverse_EmptyOrAll_ReturnsNil(t *testing.T) {
-	assert.Nil(t, parseUniverse(""))
-	assert.Nil(t, parseUniverse("all"),
-		"universe='all' is a sentinel for 'use default pool' and must map to nil")
-}
-
-func TestParseUniverse_StripPrefix(t *testing.T) {
-	assert.Equal(t, []string{"csi300", "csi500"},
-		parseUniverse("universe:csi300,csi500"),
-		"the 'universe:' prefix is a transport quirk and must be stripped")
-}
-
-func TestParseUniverse_TrimsWhitespace(t *testing.T) {
-	got := parseUniverse(" csi300 , csi500 ,csi800 ")
-	assert.Equal(t, []string{"csi300", "csi500", "csi800"}, got)
-}
-
-func TestParseUniverse_SingleEntry(t *testing.T) {
-	assert.Equal(t, []string{"csi300"}, parseUniverse("csi300"))
 }
 
 // ---- P0-4 (ODR-013) WorkingDir + Stage-1 sandbox -----------------------
@@ -313,7 +295,7 @@ func TestCopilotService_Run_StaticcheckRejectsDangerousCode(t *testing.T) {
 		WithWorkingDir(t.TempDir()) // WorkingDir set, so the rejection must come from staticcheck, not config
 
 	res := svc.Generate(context.Background(),
-		GenerateParams{Description: "do bad things"}, nil)
+		GenerateParams{Description: "do bad things"})
 	require.NotNil(t, res)
 
 	waitTerminal(t, svc, res.JobID, 2*time.Second)
@@ -350,7 +332,7 @@ func TestCopilotService_Run_StaticcheckRejectsExecCommand(t *testing.T) {
 	svc := newCopilotWithMock(mock).WithWorkingDir(t.TempDir())
 
 	res := svc.Generate(context.Background(),
-		GenerateParams{Description: "shell out"}, nil)
+		GenerateParams{Description: "shell out"})
 	require.NotNil(t, res)
 
 	waitTerminal(t, svc, res.JobID, 2*time.Second)
@@ -378,7 +360,7 @@ func TestCopilotService_Run_WorkingDirEmpty_RejectsWithConfigError(t *testing.T)
 	svc := newCopilotWithMock(mock) // WorkingDir left empty
 
 	res := svc.Generate(context.Background(),
-		GenerateParams{Description: "harmless"}, nil)
+		GenerateParams{Description: "harmless"})
 	require.NotNil(t, res)
 
 	waitTerminal(t, svc, res.JobID, 2*time.Second)
@@ -416,7 +398,7 @@ func TestCopilotService_Run_StaticcheckRejectsPanic(t *testing.T) {
 	svc := newCopilotWithMock(mock).WithWorkingDir(t.TempDir())
 
 	res := svc.Generate(context.Background(),
-		GenerateParams{Description: "crashy"}, nil)
+		GenerateParams{Description: "crashy"})
 	require.NotNil(t, res)
 
 	waitTerminal(t, svc, res.JobID, 2*time.Second)

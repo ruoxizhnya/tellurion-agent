@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-24
-verified-by: QT-17 ④ —— 停写 legacy public.experiments，写路径只剩 ai.experiments
+last-verified: 2026-10-25
+verified-by: QT-32-A —— copilot 那条链路终点改到「沙箱编译 + promote 闸门」，生成链逐段落 ai.generation_chain
 ---
 
 # Dataflow — tellurion-agent
@@ -13,7 +13,7 @@ verified-by: QT-17 ④ —— 停写 legacy public.experiments，写路径只剩
 ```
 ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
                         │  ① explore loop：生成假设 → 组策略 → 跑回测
-                        │  ② copilot：自然语言 → 代码 → 沙箱编译 → 回测
+                        │  ② copilot：自然语言 → 代码 → 沙箱编译 → 【闸门】
                         │  ③ pipeline / tools：编排与工具执行
                         ↓
               core analysis-service（HTTP 粗粒度：回测 / walk-forward /
@@ -21,6 +21,33 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
                         ↓
               ai.*（本仓自持）/ run（结果）/ market（数据）
 ```
+
+> **QT-32-A（2026-10-25）改了 ② 这条路的终点**：copilot 到「沙箱编译」为止，**不再**把 AI 产物送去回测。
+> 判据是「有没有可核验的产物坐标」：产物要先登记进资产服务、由人 promote，才可能成为可执行资产
+> （闸门真相在 `tellurion-strategy:internal/asset/ddl.go` 的 `strategy_artifacts.status`）。
+> 本仓今天产不出那个坐标（`go build` 的临时可执行文件不是资产服务认可的载体），所以一律拦，
+> 并把「拦在哪一环、为什么」写进 `ai.generation_chain`。
+> 旧实现在这里做的事是：`plugin.Open` 打开一个非 plugin 产物必然失败 → 回落成硬编码字面量
+> `"generated-strategy"` → 拿它去 core 跑回测。core 从未注册过那个名字，所以这条路从来没通过，
+> 只是断点在远端、本仓既没说谎也没留痕。
+
+### 生成链（QT-32-A）
+
+一次 copilot 生成的每一段推进都写 `ai.generation_chain`，一行 = 一次编译尝试：
+
+```
+POST /api/copilot/generate
+  → 链第 1 行（prompt + 回测区间，build_state=none）   ← 写不进去就到此为止，连 LLM 都不调
+  → LLM 出码 → staticcheck 闸（拒 → 源码+指纹留下，停在这行）
+  → 每次尝试一行：source + source_sha256 → 先写「要编」，再跑沙箱 go build → 覆盖成 failed / passed
+    （LLM 修码重试：换下一版之前先把这一 attempt 的 failed 与诊断落链，旧结论不被覆盖）
+  → 编译通过 → promote 闸门拦下：blocked_reason=promote_gate，job 终态 sandbox_rejected
+```
+
+`source_sha256` 覆盖的是**同一行 `source`** 的字节，不是 `version_hash`（缺资产服务签发的 `strategy_id`）、
+也不是 `artifact_hash`（只覆盖编译产物）。链的最后一环 —— core 的 run 身份 —— 今天接不上，
+`BacktestResponse.ID` 已在客户端解出（`pkg/ai/client/backtest_client.go:285`），丢在
+`cmd/ai/http_runner.go:163`；把它送过 `contracts.BacktestRunner` 那一层是跨仓契约变更（`docs/TASKS.md` QT-32-A ⑦-2）。
 
 > **QT-17 S3-c-3 起**：本仓进程内没有引擎。pipeline 把 YAML 的表达式段映射成
 > core 内置 `expression_template` 的 `strategy_params`，一次 `POST /api/backtest`
@@ -55,6 +82,8 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
 | SSE 断线 | ui 看不到进度 | 只停推、不取消探索；客户端重连拿快照 |
 | 双写不一致 | 切读后数据缺 | 双写期已结束；停写前已做一次全量回填 + 行级对拍（0 差异），此后旧表零增长 |
 | 工具执行超时 | 卡住 pipeline | 每工具独立超时 + 归类为失败 |
+| **AI 产物编译通过但没过 promote 闸门** | 链停在 `blocked_reason=promote_gate`，job 终态 `sandbox_rejected` | **不猜策略名、不本地兜底**：没有可核验的产物坐标就不进回测（QT-32-A）。资产服务那侧的 resolve/promote 才是判据来源 |
+| **留痕落点没装 / 写不进去** | job 终态 `sandbox_rejected`，错误点名 `chain sink not configured` 或 `ai.generation_chain` | LLM **一次都不调**：宁可这次不做，也不产出一份事后查不到的生成 |
 
 ## 4. 不变量（可被测试钉住的）
 
@@ -62,6 +91,8 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
 2. 同一实验配置 → 同一结果（引擎确定性 + 三 hash 留痕）。
 3. 断线不影响 run 的生命周期。
 4. 本仓生产代码不出现 `pkg/storage` 的 import——**白名单已清零（QT-17 ③，2026-10-25）**：仪器域上市窗口改走 core QT-67 的只读端点（`POST /api/v1/listing-windows`，凭证从入站请求转发），由 `internal/repoguard` AST 护栏钉住；**QT-17 S3-d 起全仓源码对 core 的 import 字面量归零**（`grep '"tellurion/'` 无命中），`replace` 已删除。
+5. **未过 promote 闸门的 AI 产物不进回测**（QT-32-A）：`pkg/copilot` 的生产源码里不出现 `plugin.Open` / `"generated-strategy"` / `RunBacktest(` 三种形状，由 `TestQT32A_NoFabricatedStrategyPathInProductionSource` 读源码钉住（守卫自身的牙齿靠破坏验证取证，见 `docs/TASKS.md` QT-32-A 施工记录）。
+6. **每一次生成都留下一条链**（QT-32-A）：留痕写不进去就中止，不产出无法复查的产物；`ai.generation_chain` 的 `INSERT / SELECT / DO UPDATE` 三处列清单由静态护栏与 DDL 逐列对拍（`pkg/aistore/generation_chain_sql_test.go`）。
 
 ## 5. 与契约文档的关系
 

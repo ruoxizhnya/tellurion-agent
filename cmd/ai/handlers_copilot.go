@@ -37,7 +37,12 @@ import (
 
 // registerCopilotRoutes 注册 copilot 路由组（generate / generate/:job_id / stats）。
 // AUD-01 之后本组**不再包含** POST /save，原因见上方说明块。
-func registerCopilotRoutes(router *gin.Engine, copilotService *copilot.CopilotService, copilotRunner copilot.BacktestRunner) {
+//
+// QT-32-A 起不再有 runner 参数：AI 产物要先进资产服务、过 promote 人工闸门
+// 才可能进回测，本仓没有可核验的产物坐标时那一环必须拦（闸门在 pkg/copilot）。
+// 响应里 backtest_result / backtest_error / strategy_name 三个键因此今天不会
+// 出现 —— 它们是可选字段、契约未变，填上它们是 A2 的动作，不是这里的。
+func registerCopilotRoutes(router *gin.Engine, copilotService *copilot.CopilotService) {
 	copilotGroup := router.Group("/api/copilot")
 	{
 		copilotGroup.POST("/generate", func(c *gin.Context) {
@@ -50,7 +55,7 @@ func registerCopilotRoutes(router *gin.Engine, copilotService *copilot.CopilotSe
 				httpserver.Wrap(c, http.StatusBadRequest, err, "invalid request: ")
 				return
 			}
-			result := copilotService.Generate(c.Request.Context(), req, copilotRunner)
+			result := copilotService.Generate(c.Request.Context(), req)
 			// S7-P0-12 (ODR-043): Lock before reading Status. Generate()
 			// spawns a goroutine that writes result.Status under
 			// result.Lock(); reading it without synchronizing is a data

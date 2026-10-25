@@ -96,13 +96,18 @@ func (a *SandboxRunnerAdapter) IsTimeout(err error) bool {
 }
 
 // BuildCopilot 构造 Copilot service（S7-P1-2, ODR-043）：LLM client、
-// code checker、build executor 全部在装配根注入。runner 由调用方注入 ——
-// QT-17 S3-c-3 起是 HTTP 适配器，本函数不再持有引擎。
-func BuildCopilot(v *viper.Viper, runner copilot.BacktestRunner, logger zerolog.Logger) *copilot.CopilotService {
+// code checker、build executor 全部在装配根注入。
+//
+// QT-17 S3-c-3 起本函数不再持有引擎；QT-32-A 起也不再持有回测 runner ——
+// AI 产物要先进资产服务、过 promote 人工闸门才可能进回测，本仓没有
+// 可核验的产物坐标时就只能拦（见 pkg/copilot 的闸门段）。这里改为注入
+// 留痕落点：记不下一次生成，就不开始一次生成。
+func BuildCopilot(v *viper.Viper, chain copilot.ChainSink, logger zerolog.Logger) *copilot.CopilotService {
 	copilotService := copilot.NewCopilotService().
 		WithLLMClient(ai.NewClient()).
 		WithCodeChecker(StaticCheckAdapter{}).
 		WithBuildExecutor(NewSandboxRunnerAdapter(logger)).
+		WithChainSink(chain).
 		WithLogger(logger.With().Str("component", "copilot").Logger()).
 		WithWorkingDir(v.GetString("copilot.working_dir"))
 	logger.Info().

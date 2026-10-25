@@ -16,7 +16,7 @@ import (
 // 范式同 handlers_openapi_test.go 的 newOpenAPITestRouter。
 func newCopilotTestRouter() *gin.Engine {
 	router := gin.New()
-	registerCopilotRoutes(router, copilot.NewCopilotService(), nil)
+	registerCopilotRoutes(router, copilot.NewCopilotService())
 	return router
 }
 

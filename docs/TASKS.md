@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: QT-17 ④ 停写复核（2026-10-25）——legacy 零增长证据 / 白名单清零 / 护栏反证两条腿 / core deprecated 复核；此前 S3-d 已删 core replace/require、CI 单仓
+verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -23,6 +23,8 @@ verified-by: QT-17 ④ 停写复核（2026-10-25）——legacy 零增长证据 
 | QT-17 | `ai.*` schema 自持 + 双写对拍 + 切读 + 停写 ✅ 完成（2026-10-25，①~⑤ + ④ 复核；正文见下） | `QT-17` | D24 补第 7 类动作 |
 | S3 | 删 `replace ../tellurion`，改 HTTP 粗粒度 ✅ 完成（2026-10-25，S3-a~d） | `QT-07 / QT-50` | QT-17 + QT-50 |
 | QT-65 | QT-11 跨仓回归（agent 腿）：pipeline / yaml 生产路径改**工厂注册** ✅ 完成（2026-10-24，见下方完成记录） | `QT-11` | 无硬前置 |
+| QT-32-A | AI 生成链留痕 + promote 闸门的生产者侧 fail-closed ✅ 完成（2026-10-25，正文见下） | `QT-32` | QT-03 / QT-26 / QT-41b（均已 ✅） |
+| QT-32-B | 生成物接资产服务（`PUT .../source` + `POST .../build`）拿真 `version_hash` / `artifact_hash` ⬜ **待裁** | `QT-32` | **需协调者裁「AI 生成物的载体」**（wasm + host ABI / so / 维持 ADR-024「只审阅不执行」），见 QT-32-A ⑦-1 |
 
 > **QT-65 证据（2026-10-23，C4 期间发现；2026-10-24 已闭环）**：core QT-11（`67bee39`）把注册表改存构造函数后，`strategy.GlobalRegister(实例)` 注册的共享条目在执行路径被 `Registry.NewInstance` fail-closed 拒绝（`ErrSharedStrategy`）。本仓两个**生产**调用点没跟上：`pkg/ai/pipeline/pipeline.go`（`registerOrConfigure` 的注册分支，ExecuteFromYAML 链路）与 `pkg/ai/yaml/loader.go`（`LoadAndRegister`）。现有测试当时全绿是因为没有用例在注册后真经引擎跑（latent，非当前红）。
 
@@ -282,3 +284,107 @@ verified-by: QT-17 ④ 停写复核（2026-10-25）——legacy 零增长证据 
   `engine strategy lookup failed: strategy is registered as a shared instance: ... (registered with Register; a per-run instance needs RegisterFactory)`。
   从备份逐字节还原后 `SHA256=0EB49D35…77C59D7A` 与改前一致，复跑全绿。
 - **⑦ 停止项（按派发要求不动）**：`QT-17 ③`（D24 第 7 类只读 port）、`QT-07 ⑥ S3`（删 replace）、`QT-32`（依赖 G1-QT-26 / G5-QT-41b）继续等待；QT-17 ④ 停写切换已于 `b1a8fcd` 提交，本轮不重复施工。
+  > **该停止项已于 2026-10-25 解除**：QT-26 ✅（core 2026-10-24）、QT-41b/QT-41c ✅（strategy 仓 2026-10-24/25）、QT-03/QT-63 ✅。agent 腿已在本仓立单执行 → 见下方 **QT-32-A**。
+
+---
+
+## QT-32-A（agent 腿）· AI 生成链留痕 + promote 闸门的生产者侧 fail-closed ✅ 完成（2026-10-25，范围 = ① ~ ⑥；⑦ 全部是未落的后续单，不算已完成）
+
+> **立单来历**：core `docs/TASKS.md` QT-32 ⑥「生成质量与实验编排属 agent 仓（其台账另立单）」+ ④「不把 AI 编排逻辑搬进 core（ADR-023）」。
+> 2026-10-25 派发 G8 时实测本仓台账**没有** QT-32 的六字段条目（`grep QT-32 docs/TASKS.md` 只有上方那条「继续等待」），故先立单再施工。
+> 本单只做 **AI 侧**；闸门结论的真相在资产服务（下方 ② 锚点），本仓不建第二套。
+
+- **① 目标**：一条 AI 生成的策略在**本仓**这一段可追溯——prompt、生成源码、源码指纹、静态闸与编译结果**逐环落进 `ai.*`**，且在没有任何可核验产物坐标时**响亮地拒绝**把它送进回测（链断在哪一环、为什么断，都能被查出来）。
+  判据不是「生成了」，是「生成过的那一份，事后还能不能拿出来说明它是哪一份、编过没编过、为什么没跑」。
+- **② 上下文**（开工前逐一读；全部为 2026-10-25 实测）：
+  - **今天一条留痕都没有**：`pkg/copilot/copilot.go:95` 的 `jobs sync.Map` 是内存态，进程重启即失；源码写到 `os.MkdirTemp` 的临时目录、`defer os.RemoveAll` 删掉（`:341-349`）；`ai.experiments`（`pkg/aistore/schema.go:55-72`）**没有任何一列**装 prompt / 源码 / hash / 产物身份，copilot 路径连实验行都不写。
+  - **链的最后一环是假的**：`:411` 只 `go build -o <临时可执行文件>`（**不是** `-buildmode=plugin`），`:457` 却拿它去 `plugin.Open`（`:492-507`）——必然失败，回落成硬编码字面量 `"generated-strategy"`；`:470-487` 再拿这个名字调回测。实测 core 从未注册过该名字（`grep -rn 'generated-strategy' tellurion:pkg tellurion:cmd` = 0 命中），且 `tellurion:pkg/strategy/registry.go:123` 对未注册名报 `strategy not found` ⇒ 这条回测**从来没跑成过**，只是断在 core 而不是断在本仓。`plugin.Open` 这个形状本身还违反 ADR-024（「LLM 生成的 Go 代码只是可审阅 artifact，不加载、不执行」）与本仓 `docs/api-schema.md` §5（「不做策略执行沙箱」）。
+  - **core 的 run 身份其实拿得到**：`pkg/ai/client/backtest_client.go:285` 已从 `BacktestResponse.ID` 解出并放进 `BacktestOutcome.JobID`；丢它在适配层——`cmd/ai/http_runner.go:163` 只 `return outcome.Result, nil`。但 `contracts.BacktestRunner` 的签名（本仓 `pkg/copilot/copilot.go:69` 以别名复用，且 `pkg/ai/pipeline/backtest_runner_alias_test.go:43-46` 钉住它是**类型别名**）不带这个字段 → 要把它送过这一层是跨仓契约变更，另单（见 ⑦）。
+  - **闸门真相在资产服务，不在本仓**：`tellurion-strategy:internal/httpapi/api.go:42-51` 已实装 `POST /api/strategies`、`PUT .../source`、`POST .../build`、`POST .../versions/{hash}/promote`、`GET .../resolve`；`tellurion-strategy:internal/asset/ddl.go:53-63` 的 `strategy.strategy_artifacts.status` 是 `built→validated→promoted/rejected/deprecated` 状态机，`api.go:53-54` 明写「promote 是人的闸门」。**本仓因此不存「是否已 promote」这个结论**——存了就成两处真相；本仓只按「有没有可核验的产物坐标」拦。
+  - **本仓自己算不出 `version_hash`**：`tellurion-contracts:engine/provenance.go:65-72` 的六项输入含 `strategy_id`，而 id 由资产服务发号（`POST /api/strategies` → `201 {id}`）。所以本单的指纹列**明确叫 `source_sha256`**，不冒充 `version_hash` / `artifact_hash`（后者按 `provenance.go:39` 只覆盖编译产物字节）。
+  - **③-⑤「沿用既有 AST/白名单」这句前提要订正**：本仓代码生成侧的闸是**正则**，不是 AST——`tellurion-kit:sandbox/staticcheck/staticcheck.go:156-235` 的 13 条 `builtinPatterns`，它自己的文档（`:7-18`、`:44-88`）写明「Why regex and not go/ast」与六条绕过形状、「not a security boundary」，真边界在第二层 `sandbox/runner`。本仓唯一的 AST 护栏是**构建期仓内卫生**（`internal/repoguard/storage_import_test.go`），与代码生成无关。本单**沿用现状不新造**，代价在此如实登记。
+  - **wire 契约不能顺手改**：ui 侧 `tellurion-ui:web/src/api/copilot.ts:30-37` 用**终态白名单**判定轮询结束（`generated` / `backtest_complete` / `llm_failed` / `sandbox_rejected` / `build_failed` / `backtest_failed`），`web/src/types/api.ts:182-190` 登记同一套取值。新增状态串会让前端一路轮到超时。故本单的拦下态**复用 `sandbox_rejected`**。
+  - `pkg/aistore/schema_core_drift_test.go:136-153` 现在要求 `Tables` 里每张表都有 core 来源（QT-17「逐表搬、不臆造」的腿）。本单新增的表**core 没有对应物**（AI 侧留痕本来就随拆仓迁到本仓），所以那条腿必须显式扩一个「本仓自持表」声明，而不是把表藏起来不加登记。
+- **③ 要求**：
+  1. `ai.generation_chain` 新表（`pkg/aistore/schema.go` 的 `statements` 末尾追加幂等 DDL，并登记进 `Tables`）：**一行 = 一次编译尝试**，主键 `(job_id, attempt)`；列 = `job_id`（本仓 copilot 作业身份）/ `attempt` / `prompt`（NOT NULL）/ `universe`·`start_date`·`end_date`（人要求的回测区间，被拦也照样留）/ `source` / `source_sha256` / `build_state`（DDL `CHECK` 闭合词表 `none｜failed｜passed`）/ `build_error` / `blocked_reason` / `created_at`·`updated_at`。列的含义与三条边界写进 `docs/db-schema.md`。
+     > **工单原文的两处在本单内被改对（不是扩范围，是原写法机械不可执行）**：① 原来只写「`job_id` 主键」——那样重试会覆盖上一 attempt，而重试恰恰是另一份字节、另一个指纹，「中间试过什么」正是复查生成质量要看的东西；② 原来没有回测区间三列——「人当时要求跑什么」本来就是链上的一环，闸门拦下了也得留。
+  2. `pkg/aistore` 新增 `GenerationChain` 结构 + `UpsertGenerationChain`（同 `(job_id, attempt)` 重复写 = 更新，不是插第二条）+ `ListGenerationChain`。
+     > 原写的是 `GetGenerationChain(jobID)`：链的答案在**序列**上（每个 attempt 一行），单行 Get 要么强制调用方先知道 attempt 号、要么悄悄只给最后一行 —— 交付时改成 List，没有第三种读法。
+  3. `pkg/copilot` 新增 `ChainSink` port 与 `WithChainSink` 注入点，**与 `WithCodeChecker` / `WithBuildExecutor` 同形：未注入即 fail-closed**（记不下链 = 不许生成）。装配根 `cmd/ai/builders.go` 注入 `*aistore.Store` 的适配器。
+  4. 逐段落库：作业创建时（prompt）→ LLM 出码后（source + sha256）→ 静态闸结论 → 编译结论 → 终止原因。任一环失败都要留下一行，不留「跑过但查不到」。
+  5. **闸门**：删除 `loadPluginSymbol`（含 `plugin.Open`）与硬编码 `"generated-strategy"`；编译成功后**不再**自行决定回测，改为按「有无产物坐标」判定——本仓今天产不出资产服务认可的坐标 ⇒ 一律拦，链上 `blocked_reason=promote_gate`，终态 `sandbox_rejected`，给人看的解释走 job 的 `build_error`。
+     > **施工中的订正（两条轴不许共用一列）**：工单原文那句「`build_error` 说明为什么拦」会让链上的 `build_error` 装着闸门的措辞 —— 读库的人就分不出「编不过」和「编过了但不许跑」，而那正是要看的差别。交付拆成两个终态出口：`stop`（环节错误 → 写 `build_error`）与 `stopAtGate`（闸门 → 只写 `blocked_reason`），并由破坏验证 G 条钉住（把闸门改走 `stop` 当场红）。
+  6. `source_sha256` = 对**最终送编译的那份源码字节**取 sha256（重试修过就是另一份）；注释写明它与 `version_hash` / `artifact_hash` 不是同一件事。
+- **④ 约束与非目标**：
+  - **不改 wire**：`/api/copilot/*` 的路径、状态取值集合、`/stats` 的 `backtest_valid` / `acceptance_rate` 字段都不动（后者结构上恒 0，直到 ⑦ 的 A2 接上——这是**如实反映**，它此前也从未非 0 过：回测从没跑成）。
+  - **不在本仓建第二套闸门真相**：不存 promote 结论、不存资产服务的 status；只在运行时按可核验坐标拦。
+  - **不接资产服务**（A2，见 ⑦）：本单不新增 `pkg/ai/client` 客户端、不加 `ai_service.asset_api_url` 配置键。
+  - 不动 `pipeline` / `explore` 的执行链（它们的载体是表达式 + `strategy_params`，不是 AI 生成的 Go）；不改 `contracts.BacktestRunner` 别名及其护栏；不 import core 任何实现包；不新增第三方依赖；不放宽 `staticcheck` / 沙箱预算任何一条。
+  - 不删 core 侧的 `strategies` / `quant.run_provenance` 相关内容（本仓不改 core）。
+- **⑤ 验收**（真退出码，逐条贴输出）：
+  1. 留痕用例：一次生成后 `ai.generation_chain` 有一行，`prompt` / `source` / `source_sha256` / `build_state` 齐全；**改源码一个字节 → 指纹变**（同 prompt 同 job 不留旧指纹）。
+  2. 闸门用例：注入「编译成功」的执行器 ⇒ 断言链上最后一行 `build_state=passed` 且 `blocked_reason=promote_gate`、job 终态 `sandbox_rejected`、`build_error` 点名「不进回测」、`Stats()` 的 `backtested == 0`。
+     ⚠️ **本条判据在施工中被改写过（如实登记）**：原写法是「注入一个会记录调用的假 `BacktestRunner`，断言它被调用 0 次」。施工中发现 `Generate` 的 runner 参数已无可达路径，留着就是一个「看着还能跑回测」的假接口，于是删掉参数与 `plugin.Open`；进程内**不再有回测通道**，那条计数断言随之不可表达。替代腿是源码级的 `TestQT32A_NoFabricatedStrategyPathInProductionSource`（本包生产源码里出现 `plugin.Open` / `"generated-strategy"` / `"copilot-generated"` / `RunBacktest(` 任一即红），它的牙齿由破坏验证 B 腿取证。
+  3. 未注入 sink fail-closed 用例：状态终态且错误点名「chain sink not configured」（与既有 nil-checker / nil-executor 两条腿同形）。
+  4. store 用例（**没有内存版 Store 假件**：`aistore.Store` 绑 `pgxpool`，为这条腿再造一个内存实现等于开第二条存取路径；替代形态见下）：
+     - 既有静态腿自动覆盖新表：`TestStatements_AreIdempotent` / `TestStatements_OnlyTouchAISchema` / `TestTables_MatchStatements` / `TestStatements_IndexesFollowTheirTables` / `TestStatements_NoForeignSchemaReferences`；
+     - 新增 `TestGenerationChain_InsertCoversEveryColumn` / `_SelectCoversEveryColumn` / `_UpsertRewritesEveryMutableColumn`：把 `INSERT` / `SELECT` / `DO UPDATE SET` 三处列清单与 DDL 的列集**逐列对拍**（core 没有对应表，就自己当自己的尺子），外加冲突键必须等于主键；
+     - 新增 `TestGenerationChain_BuildStateVocabularyMatchesDDL`：Go 侧编译状态常量 ↔ DDL `CHECK` 取值双向闭合；
+     - 真库 opt-in 三条：同 `(job_id, attempt)` 写两次 = 一行且是最后状态（同一条用例里再写第三个 attempt = 两行、按 attempt 升序、两个指纹不同）/ 未登记的 `build_state` 被 `CHECK` 拒 / 未知 job 读回空列表不是 error；另一条 `空 job_id 被拒` 刻意**不连库**（校验在 Exec 之前），CI 无 PG 也真的在跑。
+  5. drift 护栏的新腿：本仓自持表**必须**在 `Tables` 且**不许**出现在 core 对照表；把已登记为 core 搬迁的表改成本仓自持 → 红（防止用豁免名单夹带）。
+  6. **破坏验证两条**：① 绕过闸门（把拦下分支删掉，恢复拿硬编码名跑）→ 用例 2 当场红 → 逐字节还原 → 绿；② 把 `source_sha256` 写成固定常量 → 用例 1 的红指纹腿当场红 → 还原 → 绿。两条都要贴改前/改坏/还原三次退出码。
+     > 交付时扩到 **8 条**（闸门留痕 A、两条轴分列 G、重试不留旧行 H、假策略名 B、指纹脱离源码 C、写失败取反 D、SQL 列缺 E、豁免夹带 F），逐条输出见下方施工记录。
+  7. 门禁：`gofmt -l`（改动文件）空、`go build ./...` / `go vet ./...` EXIT=0、`go test ./... -count=1` 全绿且**不新增红**。
+- **⑥ 边界**：只做 copilot 这一段生成链的留痕与生产者侧闸门；资产登记/编译产物/promote 审批面属 `tellurion-strategy`，`strategy_ref` 解析与 `quant.run_provenance` 属 core（QT-32 主单），生成质量（提示词、表达式与载体形状）属下一单。
+- **⑦ 未落 / 后续（如实登记，不写成已完成）**：
+  1. **`artifact_hash` 在本单没有产出方**。本仓 `go build` 产出的是临时可执行文件，不是资产服务认可的载体 ⇒ 表里**不留** artifact 列（留了就是空列或假 hash）。要产出真坐标必须先把「AI 生成物的载体」裁决下来：`carrier=wasm` + 12 个 host 函数 ABI（对齐 QT-26/30/31 的 `wasmSignalProvider`）/ `carrier=so`（Windows 不支持 `plugin`，core AGENTS §2 已记）/ 维持 ADR-024 的「只审阅不执行」。这是**跨仓 + 契约层**决定，需协调者裁。裁完才立 A2：接 `PUT /api/strategies/{id}/source` + `POST .../build`，拿真 `version_hash`（含资产服务发的 `strategy_id`）与 build job 状态。
+  2. **链的第五环（core run 身份）本单接不上**：闸门拦下后不回测；且 `contracts.BacktestRunner` 签名不带 run 身份（`pkg/ai/pipeline/backtest_runner_alias_test.go:43-46` 钉住别名）。A3 = 让 run 身份穿过这一层（跨仓契约变更，要走 contracts 兼容矩阵 MINOR），落点在 `cmd/ai/http_runner.go:163`。
+  3. **闸门只在本仓生产侧**；「未过 promote 的产物被回测路径拒绝」的**执行侧**那条腿在 core + 资产服务（QT-32 主单 ⑤），本仓无法替它作证。
+  4. **服务间凭证（QT-71）不是本单的阻塞，但 core 那条登记已过期**：本单不新增跨服务调用，所以与它无关；施工时顺手核了远端 —— `git ls-remote --tags origin` 实测 `tellurion-kit` 已有 **`v0.1.2` / `v0.1.3`**（core 台账 QT-71 登记的是「远端只有 v0.1.0/v0.1.1」，那条前提**今天不成立**）。**报协调者**：QT-71 是否解除归 core 判，本仓不改 core。另一条相关事实：`tellurion-strategy:internal/httpapi` 今天**没有任何鉴权面**（全文件零 auth 引用），所以 A2 若要调资产服务，凭证不是它的前置。
+  5. **`-race` 未跑**：本机无 C 编译器（`CGO_ENABLED=1` → `cgo: C compiler "gcc" not found`），`-race` 直接 build failed。本单动了 copilot goroutine 里的写库调用，并发面按 AGENTS §2 本该带 `-race`，代价登记在此。
+  6. **真库腿本机未跑**：本机无 PG 服务、Docker daemon 未起 ⇒ opt-in 用例只证到「无 `TEST_DATABASE_DSN` 时显式 skip」，不装成通过。
+  7. **DBT-18（mining 的真实 Proposer）归属本仓** —— **裁决（2026-10-25，主任口径）⑧**：**归 agent 仓**（core 只保留 `mining.Proposer` 接口作为冻结契约 + 跨仓任务索引一条指针，**不镜像正文**）。**依据**：DBT-18 ② 原文「⇒ 本单**主体不在 core**」；③ ② 原文给了归 agent 时的处置；④ 原文「core 不引入 LLM SDK；**不在本仓实现第二个编排者（ADR-023 禁）**」。**若归 core 的那条路不采纳**——与 ADR-023 直接冲突。**本仓的动作**：立自己的六字段单（含 LLM/MCTS Proposer 的实现位置）。裁决全文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` ⑧。
+
+> **✅ 施工记录（2026-10-25，G8 / agent 腿）**
+>
+> **交付**
+> - `pkg/aistore/schema.go`：`ai.generation_chain` 幂等 DDL（主键 `(job_id, attempt)`、`build_state` 带 `CHECK`）+ `Tables` 登记。
+> - `pkg/aistore/generation_chain.go`：`GenerationChain` + `UpsertGenerationChain`（整行覆盖）+ `ListGenerationChain`（按 attempt 升序）+ 词表常量。
+> - `pkg/copilot/copilot.go`：`ChainSink` / `ChainEntry` / `WithChainSink`（未注入即 fail-closed）+ 逐段写链 + `sha256Hex`；**删除** `loadPluginSymbol`（`plugin.Open`）、硬编码 `"generated-strategy"` / `"copilot-generated"`、`parseUniverse`、以及 `Generate` 的 runner 参数；promote 闸门落在「编译通过」之后那一步。
+>   ⚠️ 自审时补的一处（不是新功能，是留痕本身漏的一环）：LLM 修码重试**换下一版之前**没把这一 attempt 的失败结论落链，于是链上只剩 `none`（「这一版要编」），「第一版确实编不过」这个证据被重试覆盖了 —— 而 ①「一次尝试一行」买的就是这个证据。补 `trace` 一行在前，钉子 `TestQT32A_RetryKeepsTheFailedAttemptRow`，牙齿是破坏腿 H。
+> - `cmd/ai/chain_sink.go`：装配根适配器（`NewChainSink`；词表映射**认不出就报错**，不静默传库）；`cmd/ai/builders.go` + `main.go` 改注入留痕落点、`registerCopilotRoutes` 去掉 runner。
+> - 测试：`pkg/copilot/copilot_chain_test.go`（8 条，含自审后补的 `TestQT32A_RetryKeepsTheFailedAttemptRow`）+ `pkg/aistore/generation_chain_sql_test.go`（4 条静态形状/词表）+ `pkg/aistore/generation_chain_integration_test.go`（3 条真库 opt-in + 1 条不连库）+ `cmd/ai/chain_sink_test.go`（5 条）+ `pkg/aistore/schema_core_drift_test.go` 的 `agentOwnedTables` 豁免与它的四条反证腿。
+> - 文档：`docs/db-schema.md`（新表 + 三条边界 + §5 增 6/7/8 项）、`docs/api-schema.md`（§2 两行 fail-closed + 一段字段实况）、`docs/dataflow.md`（② 链路终点改写 + 生成链小节 + 失败模式两行 + 不变量 5/6）、`docs/adr/0002-AI-生成链留痕归本仓-闸门结论不归本仓.md`（+ ADR 索引）、`AGENTS.md` §1 的 copilot 一行。
+> - 联动退场：`pkg/ai/pipeline/backtest_runner_alias_test.go` 的 copilot 一侧断言随 `copilot.BacktestRunner` 一起删（本包不再有回测通道），保留 pipeline↔contracts 那条腿并在文件头写明**为什么少了一边**。
+>
+> **⑤ 验收逐条（真退出码，本机 `~/sdk/go1.25.0`）**
+> 1. 留痕：`TestQT32A_TraceCarriesPromptSourceAndSelfConsistentFingerprint` PASS —— 且「链上那份 = 编译时磁盘上那份」是拿执行器记下的实际文件内容对拍的，不在断言里重写去围栏逻辑；`TestQT32A_RetryKeepsTheFailedAttemptRow` PASS —— 链上是**两行**（attempt 0 `failed` 带当时的诊断 + attempt 1 `passed`），重试不覆盖前一次。`pkg/copilot -run TestQT32A` → 8 PASS / 0 FAIL。
+> 2. 闸门：`TestQT32A_PromoteGateBlocksEvenAfterSuccessfulBuild` PASS（`build_state=passed` + `blocked_reason=promote_gate` + 终态 `sandbox_rejected` + `backtested==0`）；`TestQT32A_BuildFailureIsNotReportedAsGateBlock` PASS（编译失败不得冒充闸门拦下）。
+> 3. 未注入 sink / 写失败：`TestQT32A_NilChainSink_FailsClosedBeforeCallingLLM`、`TestQT32A_TraceWriteFailure_AbortsBeforeLLM` PASS —— 两条都额外断言 **LLM 调用次数为 0**。
+> 4. store：`-run 'TestGenerationChain|TestSchema|TestStatements|TestTables'` → **21 PASS / 3 SKIP**（skip 的三条正是需要 `TEST_DATABASE_DSN` 的那三条 —— `UpsertIsIdempotentPerAttempt` / `RejectsUnregisteredBuildState` / `ListUnknownJobIsEmpty`；`RejectsEmptyJobID` 不连库、真的在跑）。
+> 5. drift 豁免：`TestSchema_AgentOwnedTablesAreDeclared` PASS（不读 core 源码，单仓也跑）。
+> 6. **破坏验证 8 条**（脚本 `.qt32a_break.py` 现场执行后删除；改坏 → 目标用例红 → 逐字节还原 → 核 SHA256 一致。`go test` 退出码直接取，不经管道）：
+>    基线 `go test ./pkg/copilot ./pkg/aistore ./cmd/ai -count=1` → `ok / ok / ok`，EXIT=**0**。
+>
+>    | # | 改坏的东西 | 目标用例 | 红时退出码 | 还原 |
+>    |---|---|---|---|---|
+>    | A | `entry.BlockedReason = BlockedPromoteGate` → `= ""`（闸门不再留痕） | `TestQT32A_PromoteGateBlocksEvenAfterSuccessfulBuild` | **1** | SHA 一致 |
+>    | G | 闸门改走 `stop`（把「未过 promote」那句塞进链的 `build_error`） | 同上，红在「闸门拦下不得占用 build_error」那条断言 | **1** | SHA 一致 |
+>    | H | 删掉重试分支里「先落这一 attempt 的失败结论」那五行 | `TestQT32A_RetryKeepsTheFailedAttemptRow`（红在「第 0 次尝试的失败结论必须留在链上」与「那一行要带当时的诊断」） | **1** | SHA 一致 |
+>    | B | 生产源码里放回 `const legacyFakeStrategyName = "generated-strategy"` | `TestQT32A_NoFabricatedStrategyPathInProductionSource` | **1** | SHA 一致 |
+>    | C | `sha256Hex(code)` → `sha256Hex("fixed-placeholder")`（2 处：静态闸行 + 循环行） | `TestQT32A_TraceCarriesPromptSourceAndSelfConsistentFingerprint` | **1** | SHA 一致 |
+>    | D | `trace` 的失败分支取反（`err != nil` → `err == nil`：写失败不再中止，写成功反倒中止） | `TestQT32A_TraceWriteFailure_AbortsBeforeLLM` | **1** | SHA 一致 |
+>    | E | `INSERT` 列清单删掉 `blocked_reason` | `TestGenerationChain_InsertCoversEveryColumn` | **1** | SHA 一致 |
+>    | F | `agentOwnedTables` 里夹带一张没登记、理由为空的表 | `TestSchema_AgentOwnedTablesAreDeclared` | **1** | SHA 一致 |
+>
+>    还原后 `git status` 只剩本单的文件，`.bak` / 临时脚本零残留。**注意两条**：G 红的不是「少写了原因」，而是「原因写错了列」；H 红的是「上一版的失败结论被重试覆盖掉」—— 这两类断言只有改坏一次才知道自己有没有牙齿。
+>    D 这条**第一次跑的没落**（锚点在文件里有 3 处 `SaveChain` 失败分支，脚本按「恰好 1 处」才动手）：`stop` / `stopAtGate` 那两处的写失败**刻意只记日志**（终态已落定，不能因审计口失灵把 job 改回「还在跑」），所以不能整片短路。改成只取 `trace` 的函数签名当锚点，才只命中 1 处。
+> 7. 门禁（真实输出）：`gofmt -l`（本单 16 个 .go 文件，含 5 个新建）→ 空；`go build ./...` → **EXIT=0**；`go vet ./...` → **EXIT=0**；`go test ./... -count=1` → **EXIT=0**，`^ok` 20 个包、`FAIL` 0 行（另 4 个包 no test files）。全仓 `gofmt -l .` 仍命中两个**既有 BOM** 文件（`pkg/ai/drift/detector.go`、`pkg/ai/validation/redundancy.go`），与本次改动无关、未动（QT-17 W7 已在册）。
+>
+> **本单做的技术决定（代价如实）**
+> 1. **删掉 `Generate` 的 runner 参数与 `plugin.Open`**，而不是「留着但恒不执行」：留着就是一条看着还能跑回测的假接口。代价 —— `JobResult.StrategyName/BacktestResult/BacktestErr` 与状态 `generated`/`backtest_complete`/`backtest_failed` 今天不可达、`/stats` 的 `backtest_valid`/`acceptance_rate` 恒 0；**字段与取值集合不动**（`tellurion-ui:web/src/api/copilot.ts` 的终态白名单 + `types/api.ts` 在消费，删是跨仓 breaking），A2 填上它们不需要改 wire。这不是回归：那条回测此前也从没跑成（core 未注册那个名字）。
+> 2. **留痕是前置**：sink 没装 / 写失败 → LLM 一次都不调。代价 = 库不可用时 copilot 直接不可用（研究路径受影响），换来的是「存在过的生成都查得到」。这与 S3 那条「四项一律 fail-closed，不做本地兜底」同向。
+> 3. **一 attempt 一行**：链能回答「最后编进去的是哪一版」，也留得住中间版本；代价是行宽（prompt + 源码全量入库、不压缩）。
+> 4. **闸门只按「有没有可核验坐标」拦，不在本仓存 promote 结论**；代价是「拦下的理由」今天只有一种（`promote_gate`），将来 A2 才有第二个判据。
+> 5. **`source_sha256` 命名不改**：它不是 `version_hash` / `artifact_hash`，注释与 DDL 都写明；将来接资产服务时**并列加列**，不复用这个名字。
+> 6. **`agentOwnedTables` 是给豁免装的护栏，不是给新表开的后门**：core 的表若哪天新增同名表，需要把它从豁免名单移回 `coreToAI`（那条动作会同时让「自持」断言变红，逼人来改）。

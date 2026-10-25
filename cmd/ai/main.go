@@ -88,7 +88,7 @@ func main() {
 	backtestRunner := NewHTTPBacktestRunner(btClient)
 	wfRunner := NewHTTPWalkForwardRunner(btClient)
 
-	copilotService := BuildCopilot(v, backtestRunner, logger)
+	copilotService := BuildCopilot(v, NewChainSink(aiStore), logger)
 
 	factorPool := gene_pool.NewFactorPool(aiStore.Pool())
 	strategyPool := gene_pool.NewStrategyPool(aiStore.Pool())
@@ -120,7 +120,7 @@ func main() {
 	router.GET("/metrics", kitobservability.Handler(m))
 
 	// ── 四族 AI 路由（自 analysis 迁入，路径不变）────────────────────
-	registerCopilotRoutes(router, copilotService, backtestRunner)
+	registerCopilotRoutes(router, copilotService)
 
 	// P1-1b：实验日志落点。QT-17 ④ 已**停写** legacy public.experiments，
 	// 写路径只剩本仓自持的 ai.experiments —— aistore.Store 同时满足

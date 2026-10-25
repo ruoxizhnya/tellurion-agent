@@ -25,6 +25,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -81,12 +83,21 @@ func (s *stubCodeChecker) CheckOrError(code string) error {
 }
 
 // stubBuildExecutor is a test-only BuildExecutor.
+//
+// QT-32-A adds one thing: it remembers the bytes it was asked to compile
+// (the .go file named in args). That is what lets a test assert "the
+// source on the chain is the source that went into the compiler" instead
+// of re-implementing the trimming in the assertion.
 type stubBuildExecutor struct {
 	runCalls  int32
 	stdout    *bytes.Buffer
 	stderr    *bytes.Buffer
 	err       error
 	isTimeout bool
+
+	mu              sync.Mutex
+	compiledSource  string
+	compiledSources int32
 }
 
 func (s *stubBuildExecutor) Run(ctx context.Context, name string, args []string, workingDir string) (*bytes.Buffer, *bytes.Buffer, error) {
@@ -97,11 +108,30 @@ func (s *stubBuildExecutor) Run(ctx context.Context, name string, args []string,
 	if s.stderr == nil {
 		s.stderr = &bytes.Buffer{}
 	}
+	// args 形如 ["-o", "<out>", "<source.go>"]：把最后一个 .go 读下来。
+	for _, a := range args {
+		if !strings.HasSuffix(a, ".go") {
+			continue
+		}
+		if raw, err := os.ReadFile(a); err == nil {
+			s.mu.Lock()
+			s.compiledSource = string(raw)
+			s.mu.Unlock()
+			atomic.AddInt32(&s.compiledSources, 1)
+		}
+	}
 	return s.stdout, s.stderr, s.err
 }
 
 func (s *stubBuildExecutor) IsTimeout(err error) bool {
 	return s.isTimeout && errors.Is(err, s.err)
+}
+
+// compiled 返回最后一次被要求编译的源码字节。
+func (s *stubBuildExecutor) compiled() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.compiledSource
 }
 
 // ---- Tests ---------------------------------------------------------------
@@ -115,7 +145,8 @@ func TestS7P1_2_LocalInterfacesExist(t *testing.T) {
 	var _ LLMClient = (*stubLLMClient)(nil)
 	var _ CodeChecker = (*stubCodeChecker)(nil)
 	var _ BuildExecutor = (*stubBuildExecutor)(nil)
-	t.Log("local interfaces exist: LLMClient, CodeChecker, BuildExecutor")
+	var _ ChainSink = (*recordingSink)(nil)
+	t.Log("local interfaces exist: LLMClient, CodeChecker, BuildExecutor, ChainSink")
 }
 
 // TestS7P1_2_NewCopilotService_ReturnsNilDeps verifies the default
@@ -152,9 +183,10 @@ func TestS7P1_2_WithCodeChecker_Injects(t *testing.T) {
 	svc := NewCopilotService().
 		WithLLMClient(llm).
 		WithCodeChecker(checker).
-		WithWorkingDir(t.TempDir())
+		WithWorkingDir(t.TempDir()).
+		WithChainSink(&recordingSink{})
 
-	res := svc.Generate(context.Background(), GenerateParams{Description: "x"}, nil)
+	res := svc.Generate(context.Background(), GenerateParams{Description: "x"})
 	require.NotNil(t, res)
 	waitTerminal(t, svc, res.JobID, 2*time.Second)
 
@@ -183,10 +215,11 @@ func TestS7P1_2_NilCodeChecker_FailsClosed(t *testing.T) {
 	}
 	svc := NewCopilotService().
 		WithLLMClient(llm).
-		WithWorkingDir(t.TempDir())
+		WithWorkingDir(t.TempDir()).
+		WithChainSink(&recordingSink{})
 	// codeChecker is nil — must fail closed.
 
-	res := svc.Generate(context.Background(), GenerateParams{Description: "x"}, nil)
+	res := svc.Generate(context.Background(), GenerateParams{Description: "x"})
 	require.NotNil(t, res)
 	waitTerminal(t, svc, res.JobID, 2*time.Second)
 
@@ -213,10 +246,11 @@ func TestS7P1_2_NilBuildExecutor_FailsClosed(t *testing.T) {
 	svc := NewCopilotService().
 		WithLLMClient(llm).
 		WithCodeChecker(&stubCodeChecker{err: nil}). // allow
-		WithWorkingDir(t.TempDir())
+		WithWorkingDir(t.TempDir()).
+		WithChainSink(&recordingSink{})
 	// buildExecutor is nil — must fail closed at build step.
 
-	res := svc.Generate(context.Background(), GenerateParams{Description: "x"}, nil)
+	res := svc.Generate(context.Background(), GenerateParams{Description: "x"})
 	require.NotNil(t, res)
 	waitTerminal(t, svc, res.JobID, 2*time.Second)
 
@@ -244,9 +278,10 @@ func TestS7P1_2_BuildExecutor_IsInvoked(t *testing.T) {
 		WithLLMClient(llm).
 		WithCodeChecker(&stubCodeChecker{err: nil}).
 		WithBuildExecutor(exec).
-		WithWorkingDir(t.TempDir())
+		WithWorkingDir(t.TempDir()).
+		WithChainSink(&recordingSink{})
 
-	res := svc.Generate(context.Background(), GenerateParams{Description: "x"}, nil)
+	res := svc.Generate(context.Background(), GenerateParams{Description: "x"})
 	require.NotNil(t, res)
 	waitTerminal(t, svc, res.JobID, 2*time.Second)
 

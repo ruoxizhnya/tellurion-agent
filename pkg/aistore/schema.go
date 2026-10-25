@@ -31,6 +31,11 @@ const Schema = "ai"
 // Tables lists every table the `ai` schema owns, in creation order. It is the
 // checked-in claim that the drift test compares against Statements() and against
 // core's DDL.
+//
+// All but the last one are QT-17 ports of core tables (see coreToAI in the drift
+// test). `ai.generation_chain` is NOT a port — nothing in core ever recorded an
+// AI generation, so there is no core column set to match. It is declared as
+// agent-owned there, never silently omitted here.
 var Tables = []string{
 	"ai.experiments",
 	"ai.research_profile",
@@ -39,6 +44,7 @@ var Tables = []string{
 	"ai.factor_genes",
 	"ai.strategy_genes",
 	"ai.factor_hypothesis",
+	"ai.generation_chain",
 }
 
 // statements is the execution truth: idempotent DDL, executed in order by
@@ -169,6 +175,45 @@ var statements = []string{
 		reference    TEXT,
 		created_at   TIMESTAMPTZ DEFAULT NOW(),
 		updated_at   TIMESTAMPTZ DEFAULT NOW()
+	)`,
+
+	// generation_chain — QT-32-A（本仓自持，core 无对应表）。
+	//
+	// 一次 AI 生成的证据链：人给的意图（prompt + 回测区间）、LLM 产出的源码、
+	// 源码指纹、静态闸与编译的结论、以及链断在哪一环、为什么断。此前这些
+	// 只活在内存里的 job 和一个用完即删的临时目录里，进程一重启那次生成
+	// 就从未发生过。
+	//
+	// 主键是 (job_id, attempt) 而不是 job_id：**每次编译尝试一行**。重试会让 LLM
+	// 交出另一份字节、另一个指纹；只留最后一版就把「中间试过什么」抹掉了，
+	// 而那正是复查生成质量时要看的东西。
+	//
+	// 三条口径是刻意的：
+	//   - `source_sha256` **不是** version_hash 也不是 artifact_hash。前者按
+	//     tellurion-contracts:engine/provenance.go:65 需要资产服务签发的
+	//     strategy_id（本仓拿不到），后者按 :39 只覆盖编译产物字节（本仓的
+	//     go build 产物不是资产服务认可的载体）。这里存的是**同一行 source**
+	//     的 sha256，用途是指纹与篡改检测，不充当执行真相。
+	//   - **没有 promote / artifact 列**。闸门结论的真相在
+	//     tellurion-strategy:internal/asset/ddl.go 的 strategy_artifacts.status
+	//     状态机；在这里再存一份就是两处真相，且一定会漂移。
+	//   - `blocked_reason` 为空 = 链没被拦；非空 = 点名是哪一道闸把链停下的。
+	//     被拦时回测区间照样留着 —— 「当时人要求跑什么」也是链上的一环。
+	`CREATE TABLE IF NOT EXISTS ai.generation_chain (
+		job_id         VARCHAR(64) NOT NULL,
+		attempt        INT         NOT NULL,
+		prompt         TEXT        NOT NULL,
+		universe       VARCHAR(64),
+		start_date     VARCHAR(16),
+		end_date       VARCHAR(16),
+		source         TEXT,
+		source_sha256  CHAR(64),
+		build_state    VARCHAR(16) NOT NULL DEFAULT 'none' CHECK (build_state IN ('none','failed','passed')),
+		build_error    TEXT,
+		blocked_reason VARCHAR(32),
+		created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (job_id, attempt)
 	)`,
 }
 

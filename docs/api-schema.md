@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-20
-verified-by: 功能边界固化（三份契约：db / api / dataflow）
+last-verified: 2026-10-25
+verified-by: QT-32-A —— copilot 的 promote 闸门与留痕 fail-closed 登记；端点与状态取值集合未变（§2 补两行 + 一段字段实况）
 ---
 
 # API Schema — tellurion-agent
@@ -39,6 +39,10 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 | 工具未注册 | 404 | 不返回空结果 |
 | 生成任务失败 | job 状态 `failed` + 原因 | 不静默重试 |
 | 引擎不可用 | 5xx | 明确失败，不产出"部分结果"当成功 |
+| **AI 产物未过 promote 人工闸门** | job 终态 `sandbox_rejected`，`build_error` 只给人看的解释（「编译通过；…不进回测」）；链上那一行用 `blocked_reason=promote_gate` 说话 | **编译通过也不去跑回测**：AI 产物要先进资产服务、由人 promote 才成为可执行资产。两条轴不共用一列（「编不过」≠「编过了但不许跑」）。闸门结论的真相在 `tellurion-strategy`，本仓不存第二份 |
+| 生成链写不进去 / 没注入留痕落点 | job 终态 `sandbox_rejected` + `build_error` 点名 `ai.generation_chain` 或 `chain sink not configured` | **一条记不下来的生成 = 不做的生成**；LLM 在这一步之前不会被调用（不花钱买一份无法复查的产物） |
+
+> **`/api/copilot/generate/{job_id}` 今天的字段实况（QT-32-A，2026-10-25）**：`strategy_name` / `backtest_result` / `backtest_error` 与状态取值 `generated` / `backtest_complete` / `backtest_failed` **不会出现** —— 上面那条闸门把这条路拦在生产回测之外。它们仍是契约的一部分（`tellurion-ui:web/src/types/api.ts` 与 `api/copilot.ts` 的终态白名单在消费），**不删**；填上它们是「接资产服务编译管线」那一单的动作，届时无需改 wire。同理 `/api/copilot/stats` 的 `backtest_valid` 与 `acceptance_rate` 结构上为 0 —— 这不是回归：旧实现拿硬编码策略名去 core 跑回测，那个名字从未注册过，两个字段此前也恒为 0。
 
 **SSE 契约**：事件名 `progress` / `complete`；`progress` 的 payload 与 `GET /runs/{id}` **同 JSON 形状**（客户端复用类型）。
 
