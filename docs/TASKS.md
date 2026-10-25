@@ -345,7 +345,7 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
   6. **真库腿本机未跑**：本机无 PG 服务、Docker daemon 未起 ⇒ opt-in 用例只证到「无 `TEST_DATABASE_DSN` 时显式 skip」，不装成通过。
   7. **DBT-18（mining 的真实 Proposer）归属本仓** —— **裁决（2026-10-25，主任口径）⑧**：**归 agent 仓**（core 只保留 `mining.Proposer` 接口作为冻结契约 + 跨仓任务索引一条指针，**不镜像正文**）。**依据**：DBT-18 ② 原文「⇒ 本单**主体不在 core**」；③ ② 原文给了归 agent 时的处置；④ 原文「core 不引入 LLM SDK；**不在本仓实现第二个编排者（ADR-023 禁）**」。**若归 core 的那条路不采纳**——与 ADR-023 直接冲突。**本仓的动作**：立自己的六字段单（含 LLM/MCTS Proposer 的实现位置）。裁决全文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` ⑧。
 
-> **✅ 施工记录（2026-10-25，G8 / agent 腿）**
+> **✅ 施工记录（2026-10-25，G8 / agent 腿，提交 `55dbf05`）**
 >
 > **交付**
 > - `pkg/aistore/schema.go`：`ai.generation_chain` 幂等 DDL（主键 `(job_id, attempt)`、`build_state` 带 `CHECK`）+ `Tables` 登记。
@@ -380,6 +380,7 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 >    还原后 `git status` 只剩本单的文件，`.bak` / 临时脚本零残留。**注意两条**：G 红的不是「少写了原因」，而是「原因写错了列」；H 红的是「上一版的失败结论被重试覆盖掉」—— 这两类断言只有改坏一次才知道自己有没有牙齿。
 >    D 这条**第一次跑的没落**（锚点在文件里有 3 处 `SaveChain` 失败分支，脚本按「恰好 1 处」才动手）：`stop` / `stopAtGate` 那两处的写失败**刻意只记日志**（终态已落定，不能因审计口失灵把 job 改回「还在跑」），所以不能整片短路。改成只取 `trace` 的函数签名当锚点，才只命中 1 处。
 > 7. 门禁（真实输出）：`gofmt -l`（本单 16 个 .go 文件，含 5 个新建）→ 空；`go build ./...` → **EXIT=0**；`go vet ./...` → **EXIT=0**；`go test ./... -count=1` → **EXIT=0**，`^ok` 20 个包、`FAIL` 0 行（另 4 个包 no test files）。全仓 `gofmt -l .` 仍命中两个**既有 BOM** 文件（`pkg/ai/drift/detector.go`、`pkg/ai/validation/redundancy.go`），与本次改动无关、未动（QT-17 W7 已在册）。
+>    同一结论在**干净 checkout** 上复取一次（core AGENTS §6 那条实测代价：`gofmt -l` 判工作区、CI 判提交出去的内容，两者可以不同）：`git worktree add --detach <tmp> HEAD` 里 `gofmt -l .` → 只列上面那两个既有 BOM 文件、`go build ./...` / `go vet ./...` / `go test ./... -count=1` → **全 EXIT=0**（`^ok` 20 包 / `FAIL` 0），用完 `git worktree remove --force`。
 >
 > **本单做的技术决定（代价如实）**
 > 1. **删掉 `Generate` 的 runner 参数与 `plugin.Open`**，而不是「留着但恒不执行」：留着就是一条看着还能跑回测的假接口。代价 —— `JobResult.StrategyName/BacktestResult/BacktestErr` 与状态 `generated`/`backtest_complete`/`backtest_failed` 今天不可达、`/stats` 的 `backtest_valid`/`acceptance_rate` 恒 0；**字段与取值集合不动**（`tellurion-ui:web/src/api/copilot.ts` 的终态白名单 + `types/api.ts` 在消费，删是跨仓 breaking），A2 填上它们不需要改 wire。这不是回归：那条回测此前也从没跑成（core 未注册那个名字）。
