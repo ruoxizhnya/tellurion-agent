@@ -10,6 +10,8 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 > 状态：`⬜ 待做` / `🔶 进行中` / `⛔ 阻塞` / `✅ 完成（附日期）`。
 > 本文件自 core 台账 OPS-01 改判（2026-10-14）派生——原单前提（core 侧做 explore SSE）因 AI 拆仓失效，实现落此仓。
 
+> **第三轮裁决指针（2026-10-25）**：⑩ AI 生成物载体 = **默认 `carrier="dsl"`**，仅 L3（自定义状态机 / L2 表达不了）才 `carrier="wasm"`，**`carrier="so"` 删除**；`artifact_hash` 用 `contracts.engine.StrategyVersionInput{Carrier:"dsl", Source:<配置文本>}.Hash()`，复用 QT-41 资产服务。正文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` §五。
+
 ---
 
 ## 施工序（候选单，开工前必须展开成六字段）
