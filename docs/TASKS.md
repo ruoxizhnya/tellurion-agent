@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: QT-17 S3-d 收口——删 core replace/require、CI 单仓、core import 字面量归零
+verified-by: QT-17 ④ 停写复核（2026-10-25）——legacy 零增长证据 / 白名单清零 / 护栏反证两条腿 / core deprecated 复核；此前 S3-d 已删 core replace/require、CI 单仓
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -20,7 +20,7 @@ verified-by: QT-17 S3-d 收口——删 core replace/require、CI 单仓、core 
 
 | 阶段 | 内容 | 上游单号 | 前置 |
 |---|---|---|---|
-| QT-17 | `ai.*` schema 自持 + 双写对拍 + 切读 + 停写 | `QT-17` | D24 补第 7 类动作 |
+| QT-17 | `ai.*` schema 自持 + 双写对拍 + 切读 + 停写 ✅ 完成（2026-10-25，①~⑤ + ④ 复核；正文见下） | `QT-17` | D24 补第 7 类动作 |
 | S3 | 删 `replace ../tellurion`，改 HTTP 粗粒度 ✅ 完成（2026-10-25，S3-a~d） | `QT-07 / QT-50` | QT-17 + QT-50 |
 | QT-65 | QT-11 跨仓回归（agent 腿）：pipeline / yaml 生产路径改**工厂注册** ✅ 完成（2026-10-24，见下方完成记录） | `QT-11` | 无硬前置 |
 
@@ -161,7 +161,7 @@ verified-by: QT-17 S3-d 收口——删 core replace/require、CI 单仓、core 
 
 ---
 
-## QT-17 · agent 数据自持（D10：`ai.*` schema 建表与迁移）🔶
+## QT-17 · agent 数据自持（D10：`ai.*` schema 建表与迁移）✅（2026-10-25）
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「S2~S3 · 拆仓」迁入（任务台账批量重分布：实现整体落本仓的单迁入本仓台账）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
 
@@ -187,7 +187,7 @@ verified-by: QT-17 S3-d 收口——删 core replace/require、CI 单仓、core 
 > - **仍待**：S3 去 replace（依赖 QT-17 ③ + QT-50，见下）。③ 仪器域只读 port 已于 2026-10-25 消费 QT-67 落地（见下节）；core 侧 deprecated 标记已由 core 仓 QT-05 ④ 落地（删除期限见下交接件）。
 > **🔶 进度（2026-10-24，④ 停写切换，本次）**：见下行专节。
 >
-> #### ④ 停写切换（2026-10-24，ODR-001）
+> #### ④ 停写切换 ✅（2026-10-24，ODR-001；2026-10-25 复核）
 >
 > **已落**：
 > 1. **对拍零差异**：双写适配器的真库对拍腿（完成/失败/裁决/父子链四条路径）切换前 `PASS`；存量单独数过——旧表 30 行（8 run / 20 行有父代）、`ai.experiments` 0 行（30 行全部早于双写期），故先做一次性回填归档。
@@ -201,6 +201,15 @@ verified-by: QT-17 S3-d 收口——删 core replace/require、CI 单仓、core 
 > - `research.*` 的「停写」是**无操作**：全工作区不存在其生产写入方（core `pkg/storage/research.go` 只有 `GetResearchProfile`，`cmd/analysis` 无研究域 handler；真库 0 行）。此前台账/`db-schema.md` 写的「写方在 core」**与代码事实不符**，已订正。
 > - `factor_genes` / `strategy_genes` **当时仍写 core `public.*`**（`pkg/ai/gene_pool` 用未限定表名，经 `search_path` 落到 `public`，池也是 core 的 `store.DB()`）；两表真库当前 0 行。**已于 2026-10-25 由 ⑤ 收口**（见下节），本条保留为当日的如实记录。
 > - `grep -r "pkg/storage"` **未归零**：生产代码 1 处（`handlers_explore.go`，等 D24 第 7 类动作），其余在 `_test.go` / 文档 / 护栏注释；整体归零依赖 S3 删 replace（QT-50）。
+
+> **W7 复核（2026-10-25，④ 收口）**
+> - **写路径**：`cmd/ai/experiment_dualwrite.go` 不存在（`b1a8fcd` 删除）；`cmd/ai/main.go` 只注入 `*aistore.Store`（同时满足 `pipeline.ExperimentSink` 与 `verdictSink`）。
+> - **对拍零差异报告（归档）**：ODR-001 `§Metrics` —— 回填后 `public.experiments` / `ai.experiments` 各 30 行、`parent_id` 非空 20；行级 `EXCEPT` 双向 `legacy_only=0 / ai_only=0`；停写取证 `public.experiments` 30 行 / `max(id)=1203` 不变。
+> - **护栏**：`storageWhitelist` 为空（`experiment_dualwrite.go` 条目已随文件删除）；`TestStorageImportBoundary_Fixtures` 五条反证腿常驻（违规→红 / 干净→绿 / 白名单放行 / 条目不再 import→红 / 条目文件消失→红）。
+> - **反证（本轮实测，两条腿）**：① 新建 `cmd/ai/experiment_dualwrite_LEG.go`（`import _ "tellurion/pkg/storage"`）→ `TestStorageImportBoundary` 红并点名该文件；删除后复绿（工作区零残留）。② 临时给已删文件登记白名单条目 → 同一条腿红（`storageWhitelist 有条目已失效 … cmd/ai/experiment_dualwrite.go`）→ 逐字节还原（`SHA256=2F818BE3…3572425B` 与改前一致）→ 复绿。
+> - **core 侧**：`pkg/storage/experiments.go` / `research.go` 的导出符号均带 `Deprecated:`，删除期限 **2027-01-31**；`pkg/storage/deprecated_legacy_test.go` 逐符号钉住（core 仓）。
+> - **门禁（真实输出）**：`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全绿（`cmd/ai 0.478s`、`internal/repoguard 0.344s`、`pkg/ai/pipeline 4.259s`）。`gofmt -l .` 命中两个**既有** BOM 文件（`pkg/ai/drift/detector.go`、`pkg/ai/validation/redundancy.go`），与本次改动无关，未动。
+> - **未落（如实）**：`TestStopWrite_LegacyExperimentsFrozen` 本机无 `TEST_DATABASE_DSN` → skip；本轮未重跑真库腿，2026-10-24 的停写取证仍为最后一次真库证据。生产 import 已零；`grep -r "pkg/storage"` 仍命中护栏注释与断言文案（不是 import）。
 
 > #### ③ 仪器域只读 port 消费（2026-10-25，QT-67）
 >
