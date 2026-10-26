@@ -165,6 +165,30 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 
 ---
 
+### SVC-AGENT-G0 · 服务就绪门 G0：自有 config 与部署（ADR-036）[P0] ✅（2026-10-26）
+
+- **① 目标**：本仓作为 AI 应用服务，自带 config 与 deploy，不再借 core 的配置目录。
+- **② 上下文**：本仓已有 `Dockerfile` 与 `cmd/ai`，但没有 `config/`；compose 通过 `CONFIG_PATH=../tellurion/config/ai-service.yaml` 借用 core 配置。
+- **③ 要求**：新增本仓 `config/ai-service.yaml`（模型/预算/端口等，密钥走 env）；新增 `deploy/compose.yaml`（`:8086`，`CONFIG_PATH` 指向本仓）；README 写单仓启动命令；健康检查用现有端点或 G1 补 `/healthz`。
+- **④ 约束与非目标**：不改 AI 逻辑与 `ai.*` schema；不重新 import core；不引入 K8s。
+- **⑤ 验收**：`docker compose -f deploy/compose.yaml config` 通过；单仓启动不依赖 `../tellurion/config`；无 `replace` / `go.work`。
+- **⑥ 边界**：只改本仓 config/deploy；core 代理面不变。
+
+> **施工记录（2026-10-26）**：
+> - **落点**：`config/ai-service.yaml`（core 同名文件逐字节复制，SHA256 `F3DF46D4…C2C51B2`；core 未改）；`deploy/wait-for-deps.sh`（core 同名脚本逐字节复制，SHA256 `18EF9DAA…D39DA88`）；`deploy/compose.yaml`（自带 `postgres` / `redis` + `ai-service`，`:8086`、`CONFIG_PATH=/app/config/ai-service.yaml`、PG/Redis 走服务名，变量沿用 `DATABASE_*` / `REDIS_URL` / `AUTH_*` / `JWT_SECRET` 等既有 env）；`Dockerfile` 删三处 `--from=core`，改为本仓 `COPY config/ai-service.yaml` 与 `COPY deploy/wait-for-deps.sh`，补 `netcat-openbsd` 供等待脚本使用，`CMD` 不变；README 补目录、启动命令与单仓镜像构建。
+> - **验收（真实输出）**：`grep -c 'from=core' Dockerfile` = 0；`grep -c 'COPY config/ai-service.yaml' Dockerfile` = 1；`docker compose -f deploy/compose.yaml config -q` → exit 0；`config --services` → `postgres` / `redis` / `ai-service`；`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全绿（21 个包，`pkg/ai/pipeline 4.205s`）；`gofmt -l .` 空。
+> - **破坏验证**：把 `COPY config/ai-service.yaml` 改回 `COPY --from=core config/ai-service.yaml` → `grep -c 'from=core'` = 1（红）→ 逐字节还原后 0（绿，SHA256 一致）。
+> - **如实登记（2026-10-26 复测订正）**：本机 Docker daemon **本轮可达**，上一版「daemon 不可达、镜像实构建未取证」的陈述已失效。实测：`docker build -t tellurion-agent:g0-verify .` 成功（构建上下文只有本仓，无 `core` 命名上下文，即「删掉 core 源码也能构建」已取证）；镜像配临时 PG / Redis 起容器后 `curl -sS http://127.0.0.1:8086/health` → `200 {"service":"ai-service","status":"ok"}`，日志显示监听 `0.0.0.0:8086`。**未做**：core `docker-compose.yml` 全栈 `up`（该文件 ai-service 的 `entrypoint` 仍指旧路径 `/app/wait-for-deps.sh`，属 core 侧跨仓腿，已在 `tellurion-docs:docs/guides/{deploy-config,local-dev}.md` 登记）；`SVC-CORE-AI-RETIRE` 仍属跨仓未落项。
+
+### SVC-CORE-AI-RETIRE · core 侧 AI 遗留表与写方法退役（ADR-036 G3）[P1] ⬜
+
+- **① 目标**：core 不再写 `experiments` / `factor_hypothesis` / `factor_genes` / `strategy_genes`；遗留写方法与 DDL 删除或标只读。
+- **② 上下文**：本仓 QT-17 已停写 `ai.experiments`；core `pkg/storage/experiments.go:108`、`factor_hypothesis.go:35` 仍有 `INSERT`，后者生产零调用方，core `postgres.go` 仍建裸表。
+- **③ 要求**：core 删除/停用上述写方法；确认无生产调用；裸表标 `legacy` 或按迁移 DROP；`ai.*` 为本仓唯一写者。
+- **④ 约束与非目标**：不删除历史数据；不在本仓改 core 代码；不扩大到 `quant.*` 运行态表。
+- **⑤ 验收**：core 侧这四张表零写入；`grep` 写方法零生产调用；本仓 `ai.*` 行数持续增长而旧表不增长。
+- **⑥ 边界**：跨仓任务，正文归 `tellurion:docs/TASKS.md` 的 `SVC-RETIRE-INDEX`；本仓只留指针与本仓停写验收。
+
 ## QT-17 · agent 数据自持（D10：`ai.*` schema 建表与迁移）✅（2026-10-25）
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「S2~S3 · 拆仓」迁入（任务台账批量重分布：实现整体落本仓的单迁入本仓台账）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。

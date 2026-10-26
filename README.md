@@ -18,40 +18,52 @@ Quant Lab 的 **AI 实验员层**。从 monorepo `tellurion` 拆出（2026-10-09
 | `pkg/ai/` | AI 编排层（loop / pipeline / gene_pool / tools / agents / causal / …，24 包）——**自 core 仓迁入（2026-10-09，AI 拆仓阶段 2）** |
 | `pkg/copilot/` | `CopilotService`（自然语言 → 生成代码 → 沙箱编译 → 回测）——自 core 的 `pkg/strategy/copilot.go` 归位 |
 | `cmd/ai/` | **ai-service**（:8086）：Copilot / pipeline / explore / tools 四族 HTTP 面 + AI 侧装配 builder |
+| `config/ai-service.yaml` | 本仓自持的 ai-service 配置（内容取自 core，只读复制） |
+| `deploy/compose.yaml` | 单仓本地栈：本仓自带 PG / Redis，ai-service 发布 `127.0.0.1:8086` |
+| `deploy/wait-for-deps.sh` | 容器启动的有界依赖等待（取自 core，需 `nc`） |
 | `docs/hermes/` | Hermes agent 的配置 / 提示词 / 技能 / 系统设计 / 工具契约 |
 
 ## 依赖方向（结构性不变量）
 
 ```
-agent ──require──► core（tellurion，本地 replace ../tellurion）
+agent ──HTTP──► core（tellurion；运行期调用，零编译依赖 / 无 replace）
 core ────────────► ✗ 永不反向依赖 agent
 ```
 
 core 仓的 `internal/repoguard` 有护栏钉住这个方向：core 里**不许出现 `pkg/ai` 目录**、
 生产代码不许 import `pkg/ai` 或 agent 模块。反向边 = 重新制造仓级环 = Go module 直接拒绝编译。
-（这条不变量正是本仓曾长期「代码未迁」的原因——前置是 ADR-027 §5 第 8 步的 ai-service
-服务化，2026-10-09 落地：四族 handler 先进独立进程、analysis 改反代，环从进程边界消失，
-随后才可能做零反向边的物理搬迁。）
+（2026-10-09 四族 handler 先进独立进程、analysis 改反代；QT-17 S3 删除
+`replace tellurion => ../tellurion` 后，本仓编译不再需要 core checkout。）
 
 ## 构建与测试
 
 ```bash
-# 前提：core 仓 checkout 在同级目录（../tellurion）
 go build ./... && go vet ./... && go test ./... -count=1
 ```
 
-CI（`.github/workflows/ci.yml`）把 core checkout 到 `core/` 后用
-`go mod edit -replace` 改写路径，同样的单向依赖在远端成立。
+CI（`.github/workflows/ci.yml`）单仓 checkout（不拉 core、不改 replace）。
+
+## 启动 ai-service
+
+```bash
+# 本机直跑（需可达的 PG；配置默认读 config/ai-service.yaml）
+CONFIG_PATH=config/ai-service.yaml \
+DATABASE_HOST=127.0.0.1 DATABASE_PASSWORD=postgres \
+AUTH_INSECURE=true SERVER_HOST=127.0.0.1 \
+  go run ./cmd/ai
+
+# 或容器（单仓 compose；自带 PG / Redis，ai-service 发布 127.0.0.1:8086）
+docker compose -f deploy/compose.yaml up --build
+```
 
 ## ai-service 的镜像构建
 
-go.mod 的 replace 是相对路径，Docker 构建靠**命名构建上下文**提供 core 源码：
+单仓构建即可（go.mod 已无 replace，不再需要 core 作为命名构建上下文）：
 
 ```bash
-docker build -t ai-service --build-context core=../tellurion .
+docker build -t ai-service .
 ```
 
-core 仓的 `docker-compose.yml` 已配置 `additional_contexts: core=.`（同效）。
 ai-service 在 compose 里发布 `127.0.0.1:8086`，analysis-service 对
 `/api/{copilot,pipeline,explore,tools}` 做纯反代 —— 前端与 openapi 契约不感知拆仓。
 

@@ -1,0 +1,87 @@
+# tellurion-agent · 单仓本地运行（ADR-036 G0）
+# 用法：docker compose -f deploy/compose.yaml up --build
+# 依赖：本文件自带 PostgreSQL / Redis（仅本仓自用）；ai-service 经
+# wait-for-deps.sh 等两者就绪后再启动。
+# 端口：ai-service 只发布到 127.0.0.1:8086；PG / Redis 用非默认宿主端口，
+# 避免与本机原生 PG 5432 / Redis 6379 撞号。容器内仍用服务名与标准端口。
+name: tellurion-agent
+
+services:
+  postgres:
+    image: postgres:17.5-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-tellurion}
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - agent-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "127.0.0.1:16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  ai-service:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: tellurion-agent:dev
+    entrypoint: ["/bin/sh", "/app/deploy/wait-for-deps.sh"]
+    command: ["/app/ai-service"]
+    ports:
+      - "127.0.0.1:8086:8086"
+    environment:
+      # 配置读本仓副本（不再借 ../tellurion/config）。
+      CONFIG_PATH: /app/config/ai-service.yaml
+      # 容器内地址：服务名 + 标准端口；密钥/口令仍走 env（YAML 不入库密钥）。
+      SERVER_HOST: 0.0.0.0
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASE_DATABASE: ${POSTGRES_DB:-tellurion}
+      DATABASE_SSLMODE: disable
+      REDIS_URL: redis://redis:6379
+      # 容器必须绑 0.0.0.0；发布层限定回环，故按既有不变量声明 open-access。
+      AUTH_INSECURE: ${AUTH_INSECURE:-true}
+      AUTH_INSECURE_EXPOSURE: ${AUTH_INSECURE_EXPOSURE:-loopback-published}
+      JWT_SECRET: ${JWT_SECRET:-}
+      # 上游在本仓之外：analysis 反代面 / data-service 仍指向宿主。
+      DATA_SERVICE_URL: ${DATA_SERVICE_URL:-http://host.docker.internal:8081}
+      AI_SERVICE_FACTOR_API_URL: ${AI_SERVICE_FACTOR_API_URL:-http://host.docker.internal:8085}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1/chat/completions}
+      AI_MODEL: ${AI_MODEL:-}
+      LOGGING_LEVEL: ${LOGGING_LEVEL:-info}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-100}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  agent-pgdata:
