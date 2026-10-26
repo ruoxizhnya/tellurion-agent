@@ -260,7 +260,7 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 >
 > **验收取证（真实退出码）**：`gofmt -l pkg/ai/gene_pool pkg/aistore cmd/ai` → 空；`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./pkg/ai/gene_pool/... ./pkg/aistore/... ./cmd/ai/... -count=1` → 全 `ok`，**0**。
 > **破坏验证**：把 `factor_pool.go` 一条 SQL 临时改回 `FROM factor_genes` → `TestSQL_TableRefsAreSchemaQualified` 当场红并点名 `factor_pool.go: 未限定 schema 的表引用 "factor_genes"`（**EXIT=1**）→ 逐字节还原 → 复绿（**EXIT=0**），工作区零残留。
-> **未做 / 环境限制（如实）**：真库腿 `TestPools_WriteOnlyAiSchema` 本机无法执行——本机无 PG 服务（`127.0.0.1:5432` 拒绝连接）且 Docker daemon 未起，故只证到「无 DSN 时显式 skip」，**未取到真库绿**。有库环境跑 `TEST_DATABASE_DSN=... go test ./pkg/ai/gene_pool -run TestPools_WriteOnlyAiSchema -count=1`。
+> **未做 / 环境限制（如实；2026-10-26 订正）**：真库腿 `TestPools_WriteOnlyAiSchema` 本机未执行——`127.0.0.1:5432` 无 PG 监听；Docker daemon 本轮**已可达**（Engine 29.8.0），但**未起专用 PG 容器**，故仍只证到「无 DSN 时显式 skip」，**未取到真库绿**。有库环境跑 `TEST_DATABASE_DSN=... go test ./pkg/ai/gene_pool -run TestPools_WriteOnlyAiSchema -count=1` 或 `docker run postgres` 后同命令。
 > **不在本单**：旧表 `public.factor_genes` / `public.strategy_genes` 不删（切换前真库各 0 行、无脏数据），退役随 core QT-05 ④（2027-01-31）。
 
 > #### core 侧交接件（QT-17 ④ 的另一半——本仓**不改 core**，报协调者）
@@ -368,7 +368,7 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
   3. **闸门只在本仓生产侧**；「未过 promote 的产物被回测路径拒绝」的**执行侧**那条腿在 core + 资产服务（QT-32 主单 ⑤），本仓无法替它作证。
   4. **服务间凭证（QT-71）不是本单的阻塞，但 core 那条登记已过期**：本单不新增跨服务调用，所以与它无关；施工时顺手核了远端 —— `git ls-remote --tags origin` 实测 `tellurion-kit` 已有 **`v0.1.2` / `v0.1.3`**（core 台账 QT-71 登记的是「远端只有 v0.1.0/v0.1.1」，那条前提**今天不成立**）。**报协调者**：QT-71 是否解除归 core 判，本仓不改 core。另一条相关事实：`tellurion-strategy:internal/httpapi` 今天**没有任何鉴权面**（全文件零 auth 引用），所以 A2 若要调资产服务，凭证不是它的前置。
   5. **`-race` 未跑**：本机无 C 编译器（`CGO_ENABLED=1` → `cgo: C compiler "gcc" not found`），`-race` 直接 build failed。本单动了 copilot goroutine 里的写库调用，并发面按 AGENTS §2 本该带 `-race`，代价登记在此。
-  6. **真库腿本机未跑**：本机无 PG 服务、Docker daemon 未起 ⇒ opt-in 用例只证到「无 `TEST_DATABASE_DSN` 时显式 skip」，不装成通过。
+  6. **真库腿本机未跑**：本机无 PG 监听、本轮未起 PG 容器（Docker 已可达，见 2026-10-26 订正）⇒ opt-in 用例只证到「无 `TEST_DATABASE_DSN` 时显式 skip」，不装成通过。
   7. **DBT-18（mining 的真实 Proposer）归属本仓** —— **裁决（2026-10-25，主任口径）⑧**：**归 agent 仓**（core 只保留 `mining.Proposer` 接口作为冻结契约 + 跨仓任务索引一条指针，**不镜像正文**）。**依据**：DBT-18 ② 原文「⇒ 本单**主体不在 core**」；③ ② 原文给了归 agent 时的处置；④ 原文「core 不引入 LLM SDK；**不在本仓实现第二个编排者（ADR-023 禁）**」。**若归 core 的那条路不采纳**——与 ADR-023 直接冲突。**本仓的动作**：立自己的六字段单（含 LLM/MCTS Proposer 的实现位置）。裁决全文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` ⑧。
 
 > **✅ 施工记录（2026-10-25，G8 / agent 腿，提交 `55dbf05`）**
