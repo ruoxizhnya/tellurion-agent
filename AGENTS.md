@@ -29,7 +29,7 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 
 - 实验循环 / 基因池 / 验证 / 工具编排 / Copilot
 - `ai.*` schema 的 DDL 与迁移（QT-17）
-- 通过 core 的**只读 port** 取仪器域数据（交易日历 / 上市窗口，待 D24 补第 7 类动作）
+- 通过 core 的**只读 port** 取仪器域数据（交易日历 / 上市窗口 —— **D24 第 7 类已落，不再是待办**：core `QT-67` 的 `GET /api/v1/trading-calendar` 与 `POST /api/v1/listing-windows`，本仓 `pkg/ai/client/reference_data_client.go` 于 2026-10-25 消费；护栏 `internal/repoguard/storage_import_test.go` 的仪器域白名单已清零）
 
 **禁止**
 
