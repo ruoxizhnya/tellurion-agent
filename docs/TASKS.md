@@ -189,6 +189,17 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 - **⑤ 验收**：core 侧这四张表零写入；`grep` 写方法零生产调用；本仓 `ai.*` 行数持续增长而旧表不增长。
 - **⑥ 边界**：跨仓任务，正文归 `tellurion:docs/TASKS.md` 的 `SVC-RETIRE-INDEX`；本仓只留指针与本仓停写验收。
 
+## DBT-18 · mining 的真实候选生成器（LLM / MCTS / 基因池 → `ai.*`）[P3] ⬜（归属已裁 = 本仓，正文此前缺失）
+
+> **立单依据（把押下的那半补齐）**：core 侧 DBT-18 已 ✅，但它的 ⑤ 验收原文是「归属结论成文 + 指针登记；**跨仓那半在其归属仓台账里写全六字段**」，而裁决 ⑧ 在本仓「QT-17 前置核对」那段（条目 7，**按锚点找：全文搜 `DBT-18（mining 的真实 Proposer）归属本仓`**）写的「本仓的动作：**立自己的六字段单**（含 LLM/MCTS Proposer 的实现位置）」此前**没有条目**（实测本文件只有那条裁决指针，无 `DBT-18` 单）。本单就是那半。裁决全文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` ⑧。
+
+- **① 目标**：候选生成从「读 JSON 文件的 `fileProposer`」升级为本仓的真实生成器（LLM 提议 / MCTS / 基因池复用），**落库只落本仓 `ai.*`**，不再依赖 core 的 mining 落库腿。
+- **② 上下文**：core 侧接口是冻结契约 `tellurion:pkg/mining/pipeline.go:33`（`Proposer.Propose(ctx) ([]Candidate, error)`）与 `pkg/mining/mining.go:74`（`Candidate` 形状）——**本仓不得 import 它**（AGENTS §3 禁 import core 实现包），所以「实现同一个接口」不是选项，正确形态是**本仓自己的候选类型 + HTTP 投递或本仓自持流水线**；现状：本仓已有 `pkg/ai/loop/loop.go:35` 的 `Proposer`（控制器用的参数提议者，`cmd/ai/handlers_explore.go:263` 只接了 `NewTPEProposer`，seed 取 `time.Now().UnixNano()`）、`pkg/ai/search/{tpe,genetic}.go`、`pkg/ai/gene_pool/mutation.go`，落库面 `pkg/aistore` 已持 `ai.factor_genes` / `ai.strategy_genes` / `ai.generation_chain` / `ai.experiments`；core 侧 `cmd/data mining_cmd.go` 的 mining 落库腿在 `tellurion:SVC-CORE-AI-RETIRE` 里**要被删**（材料 §4.7）。
+- **③ 要求**：① 先给**形状归属结论**（三选一并写进 `docs/ARCHITECTURE.md` + 一条本仓 ADR）：(a) 候选只在 agent 侧生成并落 `ai.factor_genes`，core 的 mining pipeline 退役（与 `SVC-CORE-AI-RETIRE` 同向，**建议**）；(b) core 保留 pipeline、新增一条候选投递 HTTP 端点（则端点与鉴权归 core 侧另单，本仓只写客户端）；(c) 沿用 JSON 文件投递（则本单降级为「生成器改善候选质量」，落库不变）；② 按结论落实现：新增 `MCTS` 或 `LLM` 候选提议器接进 `pkg/ai/loop` 的 `Proposer`（与 TPE 同一接口，可切换、可对比）；③ **确定性口径**：LLM/MCTS 都必须带可复现 seed 或留痕（`ai.experiments` 已有三 hash 坐标；seed 不许默认取墙上时钟——`handlers_explore.go:263` 今天就是 `time.Now().UnixNano()`，本单要么给它显式 seed，要么写明为什么可接受）；④ 候选落库走 `pkg/aistore` 的 `ai.*`，**不直连 core 业务表**；⑤ LLM 成本与预算沿用 `pkg/ai/cost.go` 的预算器，不许绕过。
+- **④ 约束与非目标**：**不 import core 实现包**、**不直连 core 的业务表**（AGENTS §3 两条硬约束）；不新增仓外 `replace`；不在本仓实现「第二个编排者」（ADR-023 禁，core 侧 DBT-18 ④ 原文同判）；不改 core 的 `mining.Pipeline` 签名（那是 core 的冻结契约）；不在本单删 core 侧任何 mining 代码（那是 `SVC-CORE-AI-RETIRE`，串行第 10）；不改 `pkg/ai/validation` 的六维口径。
+- **⑤ 验收**：① 归属结论成文（ADR 或 ARCHITECTURE 一节 + 三选一的代价写清），且与 `tellurion:SVC-CORE-AI-RETIRE` 的方向**不矛盾**（矛盾即报协调者，不许两仓各按各的写）；② 新提议器至少两条用例：同 seed 两次 `Propose` 产出可复现（若选 (a)/(c)），以及与 TPE 的同接口替换可用；③ 一条反证：候选生成失败 ⇒ 流水线**不落半成品行**（断言行数为 0，不是「有行但为空」）；④ `ai.*` 落库有测试库腿（无库如实 skip）；⑤ `go build/vet/test ./...` 三条绿 + `go test ./cmd/ai/... -race -count=1`（本仓 AGENTS §2 要求端点/SSE 面带 `-race`）。
+- **⑥ 边界**：本仓的候选生成与 `ai.*` 落库；core 侧 mining 落库腿的删除、`SeedBuiltinFactorHypotheses` 的 seed 腿、7 张遗留表的退役全部归 `tellurion:SVC-CORE-AI-RETIRE`（该单在 core 台账的位置见「六之二」节的注记——那条 R4 偏差也在那儿登记）。
+
 ## QT-17 · agent 数据自持（D10：`ai.*` schema 建表与迁移）✅（2026-10-25）
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「S2~S3 · 拆仓」迁入（任务台账批量重分布：实现整体落本仓的单迁入本仓台账）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
