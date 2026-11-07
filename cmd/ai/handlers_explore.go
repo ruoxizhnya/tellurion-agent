@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -135,6 +136,11 @@ type exploreRun struct {
 	result   *loop.RunResult
 	err      error
 	done     bool
+	// seed / proposer 是这一轮的可复现坐标（DBT-18）：带 seed 重放能得到
+	// 同一串建议与同一串 ai.experiments 行。它们同时写进每次尝试的 Hypothesis，
+	// 所以「这一轮用的哪个 seed、哪个提议器」有库里的行可查。
+	seed     int64
+	proposer string
 }
 
 // StartExploreRequest 启动一轮探索的请求。
@@ -144,6 +150,12 @@ type StartExploreRequest struct {
 	// LookbackMin / LookbackMax 限定回看窗口的搜索范围；不传则用 5..250。
 	LookbackMin int `json:"lookback_min"`
 	LookbackMax int `json:"lookback_max"`
+	// Seed 是提议器的随机种子（DBT-18）。不传时退回墙上时钟，
+	// 但实际使用的值会出现在启动响应、状态响应和日志里 —— 不静默。
+	Seed *int64 `json:"seed"`
+	// Proposer 选择候选提议器：tpe（默认）或 mcts。两者实现同一个
+	// loop.Proposer 接口，切换不改编排层。
+	Proposer string `json:"proposer" example:"tpe"`
 }
 
 // AttemptView 是一次尝试的对外视图。
@@ -168,6 +180,9 @@ type ExploreStatusResponse struct {
 	Stopped  string        `json:"stopped,omitempty"`
 	Attempts []AttemptView `json:"attempts"`
 	BestSeq  *int          `json:"best_seq,omitempty"`
+	// Seed / Proposer 是这一轮的可复现坐标（DBT-18）。
+	Seed     int64  `json:"seed"`
+	Proposer string `json:"proposer"`
 }
 
 // NewExploreHandler 构造探索处理器。
@@ -243,6 +258,34 @@ func (h *ExploreHandler) Start(c *gin.Context) {
 		lbMax = 250
 	}
 
+	space := &search.SearchSpace{Params: []search.ParamDef{
+		// 参数名必须与意图参数同名，否则覆盖静默失效（见 P1-2b）。
+		{Name: "lookback_days", Type: "int", Min: float64(lbMin), Max: float64(lbMax)},
+	}}
+
+	// 显式 seed 优先；没给才退回墙上时钟。无论走哪条，实际值都会写进
+	// 启动响应、状态响应、日志，以及每次尝试的 Hypothesis（随
+	// ai.experiments 落库）—— 可复现的前提是「用的哪个 seed」可查。
+	seed := time.Now().UnixNano()
+	if req.Seed != nil {
+		seed = *req.Seed
+	}
+	proposerName := strings.ToLower(strings.TrimSpace(req.Proposer))
+	if proposerName == "" {
+		proposerName = "tpe"
+	}
+	var proposer loop.Proposer
+	switch proposerName {
+	case "tpe":
+		proposer = loop.NewTPEProposer(space, seed)
+	case "mcts":
+		proposer = loop.NewMCTSProposer(space, seed)
+	default:
+		httpserver.Error(c, http.StatusBadRequest,
+			fmt.Errorf("unknown proposer %q (want \"tpe\" or \"mcts\")", req.Proposer))
+		return
+	}
+
 	// ⚠️ 刻意不用 c.Request.Context()：响应一返回 gin 就会取消它，异步跑的
 	// 这一轮会在第一步就被掐断。这里要的是独立于请求的生命周期。
 	// 凭证在返回前取出：gin 的 context 在 handler 返回后会被复用，不能带进 goroutine。
@@ -253,17 +296,15 @@ func (h *ExploreHandler) Start(c *gin.Context) {
 	// 请求 ctx（响应一返回就被取消）。
 	ctx = client.WithBearerTokenInContext(ctx, bearerToken)
 
-	space := &search.SearchSpace{Params: []search.ParamDef{
-		// 参数名必须与意图参数同名，否则覆盖静默失效（见 P1-2b）。
-		{Name: "lookback_days", Type: "int", Min: float64(lbMin), Max: float64(lbMax)},
-	}}
-
 	runID := uuid.New().String()
 	run := &exploreRun{
-		ctrl:    loop.NewController(h.tryRunner, loop.NewTPEProposer(space, time.Now().UnixNano()), h.runner),
-		cancel:  cancel,
-		started: time.Now(),
+		ctrl:     loop.NewController(h.tryRunner, proposer, h.runner),
+		cancel:   cancel,
+		started:  time.Now(),
+		seed:     seed,
+		proposer: proposerName,
 	}
+	log.Printf("explore run %s: proposer=%s seed=%d", runID, proposerName, seed)
 	h.mu.Lock()
 	h.runs[runID] = run
 	h.mu.Unlock()
@@ -299,7 +340,10 @@ func (h *ExploreHandler) Start(c *gin.Context) {
 		h.reviewBestCausally(ctx, run, runID, req.Description, out)
 	}()
 
-	c.JSON(http.StatusOK, gin.H{"run_id": runID, "max_tries": req.MaxTries})
+	c.JSON(http.StatusOK, gin.H{
+		"run_id": runID, "max_tries": req.MaxTries,
+		"seed": seed, "proposer": proposerName,
+	})
 }
 
 // recordVerdict 把一次尝试的裁决写进实验日志那一行。
@@ -410,6 +454,8 @@ func (h *ExploreHandler) statusOf(runID string, run *exploreRun) ExploreStatusRe
 		RunID:    runID,
 		Running:  !run.done,
 		Attempts: views,
+		Seed:     run.seed,
+		Proposer: run.proposer,
 	}
 	if run.result != nil {
 		resp.Stopped = string(run.result.Stopped)

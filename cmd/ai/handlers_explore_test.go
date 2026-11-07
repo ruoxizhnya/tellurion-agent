@@ -428,3 +428,53 @@ func TestBearerTokenFromHeader(t *testing.T) {
 		}
 	}
 }
+
+// TestExploreHandler_SeedReplaysMCTSSequence 是 DBT-18 的端点级复现腿：
+// 同一个显式 seed + 同一个提议器，两次跑出的参数与假设序列必须逐字段一致。
+func TestExploreHandler_SeedReplaysMCTSSequence(t *testing.T) {
+	const body = `{"description":"做一个动量策略","max_tries":4,"seed":123456789,"proposer":"mcts"}`
+	r := newExploreRouter(NewExploreHandler(&fakeExploreRunner{}, nil))
+
+	run1 := startRun(t, r, body)
+	st1 := waitDone(t, r, run1)
+	run2 := startRun(t, r, body)
+	st2 := waitDone(t, r, run2)
+
+	assert.Equal(t, int64(123456789), st1.Seed)
+	assert.Equal(t, "mcts", st1.Proposer)
+	require.Equal(t, len(st1.Attempts), len(st2.Attempts))
+	require.NotEmpty(t, st1.Attempts)
+	for i := range st1.Attempts {
+		assert.Equalf(t, st1.Attempts[i].Params, st2.Attempts[i].Params,
+			"第 %d 次参数不可复现", i)
+		assert.Equalf(t, st1.Attempts[i].Hypothesis, st2.Attempts[i].Hypothesis,
+			"第 %d 次假设不可复现（seed 必须进 hypothesis）", i)
+	}
+}
+
+// TestExploreHandler_DefaultSeedIsTraced：不传 seed 时退回墙上时钟，
+// 但实际值必须出现在启动响应 / 状态响应里，不能静默。
+func TestExploreHandler_DefaultSeedIsTraced(t *testing.T) {
+	r := newExploreRouter(NewExploreHandler(&fakeExploreRunner{}, nil))
+
+	w := postJSON(r, "/api/explore/runs", `{"description":"做一个动量策略","max_tries":1}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	seed, ok := resp["seed"].(float64)
+	require.True(t, ok, "启动响应必须带实际使用的 seed")
+	assert.NotZero(t, seed)
+	assert.Equal(t, "tpe", resp["proposer"], "不指定时保持既有 TPE 行为")
+
+	runID, _ := resp["run_id"].(string)
+	st := waitDone(t, r, runID)
+	assert.NotZero(t, st.Seed, "状态响应同样要能查到 seed")
+	assert.Equal(t, "tpe", st.Proposer)
+}
+
+// TestExploreHandler_UnknownProposer：拼错的提议器要 400，不是静默退回 TPE。
+func TestExploreHandler_UnknownProposer(t *testing.T) {
+	r := newExploreRouter(NewExploreHandler(&fakeExploreRunner{}, nil))
+	w := postJSON(r, "/api/explore/runs", `{"description":"做一个动量策略","proposer":"bogus"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}

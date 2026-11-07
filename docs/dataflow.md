@@ -62,6 +62,11 @@ POST /api/copilot/generate
 4. ui 订阅 `GET .../stream`：每 tick 推 `progress`（快照与轮询端点同形状）
 5. 结束推 `complete`；`POST .../stop` 只停调度，不 cancel 正在跑的回测
 
+### 候选生成与落库（DBT-18）
+- `POST /api/explore/runs` 接受 `seed`（未传则墙上时钟，实际值回显并写入日志 / `ai.experiments.hypothesis`）和 `proposer=tpe|mcts`；两者都实现 `loop.Proposer`，编排层不变。
+- `pkg/ai/mining.GenerateAndSave` 先完整生成候选，再调 `aistore.SaveFactorCandidates`；生成失败直接返回，**不落半成品**。落库是 `ai.factor_genes` 的单事务整批写入（upsert by id），不写 core 的 `public.factor_genes`。
+- 候选生成不调用模型，因此没有 LLM 成本；LLM 提议器将来必须走 `pkg/ai/cost.go`。
+
 ### 研究域 / 因子假设读取
 - `research.profile` / `research.conclusion` / `research.question` 与 `factor_hypothesis` 的**读面已切 `ai.*`**（自有 `aistore`）；`factor_hypothesis` 的 builtin 种子启动时 `ON CONFLICT DO NOTHING` 镜像播种。研究域三表**目前没有写入方**（core 侧也无研究域 handler，真库 0 行）——将来接写时直写 `ai.*`，不得落 legacy `research.*`。
 

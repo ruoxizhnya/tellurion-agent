@@ -35,12 +35,15 @@ func (p *RandomProposer) Suggest(observed []Observation) Suggestion {
 type TPEProposer struct {
 	opt   *search.TPEOptimizer
 	space *search.SearchSpace
+	seed  int64
 }
 
 // NewTPEProposer 构造 TPE 提议者。前若干次（nStartupTrials）它自己会退化为
 // 随机采样 —— 历史太少时拟合出来的分布没有意义。
+//
+// seed 由调用方显式给出；它写进 Hypothesis，随 ai.experiments 落库留痕。
 func NewTPEProposer(space *search.SearchSpace, seed int64) *TPEProposer {
-	return &TPEProposer{opt: search.NewTPEOptimizer(seed), space: space}
+	return &TPEProposer{opt: search.NewTPEOptimizer(seed), space: space, seed: seed}
 }
 
 // ⚠️ 参数名必须与意图参数同名（例如 lookback_days），覆盖才会生效。
@@ -68,13 +71,13 @@ func (p *TPEProposer) Suggest(observed []Observation) Suggestion {
 	if parent == nil {
 		return Suggestion{
 			Params:     p.opt.Suggest(p.space, history),
-			Hypothesis: "TPE 起步：还没有成功观测，先随机铺点",
+			Hypothesis: fmt.Sprintf("TPE(seed=%d) 起步：还没有成功观测，先随机铺点", p.seed),
 		}
 	}
 	return Suggestion{
 		Params:     p.opt.Suggest(p.space, history),
 		ParentSeq:  parent,
-		Hypothesis: fmt.Sprintf("TPE：在第 %d 次（当前最优）附近采样", *parent),
+		Hypothesis: fmt.Sprintf("TPE(seed=%d)：在第 %d 次（当前最优）附近采样", p.seed, *parent),
 	}
 }
 

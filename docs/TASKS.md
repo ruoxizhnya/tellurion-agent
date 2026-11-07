@@ -189,7 +189,7 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 - **⑤ 验收**：core 侧这四张表零写入；`grep` 写方法零生产调用；本仓 `ai.*` 行数持续增长而旧表不增长。
 - **⑥ 边界**：跨仓任务，正文归 `tellurion:docs/TASKS.md` 的 `SVC-RETIRE-INDEX`；本仓只留指针与本仓停写验收。
 
-## DBT-18 · mining 的真实候选生成器（LLM / MCTS / 基因池 → `ai.*`）[P3] ⬜（归属已裁 = 本仓，正文此前缺失）
+## DBT-18 · mining 的真实候选生成器（LLM / MCTS / 基因池 → `ai.*`）[P3] 🔶（归属已裁 = 本仓；2026-11-07 已落，`-race` 腿未执行）
 
 > **立单依据（把押下的那半补齐）**：core 侧 DBT-18 已 ✅，但它的 ⑤ 验收原文是「归属结论成文 + 指针登记；**跨仓那半在其归属仓台账里写全六字段**」，而裁决 ⑧ 在本仓「QT-17 前置核对」那段（条目 7，**按锚点找：全文搜 `DBT-18（mining 的真实 Proposer）归属本仓`**）写的「本仓的动作：**立自己的六字段单**（含 LLM/MCTS Proposer 的实现位置）」此前**没有条目**（实测本文件只有那条裁决指针，无 `DBT-18` 单）。本单就是那半。裁决全文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` ⑧。
 
@@ -199,6 +199,30 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 - **④ 约束与非目标**：**不 import core 实现包**、**不直连 core 的业务表**（AGENTS §3 两条硬约束）；不新增仓外 `replace`；不在本仓实现「第二个编排者」（ADR-023 禁，core 侧 DBT-18 ④ 原文同判）；不改 core 的 `mining.Pipeline` 签名（那是 core 的冻结契约）；不在本单删 core 侧任何 mining 代码（那是 `SVC-CORE-AI-RETIRE`，串行第 10）；不改 `pkg/ai/validation` 的六维口径。
 - **⑤ 验收**：① 归属结论成文（ADR 或 ARCHITECTURE 一节 + 三选一的代价写清），且与 `tellurion:SVC-CORE-AI-RETIRE` 的方向**不矛盾**（矛盾即报协调者，不许两仓各按各的写）；② 新提议器至少两条用例：同 seed 两次 `Propose` 产出可复现（若选 (a)/(c)），以及与 TPE 的同接口替换可用；③ 一条反证：候选生成失败 ⇒ 流水线**不落半成品行**（断言行数为 0，不是「有行但为空」）；④ `ai.*` 落库有测试库腿（无库如实 skip）；⑤ `go build/vet/test ./...` 三条绿 + `go test ./cmd/ai/... -race -count=1`（本仓 AGENTS §2 要求端点/SSE 面带 `-race`）。
 - **⑥ 边界**：本仓的候选生成与 `ai.*` 落库；core 侧 mining 落库腿的删除、`SeedBuiltinFactorHypotheses` 的 seed 腿、7 张遗留表的退役全部归 `tellurion:SVC-CORE-AI-RETIRE`（该单在 core 台账的位置见「六之二」节的注记——那条 R4 偏差也在那儿登记）。
+
+> **🔶 施工记录（2026-11-07，本单）**
+>
+> **① 归属结论**：选 **(a)** —— agent 侧生成候选、落 `ai.factor_genes`，core mining 随 `SVC-CORE-AI-RETIRE` 退役。成文落点：`docs/ARCHITECTURE.md` §2.1（含三选一代价表）+ `docs/adr/0003-候选生成归本仓-core-mining-退役.md`（并登记进 ADR 索引与 ARCHITECTURE §6）。与 `SVC-CORE-AI-RETIRE` 同向，无矛盾。
+>
+> **② 新提议器**：`pkg/ai/search/mcts.go`（确定性 UCT 树搜索：参数切桶 + 历史 reward + 最近邻 rollout 代理）与 `pkg/ai/loop/mcts_proposer.go`（`MCTSProposer`，与 `TPEProposer` 同 `loop.Proposer` 接口）。`cmd/ai/handlers_explore.go` 的 `StartExploreRequest.Proposer` 支持 `tpe|mcts`，未知值返回 400；编排层未改。
+>
+> **③ 确定性口径**：`StartExploreRequest.Seed *int64` 显式优先；缺省退回 `time.Now().UnixNano()`，但实际 seed 写进启动响应、状态响应、日志，并写进每次尝试的 `Hypothesis`（随 `ai.experiments.hypothesis` 落库）。`TPE(seed=…)` / `MCTS(seed=…)` 都可回放。用例：`TestMCTSProposer_SameSeedReplays`（同 seed 两个实例、8 次建议逐字段相等）、`TestExploreHandler_SeedReplaysMCTSSequence`（端点级两次 run 参数与 hypothesis 相等）。
+>
+> **④ 落库**：`pkg/ai/mining/generator.go` 复用 `gene_pool.Mutator` 生成 `aistore.FactorCandidate`；`pkg/aistore/factor_candidate.go` 的 `SaveFactorCandidates` 先整批校验、再单事务写 `ai.factor_genes`（按 id upsert）。不直连 core 业务表。
+>
+> **⑤ 反证（真实输出）**：`TestGenerateAndSave_GenerationFailureWritesNothing` —— 父公式 `["abs(close)", ""]` 在第 2 个候选中失败，`GenerateAndSave` 在落库前返回；断言 `sink.rows == 0`。真库腿 `TestSaveFactorCandidates_Integration` 另验非法批次不留前一行、同 id 重写为更新。
+>
+> **破坏验证（逐字节还原 SHA256 一致）**：
+> - 把 `NewMCTSProposer` 的 seed 改成「墙上时钟 + 原子计数器」（模拟非确定 seed）→ `TestMCTSProposer_SameSeedReplays` 红（第 0 次建议不一致：lookback 18 vs 32）→ 还原后 `F263EE53…2EEE0492` 与改前一致 → 复绿。
+> - 删掉 `GenerateAndSave` 的 `if err != nil { return nil, err }` → 反证腿红（`expected 0, actual 1`，消息「候选生成失败时不许落下任何一行」）→ 还原后 `4A138ECC…2E5F69FF` 与改前一致 → 复绿。
+>
+> **门禁（真实退出码）**：`gofmt -l .` 无输出（EXIT=0；顺带移除 `pkg/ai/drift/detector.go`、`pkg/ai/validation/redundancy.go` 两个**既有** BOM，仅 BOM，无逻辑改动）；`go build ./...` EXIT=0；`go vet ./...` EXIT=0；`go test ./... -count=1` EXIT=0（cmd/ai 0.563s、pkg/ai/mining 0.293s、pkg/aistore 0.075s）。
+>
+> **未执行 / 如实登记**：
+> - `go test ./cmd/ai/... -race -count=1` **未执行**：本机 `CGO_ENABLED=0`（任务硬性纪律），真实输出 `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`，退出码 2。不是跳过，是环境不支持。
+> - `TestSaveFactorCandidates_Integration` 本机无 PG / 无 `TEST_DATABASE_DSN` → `SKIP`，未编造真库结果；CI 有库时生效。
+> - LLM 提议器未实现（本单选 MCTS + 基因池变异）；将来接入时必须走 `pkg/ai/cost.go` 的 `CostTable`，已在 ADR-0003 与 ARCHITECTURE §2.1 写明。
+> - core 侧 mining 落库腿 / DDL 的删除不在本仓，仍归 `SVC-CORE-AI-RETIRE`。
 
 ## QT-17 · agent 数据自持（D10：`ai.*` schema 建表与迁移）✅（2026-10-25）
 
