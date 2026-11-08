@@ -26,7 +26,7 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 | S3 | 删 `replace ../tellurion`，改 HTTP 粗粒度 ✅ 完成（2026-10-25，S3-a~d） | `QT-07 / QT-50` | QT-17 + QT-50 |
 | QT-65 | QT-11 跨仓回归（agent 腿）：pipeline / yaml 生产路径改**工厂注册** ✅ 完成（2026-10-24，见下方完成记录） | `QT-11` | 无硬前置 |
 | QT-32-A | AI 生成链留痕 + promote 闸门的生产者侧 fail-closed ✅ 完成（2026-10-25，正文见下） | `QT-32` | QT-03 / QT-26 / QT-41b（均已 ✅） |
-| QT-32-B | 生成物接资产服务（`PUT .../source` + `POST .../build`）拿真 `version_hash` / `artifact_hash` ⬜ **待裁** | `QT-32` | **需协调者裁「AI 生成物的载体」**（wasm + host ABI / so / 维持 ADR-024「只审阅不执行」），见 QT-32-A ⑦-1 |
+| QT-32-B | 生成物接资产服务（`PUT .../source` + `POST .../build`）拿真 `version_hash` / `artifact_hash` ⬜ 待做（载体前置已解除） | `QT-32` | **载体已裁、不再等裁**：2026-10-25 第三轮裁决 ⑩（本文件头部第 13 行）= 默认 `carrier="dsl"`、仅 L3 才 `carrier="wasm"`、`carrier="so"` 删除；`artifact_hash` 用 `contracts.engine.StrategyVersionInput{Carrier:"dsl", Source:<配置文本>}.Hash()`；与 ADR-024「LLM 生成的 Go 只审阅不执行」一致。**代裁指针，待主任追认** |
 
 > **QT-65 证据（2026-10-23，C4 期间发现；2026-10-24 已闭环）**：core QT-11（`67bee39`）把注册表改存构造函数后，`strategy.GlobalRegister(实例)` 注册的共享条目在执行路径被 `Registry.NewInstance` fail-closed 拒绝（`ErrSharedStrategy`）。本仓两个**生产**调用点没跟上：`pkg/ai/pipeline/pipeline.go`（`registerOrConfigure` 的注册分支，ExecuteFromYAML 链路）与 `pkg/ai/yaml/loader.go`（`LoadAndRegister`）。现有测试当时全绿是因为没有用例在注册后真经引擎跑（latent，非当前红）。
 
