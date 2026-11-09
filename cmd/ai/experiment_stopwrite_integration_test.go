@@ -25,6 +25,11 @@ import (
 //
 // 旧表遗留的 30 行（早于双写期，见 ODR-001）已一次性回填归档进
 // ai.experiments；本腿只验证停写后的增量行为，不重放历史。
+//
+// SVC-CORE-AI-RETIRE（2026-11-10）：core 已删掉 public.experiments 的 DDL，
+// 新建环境里这张表**不存在**。表不存在时「旧表不增长」是平凡真，本腿仍跑
+// ai 侧全链路，并把 legacy 冻结段显式记为「无对象」；表存在（存量环境）时
+// 冻结断言照旧咬人。
 func TestStopWrite_LegacyExperimentsFrozen(t *testing.T) {
 	ctx := context.Background()
 	dsn := os.Getenv("TEST_DATABASE_DSN")
@@ -38,10 +43,16 @@ func TestStopWrite_LegacyExperimentsFrozen(t *testing.T) {
 	require.NoError(t, aistore.Migrate(ctx, pool))
 	ai := aistore.NewStoreWithPool(pool)
 
-	var legacyCount, legacyMaxID int64
+	var legacyExists bool
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*), COALESCE(max(id), 0) FROM public.experiments`).
-		Scan(&legacyCount, &legacyMaxID))
+		`SELECT to_regclass('public.experiments') IS NOT NULL`).Scan(&legacyExists))
+
+	var legacyCount, legacyMaxID int64
+	if legacyExists {
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT count(*), COALESCE(max(id), 0) FROM public.experiments`).
+			Scan(&legacyCount, &legacyMaxID))
+	}
 
 	const runID = "itest_stopwrite_frozen"
 	t.Cleanup(func() {
@@ -96,6 +107,11 @@ func TestStopWrite_LegacyExperimentsFrozen(t *testing.T) {
 	assert.Equal(t, id0, *parentID, "父代必须是 ai id 空间里的那一行")
 
 	// legacy 侧：行数与最大 id 一动不动 —— 这就是「停写」。
+	if !legacyExists {
+		t.Log("public.experiments 已随 core DDL 退役（SVC-CORE-AI-RETIRE, 2026-11-10）：" +
+			"冻结断言无对象；ai 侧全链路已核对")
+		return
+	}
 	var afterCount, afterMaxID int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*), COALESCE(max(id), 0) FROM public.experiments`).

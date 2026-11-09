@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
+last-verified: 2026-11-10
+verified-by: SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；本仓反向护栏翻面 + 停写腿兼容旧表不存在）。此前 2026-10-25 QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -178,16 +178,20 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 > - **落点**：`config/ai-service.yaml`（core 同名文件逐字节复制，SHA256 `F3DF46D4…C2C51B2`；core 未改）；`deploy/wait-for-deps.sh`（core 同名脚本逐字节复制，SHA256 `18EF9DAA…D39DA88`）；`deploy/compose.yaml`（自带 `postgres` / `redis` + `ai-service`，`:8086`、`CONFIG_PATH=/app/config/ai-service.yaml`、PG/Redis 走服务名，变量沿用 `DATABASE_*` / `REDIS_URL` / `AUTH_*` / `JWT_SECRET` 等既有 env）；`Dockerfile` 删三处 `--from=core`，改为本仓 `COPY config/ai-service.yaml` 与 `COPY deploy/wait-for-deps.sh`，补 `netcat-openbsd` 供等待脚本使用，`CMD` 不变；README 补目录、启动命令与单仓镜像构建。
 > - **验收（真实输出）**：`grep -c 'from=core' Dockerfile` = 0；`grep -c 'COPY config/ai-service.yaml' Dockerfile` = 1；`docker compose -f deploy/compose.yaml config -q` → exit 0；`config --services` → `postgres` / `redis` / `ai-service`；`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全绿（21 个包，`pkg/ai/pipeline 4.205s`）；`gofmt -l .` 空。
 > - **破坏验证**：把 `COPY config/ai-service.yaml` 改回 `COPY --from=core config/ai-service.yaml` → `grep -c 'from=core'` = 1（红）→ 逐字节还原后 0（绿，SHA256 一致）。
-> - **如实登记（2026-10-26 复测订正）**：本机 Docker daemon **本轮可达**，上一版「daemon 不可达、镜像实构建未取证」的陈述已失效。实测：`docker build -t tellurion-agent:g0-verify .` 成功（构建上下文只有本仓，无 `core` 命名上下文，即「删掉 core 源码也能构建」已取证）；镜像配临时 PG / Redis 起容器后 `curl -sS http://127.0.0.1:8086/health` → `200 {"service":"ai-service","status":"ok"}`，日志显示监听 `0.0.0.0:8086`。**未做**：core `docker-compose.yml` 的全栈 `up` 健康检查腿（core 侧已同步：删 `additional_contexts`、`entrypoint` 改 `/app/deploy/wait-for-deps.sh`，2026-10-26 `docker compose build ai-service` 成功、镜像内两文件在位）；`SVC-CORE-AI-RETIRE` 仍属跨仓未落项。
+> - **如实登记（2026-10-26 复测订正）**：本机 Docker daemon **本轮可达**，上一版「daemon 不可达、镜像实构建未取证」的陈述已失效。实测：`docker build -t tellurion-agent:g0-verify .` 成功（构建上下文只有本仓，无 `core` 命名上下文，即「删掉 core 源码也能构建」已取证）；镜像配临时 PG / Redis 起容器后 `curl -sS http://127.0.0.1:8086/health` → `200 {"service":"ai-service","status":"ok"}`，日志显示监听 `0.0.0.0:8086`。**未做**：core `docker-compose.yml` 的全栈 `up` 健康检查腿（core 侧已同步：删 `additional_contexts`、`entrypoint` 改 `/app/deploy/wait-for-deps.sh`，2026-10-26 `docker compose build ai-service` 成功、镜像内两文件在位）；`SVC-CORE-AI-RETIRE` 已于 2026-11-10 由 core 执行完毕（见本节）。
 
-### SVC-CORE-AI-RETIRE · core 侧 AI 遗留表与写方法退役（ADR-036 G3）[P1] ⬜
+### SVC-CORE-AI-RETIRE · core 侧 AI 遗留表与写方法退役（ADR-036 G3）[P1] ✅（2026-11-10，core 执行）
+
+> **正文已迁 core（代裁，待主任追认）**：删除对象全在 core，按 core 台账原注的第一个选项，六字段正文与施工记录迁入 `tellurion:docs/TASKS.md` §六之二 **串行第 10**；本仓只留指针 + 本仓停写验收，不再双写。
+> **结果（core 当场实测）**：① 写点 **6 → 0**；② `SeedBuiltinFactorHypotheses` **3 → 0**；③ 七表 `CREATE TABLE` **7 → 0**；`pkg/storage/{experiments,factor_hypothesis,research}.go` 已删。delete 对象里唯一的本仓腿是反向护栏与停写取证。
+> **本仓腿（2026-11-10）**：`pkg/aistore/schema_core_drift_test.go` 的 `TestSchema_ColumnsMatchCore` 翻成 `TestSchema_RetiredCoreTablesAreGone`（core 里七表零 `CREATE TABLE`；正向对照要求 core 仍至少有一张建表）；`cmd/ai/experiment_stopwrite_integration_test.go` 先 `to_regclass('public.experiments')`，表已不存在时照跑 `ai.*` 全链路并把 legacy 冻结段记为「无对象」，存量环境仍逐行冻结。破坏验证：往 core `postgres.go` 加回一行 `CREATE TABLE IF NOT EXISTS factor_genes (...)` ⇒ 本仓护栏红，还原后 SHA256 一致复绿。门禁：`gofmt`/`go build ./...`/`go vet ./...` 全 0；`go test ./... -count=1` 除 `pkg/ai/client` 两条**前置既有**红外全绿 —— `TestClientEndpoints_AreRegisteredInCoreOpenAPI` / `TestOpenAPI_ReferenceDataShapesMatchContract` 要求 core openapi 登记 `/api/v1/trading-calendar`、`/api/v1/listing-windows`，而 core 已在 `SVC-CORE-DATA-RETIRE`（2026-11-08）把这两条端点随数据面退役（`cmd/analysis/agent_actions.go:78-80` 留有退役注记）。与本单（AI 实验域退役）无交集，未在本轮改动；需另立 agent 单决定「客户端改道数据服务 / 登记进 `clientEndpointGaps`」并回写 core openapi 口径。
 
 - **① 目标**：core 不再写 `experiments` / `factor_hypothesis` / `factor_genes` / `strategy_genes`；遗留写方法与 DDL 删除或标只读。
 - **② 上下文**：本仓 QT-17 已停写 `ai.experiments`；core `pkg/storage/experiments.go:108`、`factor_hypothesis.go:35` 仍有 `INSERT`，后者生产零调用方，core `postgres.go` 仍建裸表。
 - **③ 要求**：core 删除/停用上述写方法；确认无生产调用；裸表标 `legacy` 或按迁移 DROP；`ai.*` 为本仓唯一写者。
 - **④ 约束与非目标**：不删除历史数据；不在本仓改 core 代码；不扩大到 `quant.*` 运行态表。
-- **⑤ 验收**：core 侧这四张表零写入；`grep` 写方法零生产调用；本仓 `ai.*` 行数持续增长而旧表不增长。
-- **⑥ 边界**：跨仓任务，正文归 `tellurion:docs/TASKS.md` 的 `SVC-RETIRE-INDEX`；本仓只留指针与本仓停写验收。
+- **⑤ 验收**：core 侧这四张表零写入；`grep` 写方法零生产调用；本仓 `ai.*` 行数持续增长而旧表不增长。**以上均已由 core 侧验收并回写；本仓腿见上。**
+- **⑥ 边界**：跨仓任务，正文归 `tellurion:docs/TASKS.md` §六之二 串行第 10（原指向 `SVC-RETIRE-INDEX`，2026-11-10 迁单）；本仓只留指针与本仓停写验收。
 
 ## DBT-18 · mining 的真实候选生成器（LLM / MCTS / 基因池 → `ai.*`）[P3] 🔶（归属已裁 = 本仓；2026-11-07 已落，`-race` 腿未执行）
 
@@ -198,7 +202,7 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 - **③ 要求**：① 先给**形状归属结论**（三选一并写进 `docs/ARCHITECTURE.md` + 一条本仓 ADR）：(a) 候选只在 agent 侧生成并落 `ai.factor_genes`，core 的 mining pipeline 退役（与 `SVC-CORE-AI-RETIRE` 同向，**建议**）；(b) core 保留 pipeline、新增一条候选投递 HTTP 端点（则端点与鉴权归 core 侧另单，本仓只写客户端）；(c) 沿用 JSON 文件投递（则本单降级为「生成器改善候选质量」，落库不变）；② 按结论落实现：新增 `MCTS` 或 `LLM` 候选提议器接进 `pkg/ai/loop` 的 `Proposer`（与 TPE 同一接口，可切换、可对比）；③ **确定性口径**：LLM/MCTS 都必须带可复现 seed 或留痕（`ai.experiments` 已有三 hash 坐标；seed 不许默认取墙上时钟——`handlers_explore.go:263` 今天就是 `time.Now().UnixNano()`，本单要么给它显式 seed，要么写明为什么可接受）；④ 候选落库走 `pkg/aistore` 的 `ai.*`，**不直连 core 业务表**；⑤ LLM 成本与预算沿用 `pkg/ai/cost.go` 的预算器，不许绕过。
 - **④ 约束与非目标**：**不 import core 实现包**、**不直连 core 的业务表**（AGENTS §3 两条硬约束）；不新增仓外 `replace`；不在本仓实现「第二个编排者」（ADR-023 禁，core 侧 DBT-18 ④ 原文同判）；不改 core 的 `mining.Pipeline` 签名（那是 core 的冻结契约）；不在本单删 core 侧任何 mining 代码（那是 `SVC-CORE-AI-RETIRE`，串行第 10）；不改 `pkg/ai/validation` 的六维口径。
 - **⑤ 验收**：① 归属结论成文（ADR 或 ARCHITECTURE 一节 + 三选一的代价写清），且与 `tellurion:SVC-CORE-AI-RETIRE` 的方向**不矛盾**（矛盾即报协调者，不许两仓各按各的写）；② 新提议器至少两条用例：同 seed 两次 `Propose` 产出可复现（若选 (a)/(c)），以及与 TPE 的同接口替换可用；③ 一条反证：候选生成失败 ⇒ 流水线**不落半成品行**（断言行数为 0，不是「有行但为空」）；④ `ai.*` 落库有测试库腿（无库如实 skip）；⑤ `go build/vet/test ./...` 三条绿 + `go test ./cmd/ai/... -race -count=1`（本仓 AGENTS §2 要求端点/SSE 面带 `-race`）。
-- **⑥ 边界**：本仓的候选生成与 `ai.*` 落库；core 侧 mining 落库腿的删除、`SeedBuiltinFactorHypotheses` 的 seed 腿、7 张遗留表的退役全部归 `tellurion:SVC-CORE-AI-RETIRE`（该单在 core 台账的位置见「六之二」节的注记——那条 R4 偏差也在那儿登记）。
+- **⑥ 边界**：本仓的候选生成与 `ai.*` 落库；core 侧 mining 落库腿的删除、`SeedBuiltinFactorHypotheses` 的 seed 腿、7 张遗留表的退役全部归 `tellurion:SVC-CORE-AI-RETIRE`（2026-11-10 已由 core 执行完毕，正文见 core `docs/TASKS.md` §六之二 串行第 10）。
 
 > **🔶 施工记录（2026-11-07，本单）**
 >
@@ -270,7 +274,7 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 > - **对拍零差异报告（归档）**：ODR-001 `§Metrics` —— 回填后 `public.experiments` / `ai.experiments` 各 30 行、`parent_id` 非空 20；行级 `EXCEPT` 双向 `legacy_only=0 / ai_only=0`；停写取证 `public.experiments` 30 行 / `max(id)=1203` 不变。
 > - **护栏**：`storageWhitelist` 为空（`experiment_dualwrite.go` 条目已随文件删除）；`TestStorageImportBoundary_Fixtures` 五条反证腿常驻（违规→红 / 干净→绿 / 白名单放行 / 条目不再 import→红 / 条目文件消失→红）。
 > - **反证（本轮实测，两条腿）**：① 新建 `cmd/ai/experiment_dualwrite_LEG.go`（`import _ "tellurion/pkg/storage"`）→ `TestStorageImportBoundary` 红并点名该文件；删除后复绿（工作区零残留）。② 临时给已删文件登记白名单条目 → 同一条腿红（`storageWhitelist 有条目已失效 … cmd/ai/experiment_dualwrite.go`）→ 逐字节还原（`SHA256=2F818BE3…3572425B` 与改前一致）→ 复绿。
-> - **core 侧**：`pkg/storage/experiments.go` / `research.go` 的导出符号均带 `Deprecated:`，删除期限 **2027-01-31**；`pkg/storage/deprecated_legacy_test.go` 逐符号钉住（core 仓）。
+> - **core 侧**：`pkg/storage/experiments.go` / `research.go` 当时标 `Deprecated:`、删除期限 2027-01-31；**已于 2026-11-10 随 `SVC-CORE-AI-RETIRE` 提前删除**（含 `deprecated_legacy_test.go`），本节保留当日记录。
 > - **门禁（真实输出）**：`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全绿（`cmd/ai 0.478s`、`internal/repoguard 0.344s`、`pkg/ai/pipeline 4.259s`）。`gofmt -l .` 命中两个**既有** BOM 文件（`pkg/ai/drift/detector.go`、`pkg/ai/validation/redundancy.go`），与本次改动无关，未动。
 > - **未落（如实）**：`TestStopWrite_LegacyExperimentsFrozen` 本机无 `TEST_DATABASE_DSN` → skip；本轮未重跑真库腿，2026-10-24 的停写取证仍为最后一次真库证据。生产 import 已零；`grep -r "pkg/storage"` 仍命中护栏注释与断言文案（不是 import）。
 
@@ -296,11 +300,11 @@ verified-by: QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilo
 > **验收取证（真实退出码）**：`gofmt -l pkg/ai/gene_pool pkg/aistore cmd/ai` → 空；`go build ./...` → **0**；`go vet ./...` → **0**；`go test ./pkg/ai/gene_pool/... ./pkg/aistore/... ./cmd/ai/... -count=1` → 全 `ok`，**0**。
 > **破坏验证**：把 `factor_pool.go` 一条 SQL 临时改回 `FROM factor_genes` → `TestSQL_TableRefsAreSchemaQualified` 当场红并点名 `factor_pool.go: 未限定 schema 的表引用 "factor_genes"`（**EXIT=1**）→ 逐字节还原 → 复绿（**EXIT=0**），工作区零残留。
 > **未做 / 环境限制（如实；2026-10-26 订正）**：真库腿 `TestPools_WriteOnlyAiSchema` 本机未执行——`127.0.0.1:5432` 无 PG 监听；Docker daemon 本轮**已可达**（Engine 29.8.0），但**未起专用 PG 容器**，故仍只证到「无 DSN 时显式 skip」，**未取到真库绿**。有库环境跑 `TEST_DATABASE_DSN=... go test ./pkg/ai/gene_pool -run TestPools_WriteOnlyAiSchema -count=1` 或 `docker run postgres` 后同命令。
-> **不在本单**：旧表 `public.factor_genes` / `public.strategy_genes` 不删（切换前真库各 0 行、无脏数据），退役随 core QT-05 ④（2027-01-31）。
+> **不在本单**：旧表 `public.factor_genes` / `public.strategy_genes` 当时保留不删（切换前真库各 0 行、无脏数据），退役原定随 core QT-05 ④（2027-01-31）；**已于 2026-11-10 随 `SVC-CORE-AI-RETIRE` 提前删除**。
 
 > #### core 侧交接件（QT-17 ④ 的另一半——本仓**不改 core**，报协调者）
 >
-> **状态（2026-10-25）**：core 侧已落 —— `experiments.go` / `research.go` 的导出符号带 `Deprecated:` 说明，删除期限登记在 `tellurion:docs/TASKS.md` QT-05 ④；本仓此处保留交接要求作为来源记录。
+> **状态（2026-10-25；2026-11-10 订正）**：core 侧已落 —— `experiments.go` / `research.go` 的导出符号带 `Deprecated:` 说明，删除期限登记在 `tellurion:docs/TASKS.md` QT-05 ④；**2026-11-10 已随 `SVC-CORE-AI-RETIRE` 提前删除**。本仓此处保留交接要求作为来源记录。
 >
 > **要做**：把 core `pkg/storage` 的旧表定义与存取方法标 `deprecated`，并登记删除期限。
 > - `tellurion:pkg/storage/experiments.go`：`Experiment` / `ExperimentMetrics` / `ExperimentUpdate` / `ExperimentStatus*` / `DatasetSplit*` 及 `InsertExperiment` / `GetExperiment` / `ListExperiments` / `UpdateExperiment` / `CompleteExperiment` / `RecordVerdict`。

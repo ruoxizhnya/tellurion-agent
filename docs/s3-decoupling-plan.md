@@ -217,5 +217,5 @@ verified-by: S3-a~d 全部落地 —— 删 replace/require、单仓 build/vet/t
 ## 7. 不在本清单内
 
 - 删 `replace` 本身、CI rewrite 步骤（S3-d 的最后一笔，条件满足才动）。
-- core 旧表 `public.experiments` / `public.factor_genes` / `public.strategy_genes` 的退役（core QT-05 ④，2027-01-31）。
+- core 旧表 `public.experiments` / `public.factor_genes` / `public.strategy_genes` 的退役——**已于 2026-11-10 由 core `SVC-CORE-AI-RETIRE` 删除**（原登记期限 2027-01-31，提前完成；正文见 core `docs/TASKS.md` §六之二 串行第 10）。
 - 任何跨仓代码改动：本仓只读 core / contracts / kit 的源码做核对。

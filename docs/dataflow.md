@@ -58,7 +58,7 @@ POST /api/copilot/generate
 ### 探索一轮
 1. `POST /api/explore/runs` → 建 run（内存态）+ 返回 `runID`
 2. 后台 goroutine 跑 loop：每轮 attempt → 组策略 → 一次 `POST /api/backtest`（core 的 `expression_template` + `strategy_params`）。异步 goroutine 的 ctx 必须保留入站 JWT（`WithBearerTokenInContext`），否则回测客户端 fail-closed
-3. 每次 attempt 落 `ai.experiments`（**QT-17 ④ 起单写**）：`main.go` 把 `*aistore.Store` 直接注入 pipeline / explore 的 sink，双写适配器已删除；legacy `public.experiments` **停写并冻结**在 30 行（历史行已回填归档，行级对拍 0 差异）。`parent_id` 因此直接在 `ai` 的 id 空间内自洽，不再需要 legacyID→aiID 映射
+3. 每次 attempt 落 `ai.experiments`（**QT-17 ④ 起单写**）：`main.go` 把 `*aistore.Store` 直接注入 pipeline / explore 的 sink，双写适配器已删除；legacy `public.experiments` 在存量环境**停写并冻结**在 30 行（历史行已回填归档，行级对拍 0 差异），**core 的建表 DDL 已于 2026-11-10 随 `SVC-CORE-AI-RETIRE` 删除**（新环境无此表）。`parent_id` 因此直接在 `ai` 的 id 空间内自洽，不再需要 legacyID→aiID 映射
 4. ui 订阅 `GET .../stream`：每 tick 推 `progress`（快照与轮询端点同形状）
 5. 结束推 `complete`；`POST .../stop` 只停调度，不 cancel 正在跑的回测
 
@@ -68,7 +68,7 @@ POST /api/copilot/generate
 - 候选生成不调用模型，因此没有 LLM 成本；LLM 提议器将来必须走 `pkg/ai/cost.go`。
 
 ### 研究域 / 因子假设读取
-- `research.profile` / `research.conclusion` / `research.question` 与 `factor_hypothesis` 的**读面已切 `ai.*`**（自有 `aistore`）；`factor_hypothesis` 的 builtin 种子启动时 `ON CONFLICT DO NOTHING` 镜像播种。研究域三表**目前没有写入方**（core 侧也无研究域 handler，真库 0 行）——将来接写时直写 `ai.*`，不得落 legacy `research.*`。
+- `research.profile` / `research.conclusion` / `research.question` 与 `factor_hypothesis` 的**读面已切 `ai.*`**（自有 `aistore`）；`factor_hypothesis` 的 builtin 种子由本仓启动时 `ON CONFLICT DO NOTHING` 播种。研究域三表**目前没有写入方**（core 侧也无研究域 handler，真库 0 行）——将来接写时直写 `ai.*`，不得落 legacy `research.*`。**2026-11-10 起**：core 这四张表的 DDL 与只读实现已随 `SVC-CORE-AI-RETIRE` 删除，本仓是唯一 owner。
 
 ### 表达式校验与目录（QT-17 S3-c-4）
 - `validate_factor` 工具（L1 闸门）把表达式发到 core 的 `POST /api/expression/validate`，把 `{valid,inputs,ast,error,stage}` 原样映射成 GateDecision；`valid=false` 是判定，非 200 是工具错误。
@@ -92,7 +92,7 @@ POST /api/copilot/generate
 
 ## 4. 不变量（可被测试钉住的）
 
-1. `ai.*` 与 core 旧表在停写切换时行级一致（回填归档 + `EXCEPT` 双向 0 差异，见 ODR-001）；停写后 `public.experiments` 行数与序列不再前进。
+1. `ai.*` 与 core 旧表在停写切换时行级一致（回填归档 + `EXCEPT` 双向 0 差异，见 ODR-001）；停写后 `public.experiments` 行数与序列不再前进。**2026-11-10 起** core DDL 已退役：存量环境该表仍在但冻结，新环境不存在（`experiment_stopwrite_integration_test.go` 用 `to_regclass` 判在不在，两种环境都验）。
 2. 同一实验配置 → 同一结果（引擎确定性 + 三 hash 留痕）。
 3. 断线不影响 run 的生命周期。
 4. 本仓生产代码不出现 `pkg/storage` 的 import——**白名单已清零（QT-17 ③，2026-10-25）**：仪器域上市窗口改走 core QT-67 的只读端点（`POST /api/v1/listing-windows`，凭证从入站请求转发），由 `internal/repoguard` AST 护栏钉住；**QT-17 S3-d 起全仓源码对 core 的 import 字面量归零**（`grep '"tellurion/'` 无命中），`replace` 已删除。
