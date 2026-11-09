@@ -69,6 +69,31 @@ type ChainSink interface {
 	SaveChain(ctx context.Context, entry ChainEntry) error
 }
 
+// AssetRegistrar is the local contract for registering a compiled generation
+// with the strategy asset service (QT-32-B). Defined here, like ChainSink, so
+// this package does not import the HTTP client layer; the adapter lives at the
+// composition root (cmd/ai/asset_registrar.go).
+//
+// The coordinate can only come from the asset service: version_hash takes the
+// server-issued strategy_id as an input, so computing one here would be a
+// second source of truth. nil → run() fails closed before registration.
+type AssetRegistrar interface {
+	Register(ctx context.Context, source string) (AssetRef, error)
+}
+
+// AssetRef is the coordinate issued by the asset service.
+//
+// ArtifactHash is empty when the carrier produces no artifact (dsl / builtin /
+// external). A failure from Register may still carry the partial coordinate
+// already obtained (definition created / source stored) — the chain records
+// that, so a row can answer "how far did this generation get".
+type AssetRef struct {
+	StrategyID   string
+	Carrier      string
+	VersionHash  string
+	ArtifactHash string
+}
+
 // ChainEntry 是一次生成尝试在留痕上的当前状态（QT-32-A）。
 //
 // 链的每段推进都带**全量**状态写一次，所以它是快照不是补丁：读到哪一行，
@@ -86,6 +111,14 @@ type ChainEntry struct {
 	// 另一个指纹 —— 链要能回答「最后编进去的到底是哪一版」。
 	Source       string
 	SourceSha256 string
+
+	// 资产服务签发的坐标（QT-32-B）。它们是**身份**不是结论：这里不存 promote
+	// 结果，那只在 strategy.strategy_artifacts.status 里有一份。
+	// dsl / builtin / external 载体没有 ArtifactHash（不产字节码）。
+	StrategyID   string
+	AssetCarrier string
+	VersionHash  string
+	ArtifactHash string
 
 	BuildState    string
 	BuildError    string
@@ -106,11 +139,13 @@ const (
 )
 
 // BlockedPromoteGate 是链被拦下的唯一一种原因（与 aistore 的
-// GenerationBlockedPromoteGate 同一取值）：AI 产物没有可核验的资产坐标，
-// 未过 promote 人工闸门，不进回测（QT-32 ③-②）。
+// GenerationBlockedPromoteGate 同一取值）：AI 产物未过 promote 人工闸门，
+// 不进回测（QT-32 ③-②）。
 //
-// 装配根没注入留痕落点也是 fail-closed，但那不是「闸门拦下」而是「没开工」——
-// 它连一行链都写不出去，所以只在 job 的错误信息里点名，不占这个枚举。
+// QT-32-B 起「有没有坐标」不再是拦住它的理由 —— 坐标由资产服务在登记时签发
+// 并落链；拦下它的是**人的 promote**（promote 仍是人的闸门，本仓不调、也不
+// 存结论）。装配根没注入留痕落点 / 资产登记端口同样是 fail-closed，但那不是
+// 「闸门拦下」而是「没开工」，只在 job 的错误信息里点名，不占这个枚举。
 const BlockedPromoteGate = "promote_gate"
 
 // CopilotService generates Go strategy code from natural-language
@@ -142,6 +177,13 @@ type CopilotService struct {
 	// WithChainSink; nil → run() fails closed **before** the LLM call,
 	// because an untraceable generation is the thing this ticket removes.
 	chain ChainSink
+
+	// assets registers a compiled generation with the strategy asset service
+	// and returns the issued coordinate (QT-32-B). Injected via
+	// WithAssetRegistrar; nil → run() fails closed after the build passes,
+	// before the promote gate — a generation whose coordinate cannot be
+	// obtained must not be reported as "blocked at promote".
+	assets AssetRegistrar
 
 	generated  int64 // total generated (LLM called)
 	buildable  int64 // build succeeded
@@ -307,6 +349,15 @@ func (s *CopilotService) WithBuildExecutor(e BuildExecutor) *CopilotService {
 // generation that leaves no row is unauditable after the process dies.
 func (s *CopilotService) WithChainSink(c ChainSink) *CopilotService {
 	s.chain = c
+	return s
+}
+
+// WithAssetRegistrar injects the strategy asset service client (QT-32-B).
+// Like the chain sink, this is a composition-root wiring point: never
+// called → run() fails closed once the build passes, because a compiled
+// generation without an issued coordinate cannot be reviewed or promoted.
+func (s *CopilotService) WithAssetRegistrar(r AssetRegistrar) *CopilotService {
+	s.assets = r
 	return s
 }
 
@@ -570,24 +621,52 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 		break
 	}
 
-	// ── QT-32-A ③-5：promote 人工闸门（生产者侧）─────────────────────
+	// ── QT-32-B：登记到资产服务，拿真坐标 ───────────────────────────
 	//
-	// 编译过了 ≠ 可以拿去跑。AI 产物要先进资产服务、过人的 promote，回测才
-	// 有「这次跑的就是这一份源码」的可核验坐标：
-	//   - 闸门结论的真相在 strategy.strategy_artifacts.status
+	// 顺序固定在「编译通过之后、闸门之前」：坐标必须对应**真正编过的那份
+	// 源码**（entry.Source 与编译器看到的是同一份字节）。坐标只能由资产服务
+	// 签发 —— version_hash 的六项输入里含它自己的 strategy_id
+	// （tellurion-contracts:engine/provenance.go:65），本仓自己拼就是第二个真相。
+	if s.assets == nil {
+		s.stop(ctx, result, entry, "sandbox_rejected",
+			"asset registrar not configured; call WithAssetRegistrar() at the composition root")
+		return
+	}
+
+	ref, regErr := s.assets.Register(ctx, entry.Source)
+	// 登记失败也可能带回**部分**坐标（定义建了、源码没传成）。照实落链：
+	// 一行「走到第几步」的留痕，比一行空白更能说明问题。
+	entry.StrategyID = ref.StrategyID
+	entry.AssetCarrier = ref.Carrier
+	entry.VersionHash = ref.VersionHash
+	entry.ArtifactHash = ref.ArtifactHash
+	if regErr != nil {
+		s.logger.Error().
+			Err(regErr).
+			Str("job_id", entry.JobID).
+			Int("attempt", entry.Attempt).
+			Msg("asset registration failed; aborting job (fail-closed)")
+		s.stop(ctx, result, entry, "sandbox_rejected", "资产登记失败："+regErr.Error())
+		return
+	}
+
+	// ── QT-32 ③-②：promote 人工闸门（生产者侧）─────────────────────
+	//
+	// 编译过了 + 坐标有了 ≠ 可以拿去跑。promote 是**人的**闸门：
+	//   - 结论的真相在 strategy.strategy_artifacts.status
 	//     （tellurion-strategy:internal/asset/ddl.go 的状态机 +
 	//     internal/httpapi/api.go 的 POST .../versions/{hash}/promote，
 	//     那里明写「promote 是人的闸门」）。本仓不存第二份结论。
-	//   - 本仓今天也**没有**那个坐标可交：go build 的临时可执行文件不是资产
-	//     服务认可的载体，version_hash 又需要资产服务签发的 strategy_id
-	//     （tellurion-contracts:engine/provenance.go:65 的六项输入）。
-	// 所以只能拦，不能猜。旧实现在这里做的是另一件事：plugin.Open 打开一个
-	// 非 plugin 产物必然失败，然后回落成硬编码字面量 "generated-strategy"
-	// 去让 core 跑回测 —— core 从未注册过那个名字，于是这条链一路断在远端，
-	// 本仓既没说谎也没留痕，只是没人知道它断了。
+	//   - 本仓不调 promote、不跑回测：登记只回答「这份源码是哪一版资产」，
+	//     放行归 tellurion-strategy 的 resolve/promote 与 core 的执行侧。
+	// 旧实现在这里做的是另一件事：plugin.Open 打开一个非 plugin 产物必然失败，
+	// 然后回落成硬编码字面量 "generated-strategy" 去让 core 跑回测 —— core 从未
+	// 注册过那个名字，于是这条链一路断在远端，本仓既没说谎也没留痕，只是没人
+	// 知道它断了。
 	entry.BlockedReason = BlockedPromoteGate
-	s.stopAtGate(ctx, result, entry,
-		"编译通过；AI 产物未过 promote 人工闸门，不进回测（QT-32-A）。需要资产服务登记的 artifact 坐标后，这一环由 tellurion-strategy 的 resolve/promote 判定。")
+	s.stopAtGate(ctx, result, entry, fmt.Sprintf(
+		"编译通过并已登记资产坐标（carrier=%s strategy_id=%s version_hash=%s）；未过 promote 人工闸门，不进回测（QT-32）。promote 与回测执行归 tellurion-strategy / core。",
+		entry.AssetCarrier, entry.StrategyID, entry.VersionHash))
 }
 
 // trace 把链上的一段推进写下去。写不进去 = 这一轮不许继续（QT-32-A ③-3）：

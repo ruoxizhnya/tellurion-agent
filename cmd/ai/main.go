@@ -88,7 +88,7 @@ func main() {
 	backtestRunner := NewHTTPBacktestRunner(btClient)
 	wfRunner := NewHTTPWalkForwardRunner(btClient)
 
-	copilotService := BuildCopilot(v, NewChainSink(aiStore), logger)
+	copilotService := BuildCopilot(v, NewChainSink(aiStore), NewStrategyAssetRegistrar(v, logger), logger)
 
 	factorPool := gene_pool.NewFactorPool(aiStore.Pool())
 	strategyPool := gene_pool.NewStrategyPool(aiStore.Pool())

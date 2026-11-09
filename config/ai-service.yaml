@@ -100,6 +100,22 @@ copilot:
   # 空 = 拒绝构建（fail closed, status="sandbox_rejected"）。
   working_dir: ""
 
+# QT-32-B：AI 生成物登记到 tellurion-strategy 的资产服务（拿服务端签发的
+# strategy_id / version_hash；产物载体再加 artifact_hash）。
+#   url 为空 = 登记端口未注入 ⇒ 编译通过后 fail-closed（不产出无坐标的产物）。
+#   carrier 按 2026-10-25 第三轮裁决 ⑩：默认 dsl，仅 L3 才 wasm（那时必须给
+#   abi_version 与 toolchain）。dsl / builtin / external 不产字节码，不会调
+#   build，artifact_hash 留空。
+strategy_asset:
+  url: "http://host.docker.internal:8090"
+  carrier: "dsl"
+  abi_version: ""
+  scope: "market"
+  entry: "OnBar"
+  toolchain: ""
+  poll_interval: 1s
+  poll_timeout: 2m
+
 logging:
   level: "info"
   format: "json"

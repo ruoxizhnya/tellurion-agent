@@ -63,6 +63,8 @@ services:
       # 上游在本仓之外：analysis 反代面 / data-service 仍指向宿主。
       DATA_SERVICE_URL: ${DATA_SERVICE_URL:-http://host.docker.internal:8081}
       AI_SERVICE_FACTOR_API_URL: ${AI_SERVICE_FACTOR_API_URL:-http://host.docker.internal:8085}
+      # QT-32-B：资产服务也在本仓之外（tellurion-strategy，默认 :8090）。
+      STRATEGY_ASSET_URL: ${STRATEGY_ASSET_URL:-http://host.docker.internal:8090}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1/chat/completions}
       AI_MODEL: ${AI_MODEL:-}

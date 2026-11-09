@@ -188,13 +188,15 @@ var statements = []string{
 	// 交出另一份字节、另一个指纹；只留最后一版就把「中间试过什么」抹掉了，
 	// 而那正是复查生成质量时要看的东西。
 	//
-	// 三条口径是刻意的：
+	// 四条口径是刻意的：
 	//   - `source_sha256` **不是** version_hash 也不是 artifact_hash。前者按
 	//     tellurion-contracts:engine/provenance.go:65 需要资产服务签发的
-	//     strategy_id（本仓拿不到），后者按 :39 只覆盖编译产物字节（本仓的
-	//     go build 产物不是资产服务认可的载体）。这里存的是**同一行 source**
-	//     的 sha256，用途是指纹与篡改检测，不充当执行真相。
-	//   - **没有 promote / artifact 列**。闸门结论的真相在
+	//     strategy_id，后者按 :39 只覆盖编译产物字节。这里存的是**同一行
+	//     source** 的 sha256，用途是指纹与篡改检测，不充当执行真相。
+	//   - `strategy_id` / `version_hash` / `artifact_hash` 是资产服务**签发**的
+	//     原值（QT-32-B），本仓只照抄、不自己算。dsl / builtin / external 载体
+	//     不产字节码，`artifact_hash` 因此为空。
+	//   - **没有 promote 结论列**。闸门结论的真相在
 	//     tellurion-strategy:internal/asset/ddl.go 的 strategy_artifacts.status
 	//     状态机；在这里再存一份就是两处真相，且一定会漂移。
 	//   - `blocked_reason` 为空 = 链没被拦；非空 = 点名是哪一道闸把链停下的。
@@ -208,6 +210,10 @@ var statements = []string{
 		end_date       VARCHAR(16),
 		source         TEXT,
 		source_sha256  CHAR(64),
+		strategy_id    VARCHAR(64),
+		asset_carrier  VARCHAR(16),
+		version_hash   CHAR(64),
+		artifact_hash  CHAR(64),
 		build_state    VARCHAR(16) NOT NULL DEFAULT 'none' CHECK (build_state IN ('none','failed','passed')),
 		build_error    TEXT,
 		blocked_reason VARCHAR(32),
@@ -215,6 +221,14 @@ var statements = []string{
 		updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		PRIMARY KEY (job_id, attempt)
 	)`,
+
+	// QT-32-B 的坐标列是后加的：老库里表已存在，CREATE TABLE IF NOT EXISTS
+	// 不会补列，所以每条都要一条幂等 ALTER（core 式迁移没有版本表，见
+	// Migrate 的注释）。新库上这两处共存，效果相同。
+	`ALTER TABLE ai.generation_chain ADD COLUMN IF NOT EXISTS strategy_id VARCHAR(64)`,
+	`ALTER TABLE ai.generation_chain ADD COLUMN IF NOT EXISTS asset_carrier VARCHAR(16)`,
+	`ALTER TABLE ai.generation_chain ADD COLUMN IF NOT EXISTS version_hash CHAR(64)`,
+	`ALTER TABLE ai.generation_chain ADD COLUMN IF NOT EXISTS artifact_hash CHAR(64)`,
 }
 
 // Statements returns a copy of the DDL in execution order. Mutating the result

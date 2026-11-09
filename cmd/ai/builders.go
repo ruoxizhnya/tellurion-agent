@@ -102,16 +102,20 @@ func (a *SandboxRunnerAdapter) IsTimeout(err error) bool {
 // AI 产物要先进资产服务、过 promote 人工闸门才可能进回测，本仓没有
 // 可核验的产物坐标时就只能拦（见 pkg/copilot 的闸门段）。这里改为注入
 // 留痕落点：记不下一次生成，就不开始一次生成。
-func BuildCopilot(v *viper.Viper, chain copilot.ChainSink, logger zerolog.Logger) *copilot.CopilotService {
+// QT-32-B 起多注入一个资产登记端口：编译通过后由它拿回真坐标；它同样是
+// fail-closed 的（nil → 编译通过也不放过）。
+func BuildCopilot(v *viper.Viper, chain copilot.ChainSink, assets copilot.AssetRegistrar, logger zerolog.Logger) *copilot.CopilotService {
 	copilotService := copilot.NewCopilotService().
 		WithLLMClient(ai.NewClient()).
 		WithCodeChecker(StaticCheckAdapter{}).
 		WithBuildExecutor(NewSandboxRunnerAdapter(logger)).
 		WithChainSink(chain).
+		WithAssetRegistrar(assets).
 		WithLogger(logger.With().Str("component", "copilot").Logger()).
 		WithWorkingDir(v.GetString("copilot.working_dir"))
 	logger.Info().
 		Bool("ai_configured", copilotService.IsConfigured()).
+		Bool("asset_registrar", assets != nil).
 		Str("working_dir", copilotService.WorkingDir()).
 		Msg("Copilot service initialized")
 	return copilotService

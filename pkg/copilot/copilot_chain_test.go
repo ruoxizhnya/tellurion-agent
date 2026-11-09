@@ -77,13 +77,51 @@ func shaOf(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// buildServiceWithChain 装配一条完整依赖链（LLM / 静态闸 / 编译 / 留痕 / 工作目录）。
-func buildServiceWithChain(llm LLMClient, checker CodeChecker, exec BuildExecutor, sink ChainSink) *CopilotService {
+// stubAssetRegistrar 记下每一次登记请求（含失败注入）。
+//
+// 它替的是资产服务客户端：本包只关心「登记发生在编译之后、拿到的坐标有没有
+// 落链、失败会不会被吞」，wire 形状由 pkg/ai/client 的 httptest 用例钉。
+type stubAssetRegistrar struct {
+	mu      sync.Mutex
+	sources []string
+	ref     AssetRef
+	err     error
+}
+
+func (s *stubAssetRegistrar) Register(_ context.Context, source string) (AssetRef, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sources = append(s.sources, source)
+	return s.ref, s.err
+}
+
+func (s *stubAssetRegistrar) seen() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.sources))
+	copy(out, s.sources)
+	return out
+}
+
+// testAssetRegistrar 是「正常登记」的默认假件：dsl 载体、服务端签发一个
+// 64 位 version_hash、无 artifact_hash（dsl 不产字节码）。
+func testAssetRegistrar() *stubAssetRegistrar {
+	return &stubAssetRegistrar{ref: AssetRef{
+		StrategyID:  "stg-0123456789abcdef",
+		Carrier:     "dsl",
+		VersionHash: strings.Repeat("a", 64),
+	}}
+}
+
+// buildServiceWithChain 装配一条完整依赖链（LLM / 静态闸 / 编译 / 留痕 /
+// 资产登记 / 工作目录）。assets 传 nil 用来测「没注入登记端口」的形态。
+func buildServiceWithChain(llm LLMClient, checker CodeChecker, exec BuildExecutor, sink ChainSink, assets AssetRegistrar) *CopilotService {
 	return NewCopilotService().
 		WithLLMClient(llm).
 		WithCodeChecker(checker).
 		WithBuildExecutor(exec).
 		WithChainSink(sink).
+		WithAssetRegistrar(assets).
 		WithWorkingDir(os.TempDir())
 }
 
@@ -119,7 +157,7 @@ func TestQT32A_NilChainSink_FailsClosedBeforeCallingLLM(t *testing.T) {
 func TestQT32A_TraceWriteFailure_AbortsBeforeLLM(t *testing.T) {
 	llm := &stubLLMClient{configured: true, generateResponse: "package x\nfunc f() {}\n"}
 	sink := &recordingSink{errAt: 1}
-	svc := buildServiceWithChain(llm, &stubCodeChecker{}, &stubBuildExecutor{}, sink)
+	svc := buildServiceWithChain(llm, &stubCodeChecker{}, &stubBuildExecutor{}, sink, testAssetRegistrar())
 
 	res := svc.Generate(context.Background(), GenerateParams{Description: "momentum"})
 	waitTerminal(t, svc, res.JobID, 2*time.Second)
@@ -150,6 +188,7 @@ func TestQT32A_TraceCarriesPromptSourceAndSelfConsistentFingerprint(t *testing.T
 		&stubCodeChecker{}, // 放行
 		exec,               // 编译成功
 		sink,
+		testAssetRegistrar(),
 	)
 
 	res := svc.Generate(context.Background(), GenerateParams{
@@ -207,6 +246,7 @@ func TestQT32A_PromoteGateBlocksEvenAfterSuccessfulBuild(t *testing.T) {
 		&stubCodeChecker{},
 		&stubBuildExecutor{}, // err == nil ⇒ 编译成功
 		sink,
+		testAssetRegistrar(),
 	)
 
 	res := svc.Generate(context.Background(), GenerateParams{Description: "momentum"})
@@ -233,10 +273,133 @@ func TestQT32A_PromoteGateBlocksEvenAfterSuccessfulBuild(t *testing.T) {
 	assert.Empty(t, strategyName,
 		"不得再凭空造一个策略名 —— 旧实现拿硬编码字面量去 core 跑回测，等于宣称跑的就是这一份源码")
 
+	// QT-32-B 起闸门拦下的那一条链必须带**真坐标**（由资产服务签发、本用例的
+	// 假件返回）：闸门不再以「没有坐标」为由，而是以「人的 promote」为由。
+	assert.Equal(t, "stg-0123456789abcdef", final.StrategyID)
+	assert.Equal(t, "dsl", final.AssetCarrier)
+	assert.Equal(t, strings.Repeat("a", 64), final.VersionHash)
+	assert.Empty(t, final.ArtifactHash, "dsl 不产字节码，artifact_hash 必须留空而不是编一个")
+	assert.Contains(t, buildErr, final.VersionHash,
+		"给人看的终态要能对上链上的坐标，否则复查还得自己去翻库：got %q", buildErr)
+
 	// 计数器的账也要对上：编译成功计入 buildable，backtested 结构上为 0。
 	_, buildable, backtested := svc.Stats()
 	assert.EqualValues(t, 1, buildable, "编译过了就是过了，闸门不改变这一事实")
 	assert.EqualValues(t, 0, backtested, "闸门拦下后不可能有回测；这条断言同时钉住「没有偷偷跑」")
+}
+
+// ── ③b QT-32-B：坐标由资产服务签发并落链 ────────────────────────────
+
+// TestQT32B_RegistersCompiledSourceAndRecordsIssuedCoordinate 钉住三件事：
+//  1. 登记的字节**就是编译时磁盘上的那份**（entry.Source 与执行器读到的一致）；
+//  2. 落链的是假件**返回的**坐标，不是本仓自己算的（换一个返回值链就变）；
+//  3. 出码之前写的第一行没有坐标 —— 坐标不是猜出来的，是请求回来的。
+func TestQT32B_RegistersCompiledSourceAndRecordsIssuedCoordinate(t *testing.T) {
+	source := "package x\nfunc f() {}\n"
+	exec := &stubBuildExecutor{}
+	sink := &recordingSink{}
+	reg := &stubAssetRegistrar{ref: AssetRef{
+		StrategyID:  "stg-abc123",
+		Carrier:     "dsl",
+		VersionHash: strings.Repeat("b", 64),
+	}}
+	svc := buildServiceWithChain(
+		&stubLLMClient{configured: true, generateResponse: source},
+		&stubCodeChecker{},
+		exec,
+		sink,
+		reg,
+	)
+
+	res := svc.Generate(context.Background(), GenerateParams{Description: "momentum"})
+	waitTerminal(t, svc, res.JobID, 2*time.Second)
+
+	require.Len(t, reg.seen(), 1, "一次成功生成只登记一次")
+	require.NotEmpty(t, exec.compiled(), "执行器没读到源文件，这条对拍就是空转")
+	assert.Equal(t, exec.compiled(), reg.seen()[0],
+		"登记的必须是编译时那份字节；登记另一份就是给别的产物发身份证")
+
+	final := sink.last(t)
+	assert.Equal(t, "stg-abc123", final.StrategyID, "链上必须是服务端签发的 id")
+	assert.Equal(t, "dsl", final.AssetCarrier)
+	assert.Equal(t, strings.Repeat("b", 64), final.VersionHash,
+		"version_hash 要用返回值；自己算一份就是第二个真相")
+	assert.Equal(t, BlockedPromoteGate, final.BlockedReason,
+		"有坐标不等于可以跑：promote 仍是人的闸门")
+
+	first := sink.all()[0]
+	assert.Empty(t, first.StrategyID, "第一行写于出码之前，那时还没有资产可登记")
+	assert.Empty(t, first.VersionHash)
+}
+
+// TestQT32B_RegistrationFailureIsNotGateBlock：登记失败是**环节错误**，不是
+// 闸门拦下 —— blocked_reason 必须留空，否则读库的人分不清「编过了但没过
+// promote」与「编过了但没登记成」。已拿到的部分坐标要照实留着。
+func TestQT32B_RegistrationFailureIsNotGateBlock(t *testing.T) {
+	sink := &recordingSink{}
+	reg := &stubAssetRegistrar{
+		ref: AssetRef{StrategyID: "stg-half", Carrier: "dsl"},
+		err: errors.New("put source (strategy_id=stg-half): status 503 (want 200): unavailable"),
+	}
+	svc := buildServiceWithChain(
+		&stubLLMClient{configured: true, generateResponse: "package x\nfunc f() {}\n"},
+		&stubCodeChecker{},
+		&stubBuildExecutor{},
+		sink,
+		reg,
+	)
+
+	res := svc.Generate(context.Background(), GenerateParams{Description: "momentum"})
+	waitTerminal(t, svc, res.JobID, 2*time.Second)
+
+	job := svc.GetJob(res.JobID)
+	job.Lock()
+	status, buildErr := job.Status, job.BuildErr
+	job.Unlock()
+
+	final := sink.last(t)
+	assert.Equal(t, BuildStatePassed, final.BuildState, "登记失败不改变「编译过了」这个事实")
+	assert.Empty(t, final.BlockedReason,
+		"登记失败不是闸门拦的，blocked_reason 必须留空：got %q", final.BlockedReason)
+	assert.Contains(t, final.BuildError, "资产登记失败")
+	assert.Contains(t, final.BuildError, "status 503", "环节错误要带着上游的诊断，别只剩一句「失败了」")
+	assert.Equal(t, "stg-half", final.StrategyID, "已经建好的定义要照实落链（走到了哪一步是证据）")
+	assert.Empty(t, final.VersionHash, "没传成的源码没有 version_hash，不许补一个")
+
+	assert.Equal(t, "sandbox_rejected", status, "ui 白名单内的 fail-closed 终态")
+	assert.Contains(t, buildErr, "资产登记失败")
+	assert.NotContains(t, buildErr, "promote",
+		"没登记成就不该谎称「卡在 promote」：got %q", buildErr)
+}
+
+// TestQT32B_NilRegistrarFailsClosedAfterBuild：没注入登记端口时，编译通过也
+// 不许放过。它与「没注入留痕落点」是同一种纪律，只是拦点不同（LLM 之后）。
+func TestQT32B_NilRegistrarFailsClosedAfterBuild(t *testing.T) {
+	llm := &stubLLMClient{configured: true, generateResponse: "package x\nfunc f() {}\n"}
+	sink := &recordingSink{}
+	svc := buildServiceWithChain(llm, &stubCodeChecker{}, &stubBuildExecutor{}, sink, nil)
+	require.Nil(t, svc.assets, "本用例测的就是没注入登记端口的装配形态")
+
+	res := svc.Generate(context.Background(), GenerateParams{Description: "momentum"})
+	waitTerminal(t, svc, res.JobID, 2*time.Second)
+
+	job := svc.GetJob(res.JobID)
+	job.Lock()
+	status, buildErr := job.Status, job.BuildErr
+	job.Unlock()
+
+	final := sink.last(t)
+	assert.Equal(t, BuildStatePassed, final.BuildState)
+	assert.Empty(t, final.BlockedReason,
+		"「没装登记端口」是没开工，不是闸门拦下 —— 别污染 blocked_reason 的词表")
+	assert.Contains(t, final.BuildError, "asset registrar not configured",
+		"错误要点名缺的是哪个依赖，运维才知道去装配根补")
+	assert.Empty(t, final.StrategyID)
+
+	assert.Equal(t, "sandbox_rejected", status)
+	assert.Contains(t, buildErr, "asset registrar not configured")
+	assert.EqualValues(t, 1, atomic.LoadInt32(&llm.generateCalls),
+		"登记端口缺失发生在编译之后，LLM 该被调过（拦在闸门之前而不是出码之前）")
 }
 
 // TestQT32A_BuildFailureIsNotReportedAsGateBlock：编译失败时的结论是 failed，
@@ -258,6 +421,7 @@ func TestQT32A_BuildFailureIsNotReportedAsGateBlock(t *testing.T) {
 		&stubCodeChecker{},
 		exec,
 		sink,
+		testAssetRegistrar(),
 	)
 
 	res := svc.Generate(context.Background(), GenerateParams{Description: "momentum"})
@@ -385,7 +549,7 @@ func TestQT32A_RetryKeepsTheFailedAttemptRow(t *testing.T) {
 	}
 	exec := &sequencedExecutor{firstStderr: "strategy_v0.go:2:11: undefined: broken\n"}
 	sink := &recordingSink{}
-	svc := buildServiceWithChain(llm, &stubCodeChecker{}, exec, sink)
+	svc := buildServiceWithChain(llm, &stubCodeChecker{}, exec, sink, testAssetRegistrar())
 
 	res := svc.Generate(context.Background(), GenerateParams{Description: "momentum"})
 	waitTerminal(t, svc, res.JobID, 2*time.Second)

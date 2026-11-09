@@ -50,6 +50,12 @@ func TestGenerationChain_UpsertIsIdempotentPerAttempt(t *testing.T) {
 	second.BuildState = GenerationBuildPassed
 	second.BlockedReason = GenerationBlockedPromoteGate
 	second.BuildError = "编译通过；未过 promote 闸门"
+	// QT-32-B 的坐标列：真库走一遍，证明 nullable 的 CHAR(64)/VARCHAR 读回
+	// 不是空格串、也没有在 UPDATE 时被漏掉。
+	second.StrategyID = "stg-qt32b-itest"
+	second.AssetCarrier = "dsl"
+	second.VersionHash = strings.Repeat("d", 64)
+	second.ArtifactHash = ""
 	require.NoError(t, store.UpsertGenerationChain(ctx, &second))
 
 	rows, err := store.ListGenerationChain(ctx, jobID)
@@ -58,6 +64,10 @@ func TestGenerationChain_UpsertIsIdempotentPerAttempt(t *testing.T) {
 
 	got := rows[0]
 	assert.Equal(t, GenerationBuildPassed, got.BuildState, "读回应是最后一次推进的状态")
+	assert.Equal(t, "stg-qt32b-itest", got.StrategyID, "资产坐标要能读回：链是复查这条生成的唯一入口")
+	assert.Equal(t, "dsl", got.AssetCarrier)
+	assert.Equal(t, strings.Repeat("d", 64), got.VersionHash)
+	assert.Empty(t, got.ArtifactHash, "dsl 不产字节码，读回的必须是空而不是一串空格")
 	assert.Equal(t, GenerationBlockedPromoteGate, got.BlockedReason)
 	assert.Equal(t, "编译通过；未过 promote 闸门", got.BuildError)
 	assert.Equal(t, "动量", got.Prompt)

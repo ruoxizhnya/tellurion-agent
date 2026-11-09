@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-10
-verified-by: SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；本仓反向护栏翻面 + 停写腿兼容旧表不存在）。此前 2026-10-25 QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
+verified-by: QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pkg/ai/client` 新客户端（建定义 → 传源码 → 产物载体 build+轮询）、copilot 登记端口 fail-closed、`ai.generation_chain` 并列四列坐标（幂等 ALTER 兼容存量库）；4 条破坏验证改坏即红、还原复绿；真库 round-trip 通过；gofmt/build/vet 0，全仓仅两条 QT-17 ③ 前置既有红（本文件 :187）。此前 SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；本仓反向护栏翻面 + 停写腿兼容旧表不存在）。此前 2026-10-25 QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -26,7 +26,7 @@ verified-by: SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；�
 | S3 | 删 `replace ../tellurion`，改 HTTP 粗粒度 ✅ 完成（2026-10-25，S3-a~d） | `QT-07 / QT-50` | QT-17 + QT-50 |
 | QT-65 | QT-11 跨仓回归（agent 腿）：pipeline / yaml 生产路径改**工厂注册** ✅ 完成（2026-10-24，见下方完成记录） | `QT-11` | 无硬前置 |
 | QT-32-A | AI 生成链留痕 + promote 闸门的生产者侧 fail-closed ✅ 完成（2026-10-25，正文见下） | `QT-32` | QT-03 / QT-26 / QT-41b（均已 ✅） |
-| QT-32-B | 生成物接资产服务（`PUT .../source` + `POST .../build`）拿真 `version_hash` / `artifact_hash` ⬜ 待做（载体前置已解除） | `QT-32` | **载体已裁、不再等裁**：2026-10-25 第三轮裁决 ⑩（本文件头部第 13 行）= 默认 `carrier="dsl"`、仅 L3 才 `carrier="wasm"`、`carrier="so"` 删除；`artifact_hash` 用 `contracts.engine.StrategyVersionInput{Carrier:"dsl", Source:<配置文本>}.Hash()`；与 ADR-024「LLM 生成的 Go 只审阅不执行」一致。**代裁指针，待主任追认** |
+| QT-32-B | 生成物接资产服务（`PUT .../source` + `POST .../build`）拿真 `version_hash` / `artifact_hash` ✅ 完成（2026-11-10，正文见下） | `QT-32` | 载体已裁：2026-10-25 第三轮裁决 ⑩（本文件头部第 13 行）= 默认 `carrier="dsl"`、仅 L3 才 `carrier="wasm"`、`carrier="so"` 删除。**代裁指针，待主任追认** |
 
 > **QT-65 证据（2026-10-23，C4 期间发现；2026-10-24 已闭环）**：core QT-11（`67bee39`）把注册表改存构造函数后，`strategy.GlobalRegister(实例)` 注册的共享条目在执行路径被 `Registry.NewInstance` fail-closed 拒绝（`ErrSharedStrategy`）。本仓两个**生产**调用点没跟上：`pkg/ai/pipeline/pipeline.go`（`registerOrConfigure` 的注册分支，ExecuteFromYAML 链路）与 `pkg/ai/yaml/loader.go`（`LoadAndRegister`）。现有测试当时全绿是因为没有用例在注册后真经引擎跑（latent，非当前红）。
 
@@ -454,3 +454,66 @@ verified-by: SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；�
 > 4. **闸门只按「有没有可核验坐标」拦，不在本仓存 promote 结论**；代价是「拦下的理由」今天只有一种（`promote_gate`），将来 A2 才有第二个判据。
 > 5. **`source_sha256` 命名不改**：它不是 `version_hash` / `artifact_hash`，注释与 DDL 都写明；将来接资产服务时**并列加列**，不复用这个名字。
 > 6. **`agentOwnedTables` 是给豁免装的护栏，不是给新表开的后门**：core 的表若哪天新增同名表，需要把它从豁免名单移回 `coreToAI`（那条动作会同时让「自持」断言变红，逼人来改）。
+
+---
+
+## QT-32-B · AI 生成物接资产服务，拿真 `version_hash` / `artifact_hash` ✅ 完成（2026-11-10）
+
+> **拆单说明**：本单是 `QT-32` 的 B 腿（A 腿 = 生成链留痕 + 生产者侧闸门，2026-10-25 已收口）。
+> 载体口径**不再等裁**：2026-10-25 第三轮裁决 ⑩ 已定默认 `carrier="dsl"`、仅 L3 才 `carrier="wasm"`、`carrier="so"` 删除；
+> `artifact_hash` 按 `contracts.engine.StrategyVersionInput{Carrier:"dsl", Source:<生成物>}.Hash()` 口径理解（见 ④ 的实况订正）。
+> 本单把 QT-32-A 闸门段那句「本仓今天没有那个坐标可交」变成「本仓交出资产服务签发的坐标」。
+
+- **① 目标**：一次编译通过的 AI 生成物，由本仓**主动登记**到 `tellurion-strategy` 资产服务，拿回**服务端签发**的 `strategy_id` / `version_hash`（产物载体再加 `artifact_hash`），与生成链同一笔落库；登记失败即 fail-closed，不静默放过、不伪造坐标。
+- **② 上下文**（开工前逐一读；引用的是**冻结 wire**，不是实现细节）：
+  - 资产服务端点（`tellurion-strategy:internal/httpapi/api.go:117-126`、`:182-234`）：
+    `POST /api/strategies`（body `{carrier, abi_version, scope, capability, entry}` → **201** `{id}`）、
+    `PUT /api/strategies/{id}/source`（body `{source}` → **200** `{version_hash}`，同源码幂等）、
+    `POST /api/strategies/{id}/build`（body `{version_hash, toolchain}` → **202** `{job_id}`）、
+    `GET /api/strategies/{id}/builds/{job_id}`（→ 200 `BuildJob`，`state ∈ queued|running|succeeded|failed`，成功带 `artifact_hash`，失败带 `error_code`+`error`）。四个端点今天都是 `openRoute`，无鉴权面（同 QT-32-A 台账 :408 的实测）。
+  - **关键实况（决定了本单的形状）**：`SubmitBuild` 对 `!def.Carrier.NeedsArtifact()` 的载体**结构性拒绝**（`internal/asset/service.go:227-229`，`ErrUnsupportedCarrier: carrier %s produces no artifact`）。`dsl` 不产字节码 ⇒ **dsl 腿根本没有 `POST .../build` 可调，也没有 `artifact_hash` 可取**。这不是缺陷，是「dsl 是解释执行的文本」的定义。
+  - `Definition.Validate()`（`internal/asset/model.go`）：`carrier` 必须合法、`scope ∈ market|symbol`、`entry` 非空；`dsl` 的 `abi_version` 必须为空，`wasm` 必须非空。
+  - 本仓现状：`pkg/copilot/copilot.go:573-591` 的闸门段只拦不登记；`ai.generation_chain` 有 `source_sha256` 但**没有**坐标列（QT-32-A 台账 :455 明写「将来接资产服务时并列加列」）。
+  - 资产服务**没有 promote 读面**：promote 与回测执行仍不归本仓（③-⑤ 与 ⑥）。
+- **③ 要求**：
+  1. 新增资产服务客户端（`pkg/ai/client`，wire DTO 本地化、不 import `contracts`）：一次 `Register(ctx, source)` 按「建定义 → 传源码 →（仅产物载体）触发编译并轮询到终态」取回 `strategy_id` / `version_hash` / `artifact_hash`；非 2xx、编译 `failed`、轮询超时、`succeeded` 却无 `artifact_hash` 一律返回错误（错误文案带步骤与 job_id）。
+  2. 载体策略：`Dsl` / `Builtin` / `External` **不调** `POST .../build`（调用必被服务端拒），`artifact_hash` 留空；`Wasm` / `So` 必须调 build 并把 `artifact_hash` 取回。未知载体在开工前拒绝。
+  3. `pkg/copilot` 增 `AssetRegistrar` 端口 + `WithAssetRegistrar`；**未注入即 fail-closed**（与 chain sink / codeChecker / buildExecutor 同形），顺序固定为「编译通过 → 登记 → promote 闸门」。
+  4. 坐标进链：`ai.generation_chain` **并列加列** `strategy_id` / `asset_carrier` / `version_hash` / `artifact_hash`（nullable），INSERT / SELECT / DO UPDATE 三处列表都覆盖；**不加 promote 结论列**。
+  5. 登记失败：job 终态仍用 ui 白名单内的 `sandbox_rejected`，原因写进链的 `build_error`（此时 `build_state=passed`、`blocked_reason` 必须为空 —— 登记失败不是闸门拦下）；`Register` 返回的部分坐标（已建定义/已传源码）照样落链。
+  6. 装配根：`cmd/ai` 新增 `strategyAssetRegistrar` 适配器（形状同 `chainSink`），`BuildCopilot` 多一个 `assets` 参数；`config/ai-service.yaml` 增 `strategy_asset` 块（`url` 空 = 未注入 = fail-closed）。
+- **④ 约束与非目标**：不改 strategy 任何端点语义与错误码；**不调 promote、不跑回测、不存 promote 结论**；不引 `contracts` 依赖、不动 `go.mod` pin；不新建 DSL 校验器（校验归资产服务）；不改生成提示词；不把 `source_sha256` 复用成坐标（见 ③-4）。
+  **实况订正（代裁，待主任追认）**：生成侧今天产出的仍是 **Go 源码**（`pkg/ai/prompts.go` 的提示词未改）。按 ⑩ 默认 `carrier="dsl"` 登记意味着「这份文本作为 dsl 载体的源码入库」，但 dsl 的期望形态是可解释配置文本；两者的口径差属生成侧改造（提示词/产出形态）的工作，不在本单偷偷改。本单的处理是：**登记字节 = 生成物原文**，`asset_carrier` 如实记 `dsl`，并在这里点名该差额。
+- **⑤ 验收**：
+  1. `pkg/ai/client` httptest 假资产服务：dsl 腿**恰两次**请求（建定义 → 传源码），且**零次** build；wasm 腿四步按序、轮询从 `running` 到 `succeeded` 后取回 `artifact_hash`；编译 `failed` → 错误含 `error_code`；`succeeded` 无 hash → 报错；非 2xx → 错误含状态码。
+  2. `pkg/copilot`：正常腿终态 `sandbox_rejected` + `blocked_reason=promote_gate` + 链上坐标等于假件返回值 + 登记收到的字节 = 编译时那份；登记失败腿 `blocked_reason` 为空、`build_error` 点名登记失败、部分坐标仍在；未注入腿失败且不写闸门原因。
+  3. `pkg/aistore`：DDL / INSERT / SELECT / DO UPDATE 四处理解一致（既有静态护栏自动变红再变绿的破坏腿）。
+  4. 破坏验证：① 不写 `version_hash` 列 → copilot 用例红；② dsl 也调 build → 客户端用例红；③ 吞掉 `Register` 错误 → 失败腿红；④ INSERT 漏列 → SQL 形状用例红。均逐字节还原。
+  5. 门禁：`gofmt -l` 空、`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全 EXIT=0。
+- **⑥ 边界**：只做「生成物 → 资产坐标」这一跳。promote 人工闸门、resolve/promote 的判定、以及回测执行仍归 `tellurion-strategy` / core；ui 不感知坐标（`api-schema` 的 copilot job 形状不变）。
+
+> **施工记录（2026-11-10，本单翻 ✅）**
+>
+> **落点**：
+> - `pkg/ai/client/strategy_asset_client.go`（新）：`StrategyAssetClient.Register` 按「建定义 → 传源码 →（仅产物载体）build + 轮询」取坐标；非 2xx / `failed` / 超时 / `succeeded` 无 `artifact_hash` 一律报错（错误带步骤、状态码、`job_id`、上游 `error_code`）。载体表：`dsl|builtin|external` 不产字节码（不调 build），`wasm|so` 必须调；未知载体在构造期拒绝。
+> - `pkg/copilot/copilot.go`：新增 `AssetRegistrar` / `AssetRef` 端口与 `WithAssetRegistrar`；顺序固定「编译通过 → 登记 → promote 闸门」；未注入 → fail-closed（`asset registrar not configured`）；登记失败 → `stop`（终态 `sandbox_rejected`、`build_state=passed`、`blocked_reason` 留空、`build_error` 点名「资产登记失败」），`Register` 返回的部分坐标照样落链。
+> - `pkg/aistore`：`ai.generation_chain` 并列四列 `strategy_id` / `asset_carrier` / `version_hash` / `artifact_hash`（可空；既有库靠四条幂等 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 补齐），`INSERT / SELECT / DO UPDATE` 三处同步；`cmd/ai/chain_sink.go` 映射、`cmd/ai/asset_registrar.go` 适配器、`cmd/ai/builders.go` 多一个 `assets` 参数、`main.go` 装配。
+> - `config/ai-service.yaml` 新增 `strategy_asset` 块（`url` 空 = 未注入 = fail-closed）；`deploy/compose.yaml` 注入 `STRATEGY_ASSET_URL`（默认 `http://host.docker.internal:8090`）。
+> - 文档：`docs/db-schema.md`（列 + 三条边界改写）、`docs/dataflow.md`（流向图 + 故障表 + 不变量 7）、`docs/api-schema.md`（闸门文案 + 登记失败一行）、`docs/adr/0002`（补充段）。
+>
+> **⑤ 验收（真实输出）**：
+> - `pkg/ai/client`：`TestStrategyAssetClient_DSLRegistersSourceWithoutBuild`（恰两步、零 build、`abi_version` 不发）、`_WasmBuildsAndPollsToArtifact`（四步 + 两次轮询、build 带 `version_hash`/`toolchain`）、`_BuildFailureCarriesErrorCode`、`_SucceededWithoutArtifactIsError`、`_PollTimeout`、`_Non2xxSurfacesStatusAndBody`、`_RejectsUnknownCarrier`、`_RequiresBaseURL`、`_Defaults`、`_BuildFailureWithoutDetailIsStillReadable` 全绿。
+> - `pkg/copilot`：`TestQT32B_RegistersCompiledSourceAndRecordsIssuedCoordinate`（登记字节 == 执行器读到的字节；链上坐标 == 假件返回值；第一行无坐标）、`TestQT32B_RegistrationFailureIsNotGateBlock`（`blocked_reason` 空、部分坐标在、错误带 503）、`TestQT32B_NilRegistrarFailsClosedAfterBuild`（LLM 已调、终态 fail-closed、不污染词表）；既有 QT-32-A 六条回归全绿，闸门用例新增坐标断言。
+> - 真库：`TEST_DATABASE_DSN=…/tellurion_agent_qt32b go test ./pkg/aistore -run TestGenerationChain -count=1` 通过（临时库 `DROP/CREATE` 后跑，新列 round-trip：`version_hash` 读回 64 位、`artifact_hash` 读回空；事后已 `DROP DATABASE`）。
+> - 门禁：`gofmt -l .` 空、`go build ./...` / `go vet ./...` EXIT=0、`go test ./... -count=1` 仅剩**两条前置既有红**（本文件 :187 已登记：`pkg/ai/client` 的 `/api/v1/listing-windows`、`/api/v1/trading-calendar` 未被 core openapi 登记，属 QT-17 ③ 待另立单，与本单无关；本单新增的 `/api/strategies*` 字面量经同一条护栏均判为已登记）。破坏验证四腿见下。
+>
+> **破坏验证（逐腿改坏 → 红 → 逐字节还原 → 绿）**：
+> 1. 链上不写 `VersionHash`（改成 `entry.VersionHash = ""`）→ `TestQT32B_RegistersCompiledSourceAndRecordsIssuedCoordinate` 红，报 `expected "…"` vs `actual ""`。
+> 2. 让 dsl 也走 build（`if !needsArtifact` 改 `if false && !needsArtifact`）→ `TestStrategyAssetClient_DSLRegistersSourceWithoutBuild` 红（请求序列与期望两步不一致，多出 `POST .../build`）。
+> 3. 吞掉 `Register` 错误（`if regErr != nil` 改 `if false && regErr != nil`）→ `TestQT32B_RegistrationFailureIsNotGateBlock` 红：`blocked_reason` 变成 `promote_gate`、`build_error` 里没有「资产登记失败」。
+> 4. `INSERT` 列清单漏 `version_hash` → `TestGenerationChain_InsertCoversEveryColumn` 红（列集与 DDL 不等）。
+> 四腿还原后 `gofmt/build/vet` 0、上述用例复绿，`git diff` 无残留（见本单提交）。
+>
+> **如实登记（两点，均未缩小目标）**：
+> 1. **生成物语言 vs 载体口径（代裁，待主任追认）**：提示词仍产出 Go 源码，按 ⑩ 以 `carrier="dsl"` 登记——登记字节 = 生成物原文。dsl 的期望形态是可解释配置文本，这一差额属**生成侧改造**（提示词/产出形态），本单不顺手改。
+> 2. **dsl 在当前资产服务里无法 promote**：`Promote` 要求 `validated` 产物，而 dsl `NeedsArtifact()=false` ⇒ 没有 artifact 可 validate。也就是说本单交出的是**身份坐标**，离「可执行」还差资产服务侧对 dsl 的放行口径（或改走 wasm）。这是策略服务的设计决定，不在本仓擅改；已在本单 ⑥ 与 ADR-0002 补充段点名。

@@ -25,13 +25,18 @@ ui ──(HTTP/SSE)──► tellurion-agent (ai-service :8086)
 > **QT-32-A（2026-10-25）改了 ② 这条路的终点**：copilot 到「沙箱编译」为止，**不再**把 AI 产物送去回测。
 > 判据是「有没有可核验的产物坐标」：产物要先登记进资产服务、由人 promote，才可能成为可执行资产
 > （闸门真相在 `tellurion-strategy:internal/asset/ddl.go` 的 `strategy_artifacts.status`）。
-> 本仓今天产不出那个坐标（`go build` 的临时可执行文件不是资产服务认可的载体），所以一律拦，
-> 并把「拦在哪一环、为什么」写进 `ai.generation_chain`。
 > 旧实现在这里做的事是：`plugin.Open` 打开一个非 plugin 产物必然失败 → 回落成硬编码字面量
 > `"generated-strategy"` → 拿它去 core 跑回测。core 从未注册过那个名字，所以这条路从来没通过，
 > 只是断点在远端、本仓既没说谎也没留痕。
+>
+> **QT-32-B（2026-11-10）补上了那个坐标**：编译通过后本仓调 `tellurion-strategy` 的
+> `POST /api/strategies` → `PUT /api/strategies/{id}/source`（→ `POST .../build` + 轮询，仅
+> wasm/so 等产物载体），拿回**服务端签发**的 `strategy_id` / `version_hash`（产物载体再加
+> `artifact_hash`），与生成链同一笔落库。载体默认 `carrier="dsl"`（第三轮裁决 ⑩），dsl 不产
+> 字节码 ⇒ 不调 build、`artifact_hash` 为空。**闸门没变**：登记 ≠ 放行，promote 仍是人的闸门，
+> 本仓不调 promote、不存结论、不跑回测。
 
-### 生成链（QT-32-A）
+### 生成链（QT-32-A / QT-32-B）
 
 一次 copilot 生成的每一段推进都写 `ai.generation_chain`，一行 = 一次编译尝试：
 
@@ -40,14 +45,16 @@ POST /api/copilot/generate
   → 链第 1 行（prompt + 回测区间，build_state=none）   ← 写不进去就到此为止，连 LLM 都不调
   → LLM 出码 → staticcheck 闸（拒 → 源码+指纹留下，停在这行）
   → 每次尝试一行：source + source_sha256 → 先写「要编」，再跑沙箱 go build → 覆盖成 failed / passed
-    （LLM 修码重试：换下一版之前先把这一 attempt 的 failed 与诊断落链，旧结论不被覆盖）
-  → 编译通过 → promote 闸门拦下：blocked_reason=promote_gate，job 终态 sandbox_rejected
+  → 编译通过 → 登记资产服务：strategy_id / asset_carrier / version_hash（+产物载体的 artifact_hash）
+       ↳ 登记失败 = fail-closed（终态 sandbox_rejected，blocked_reason 留空，build_error 点名）
+  → promote 闸门拦下：blocked_reason=promote_gate，job 终态 sandbox_rejected
 ```
 
-`source_sha256` 覆盖的是**同一行 `source`** 的字节，不是 `version_hash`（缺资产服务签发的 `strategy_id`）、
-也不是 `artifact_hash`（只覆盖编译产物）。链的最后一环 —— core 的 run 身份 —— 今天接不上，
-`BacktestResponse.ID` 已在客户端解出（`pkg/ai/client/backtest_client.go:285`），丢在
-`cmd/ai/http_runner.go:163`；把它送过 `contracts.BacktestRunner` 那一层是跨仓契约变更（`docs/TASKS.md` QT-32-A ⑦-2）。
+`source_sha256` 覆盖的是**同一行 `source`** 的字节，不是 `version_hash` 也不是 `artifact_hash`；
+后两者是资产服务签发的原值（QT-32-B），本仓只照抄、不自己算。链的最后一环 —— core 的 run 身份 ——
+今天仍接不上，`BacktestResponse.ID` 已在客户端解出（`pkg/ai/client/backtest_client.go:285`），
+丢在 `cmd/ai/http_runner.go:163`；把它送过 `contracts.BacktestRunner` 那一层是跨仓契约变更
+（`docs/TASKS.md` QT-32-A ⑦-2）。
 
 > **QT-17 S3-c-3 起**：本仓进程内没有引擎。pipeline 把 YAML 的表达式段映射成
 > core 内置 `expression_template` 的 `strategy_params`，一次 `POST /api/backtest`
@@ -87,7 +94,8 @@ POST /api/copilot/generate
 | SSE 断线 | ui 看不到进度 | 只停推、不取消探索；客户端重连拿快照 |
 | 双写不一致 | 切读后数据缺 | 双写期已结束；停写前已做一次全量回填 + 行级对拍（0 差异），此后旧表零增长 |
 | 工具执行超时 | 卡住 pipeline | 每工具独立超时 + 归类为失败 |
-| **AI 产物编译通过但没过 promote 闸门** | 链停在 `blocked_reason=promote_gate`，job 终态 `sandbox_rejected` | **不猜策略名、不本地兜底**：没有可核验的产物坐标就不进回测（QT-32-A）。资产服务那侧的 resolve/promote 才是判据来源 |
+| **AI 产物编译通过但没过 promote 闸门** | 链停在 `blocked_reason=promote_gate`，job 终态 `sandbox_rejected` | **不猜策略名、不本地兜底**：坐标由资产服务签发（QT-32-B）后仍不自动放行 —— promote 是人的闸门。资产服务那侧的 resolve/promote 才是判据来源 |
+| **资产服务不可达 / 登记被拒 / 编译作业 failed** | job 终态 `sandbox_rejected`；`build_state` 保留 `passed`（编译确实过了），`blocked_reason` 留空，`build_error` 点名「资产登记失败」+ 上游诊断 | **没有坐标就不算登记成功**：不静默降级成「先跑起来再说」，也不把登记失败伪造成闸门拦下 |
 | **留痕落点没装 / 写不进去** | job 终态 `sandbox_rejected`，错误点名 `chain sink not configured` 或 `ai.generation_chain` | LLM **一次都不调**：宁可这次不做，也不产出一份事后查不到的生成 |
 
 ## 4. 不变量（可被测试钉住的）
@@ -98,6 +106,7 @@ POST /api/copilot/generate
 4. 本仓生产代码不出现 `pkg/storage` 的 import——**白名单已清零（QT-17 ③，2026-10-25）**：仪器域上市窗口改走 core QT-67 的只读端点（`POST /api/v1/listing-windows`，凭证从入站请求转发），由 `internal/repoguard` AST 护栏钉住；**QT-17 S3-d 起全仓源码对 core 的 import 字面量归零**（`grep '"tellurion/'` 无命中），`replace` 已删除。
 5. **未过 promote 闸门的 AI 产物不进回测**（QT-32-A）：`pkg/copilot` 的生产源码里不出现 `plugin.Open` / `"generated-strategy"` / `RunBacktest(` 三种形状，由 `TestQT32A_NoFabricatedStrategyPathInProductionSource` 读源码钉住（守卫自身的牙齿靠破坏验证取证，见 `docs/TASKS.md` QT-32-A 施工记录）。
 6. **每一次生成都留下一条链**（QT-32-A）：留痕写不进去就中止，不产出无法复查的产物；`ai.generation_chain` 的 `INSERT / SELECT / DO UPDATE` 三处列清单由静态护栏与 DDL 逐列对拍（`pkg/aistore/generation_chain_sql_test.go`）。
+7. **链上的资产坐标只能来自资产服务**（QT-32-B）：`strategy_id` / `version_hash` / `artifact_hash` 由 `pkg/ai/client` 从 `POST /api/strategies` → `PUT .../source`（→ `POST .../build` + 轮询）取回，本仓不算；未注入登记端口则编译通过也中止（`TestQT32B_NilRegistrarFailsClosedAfterBuild`），登记失败不会被写成 `blocked_reason=promote_gate`（`TestQT32B_RegistrationFailureIsNotGateBlock`）。
 
 ## 5. 与契约文档的关系
 

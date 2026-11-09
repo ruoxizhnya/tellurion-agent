@@ -15,11 +15,13 @@ import (
 // 一行 = 一次编译尝试（主键 job_id + attempt）。重试让 LLM 交出另一份字节，
 // 那是另一个指纹、另一行；只留最后一版就把「中间试过什么」抹掉了。
 //
-// 三条口径是刻意的，别在改动时把它们抹平：
+// 四条口径是刻意的，别在改动时把它们抹平：
 //   - SourceSha256 **不是** version_hash，也不是 artifact_hash。前者需要资产服务
 //     签发的 strategy_id 才编得出来（六项输入见
 //     tellurion-contracts:engine/provenance.go:65），后者只覆盖编译产物字节
 //     （同文件 :39）。这里存的是**同一行 Source** 的 sha256。
+//   - StrategyID / VersionHash / ArtifactHash 是**资产服务签发的原值**
+//     （QT-32-B），本仓不自己算、只照抄。它们是身份不是结论。
 //   - 不存 promote 结论。闸门的真相在资产服务
 //     （tellurion-strategy:internal/asset/ddl.go 的 strategy_artifacts.status
 //     状态机），本仓再存一份就是两处真相，且一定会漂移。
@@ -62,6 +64,13 @@ type GenerationChain struct {
 	Source       string
 	SourceSha256 string
 
+	// 资产服务签发的坐标（QT-32-B）。不是本仓算的，也不是 promote 结论；
+	// dsl / builtin / external 载体没有 ArtifactHash（不产字节码）。
+	StrategyID   string
+	AssetCarrier string
+	VersionHash  string
+	ArtifactHash string
+
 	BuildState    string
 	BuildError    string
 	BlockedReason string
@@ -87,9 +96,10 @@ func (s *Store) UpsertGenerationChain(ctx context.Context, g *GenerationChain) e
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO ai.generation_chain
 			(job_id, attempt, prompt, universe, start_date, end_date,
-			 source, source_sha256, build_state, build_error,
+			 source, source_sha256, strategy_id, asset_carrier,
+			 version_hash, artifact_hash, build_state, build_error,
 			 blocked_reason, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
 		ON CONFLICT (job_id, attempt) DO UPDATE SET
 			prompt         = EXCLUDED.prompt,
 			universe       = EXCLUDED.universe,
@@ -97,6 +107,10 @@ func (s *Store) UpsertGenerationChain(ctx context.Context, g *GenerationChain) e
 			end_date       = EXCLUDED.end_date,
 			source         = EXCLUDED.source,
 			source_sha256  = EXCLUDED.source_sha256,
+			strategy_id    = EXCLUDED.strategy_id,
+			asset_carrier  = EXCLUDED.asset_carrier,
+			version_hash   = EXCLUDED.version_hash,
+			artifact_hash  = EXCLUDED.artifact_hash,
 			build_state    = EXCLUDED.build_state,
 			build_error    = EXCLUDED.build_error,
 			blocked_reason = EXCLUDED.blocked_reason,
@@ -104,6 +118,8 @@ func (s *Store) UpsertGenerationChain(ctx context.Context, g *GenerationChain) e
 	`, g.JobID, g.Attempt, g.Prompt, nullableString(g.Universe),
 		nullableString(g.StartDate), nullableString(g.EndDate),
 		nullableString(g.Source), nullableString(g.SourceSha256),
+		nullableString(g.StrategyID), nullableString(g.AssetCarrier),
+		nullableString(g.VersionHash), nullableString(g.ArtifactHash),
 		buildState, nullableString(g.BuildError), nullableString(g.BlockedReason),
 	)
 	if err != nil {
@@ -120,7 +136,8 @@ func (s *Store) UpsertGenerationChain(ctx context.Context, g *GenerationChain) e
 func (s *Store) ListGenerationChain(ctx context.Context, jobID string) ([]GenerationChain, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT job_id, attempt, prompt, universe, start_date, end_date,
-		       source, source_sha256, build_state, build_error,
+		       source, source_sha256, strategy_id, asset_carrier,
+		       version_hash, artifact_hash, build_state, build_error,
 		       blocked_reason, created_at, updated_at
 		  FROM ai.generation_chain
 		 WHERE job_id = $1
@@ -134,12 +151,15 @@ func (s *Store) ListGenerationChain(ctx context.Context, jobID string) ([]Genera
 	var out []GenerationChain
 	for rows.Next() {
 		var (
-			g                            GenerationChain
-			universe, startDate, endDate *string
-			source, sha, buildErr, block *string
+			g                                        GenerationChain
+			universe, startDate, endDate             *string
+			source, sha                              *string
+			strategyID, carrier, versionH, artifactH *string
+			buildErr, block                          *string
 		)
 		if err := rows.Scan(&g.JobID, &g.Attempt, &g.Prompt, &universe, &startDate, &endDate,
-			&source, &sha, &g.BuildState, &buildErr, &block, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&source, &sha, &strategyID, &carrier, &versionH, &artifactH,
+			&g.BuildState, &buildErr, &block, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("aistore: scan generation chain %s: %w", jobID, err)
 		}
 		g.Universe = derefString(universe)
@@ -147,6 +167,10 @@ func (s *Store) ListGenerationChain(ctx context.Context, jobID string) ([]Genera
 		g.EndDate = derefString(endDate)
 		g.Source = derefString(source)
 		g.SourceSha256 = derefString(sha)
+		g.StrategyID = derefString(strategyID)
+		g.AssetCarrier = derefString(carrier)
+		g.VersionHash = derefString(versionH)
+		g.ArtifactHash = derefString(artifactH)
 		g.BuildError = derefString(buildErr)
 		g.BlockedReason = derefString(block)
 		out = append(out, g)

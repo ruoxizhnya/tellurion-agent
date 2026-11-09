@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: QT-32-A —— 新增本仓自持表 ai.generation_chain（AI 生成链留痕）+ drift 护栏的 agentOwnedTables 显式豁免；此前 QT-17 ⑤ 基因池读写切 ai.*
+last-verified: 2026-11-10
+verified-by: QT-32-B —— `ai.generation_chain` 并列加资产坐标四列（`strategy_id` / `asset_carrier` / `version_hash` / `artifact_hash`，幂等 ALTER 兼容存量库）；此前 QT-32-A 新增本仓自持表（AI 生成链留痕）+ drift 护栏的 agentOwnedTables 显式豁免；此前 QT-17 ⑤ 基因池读写切 ai.*
 ---
 
 # DB Schema — tellurion-agent
@@ -25,11 +25,11 @@ verified-by: QT-32-A —— 新增本仓自持表 ai.generation_chain（AI 生�
 | `ai.research_profile` | 研究画像 | **唯一 owner**：core `research.profile` DDL 与只读实现已于 2026-11-10 退役；本仓只读不写，**全工作区不存在 `research.*` 的写入方**（2026-10-24 实测：core 侧无研究域 handler，真库 0 行） |
 | `ai.research_conclusion` | 研究结论 | **唯一 owner**：core `research.conclusion` DDL 已于 2026-11-10 退役；本仓只读不写，写方不存在 |
 | `ai.research_question` | 研究问题 | **唯一 owner**：core `research.question` DDL 已于 2026-11-10 退役；本仓只读不写，写方不存在 |
-| `ai.generation_chain` | **AI 生成链**：一次生成的意图、源码、指纹、编译结论、链断在哪一环 | **QT-32-A 新增（2026-10-25），本仓自持、core 无对应表**。一行 = 一次编译尝试，主键 `(job_id, attempt)`；列：`prompt`（人给的自然语言意图，NOT NULL）/ `universe`·`start_date`·`end_date`（人要求的回测区间，闸门拦下也照样留）/ `source`（这一 attempt 的源码）/ `source_sha256`（**同一行 source** 的 sha256）/ `build_state`（`none｜failed｜passed`，DDL CHECK 闭合词表）/ `build_error` / `blocked_reason`（`promote_gate` 或空）/ `created_at`·`updated_at` |
+| `ai.generation_chain` | **AI 生成链**：一次生成的意图、源码、指纹、编译结论、资产坐标、链断在哪一环 | **QT-32-A 新增（2026-10-25）、QT-32-B 加坐标列（2026-11-10），本仓自持、core 无对应表**。一行 = 一次编译尝试，主键 `(job_id, attempt)`；列：`prompt`（人给的自然语言意图，NOT NULL）/ `universe`·`start_date`·`end_date`（人要求的回测区间，闸门拦下也照样留）/ `source`（这一 attempt 的源码）/ `source_sha256`（**同一行 source** 的 sha256）/ `strategy_id`·`asset_carrier`·`version_hash`·`artifact_hash`（**资产服务签发的原值**，QT-32-B；dsl 载体的 `artifact_hash` 为空）/ `build_state`（`none｜failed｜passed`，DDL CHECK 闭合词表）/ `build_error` / `blocked_reason`（`promote_gate` 或空）/ `created_at`·`updated_at` |
 
 > **`ai.generation_chain` 的三条边界**（决策全文见 [`docs/adr/0002`](adr/0002-AI-生成链留痕归本仓-闸门结论不归本仓.md)）：
-> 1. `source_sha256` **不是** `version_hash` 也不是 `artifact_hash`。前者按 `tellurion-contracts:engine/provenance.go:65` 需要资产服务签发的 `strategy_id`（本仓拿不到），后者按 `:39` 只覆盖编译产物字节。别拿它当执行真相。
-> 2. **不存 promote 结论**。闸门真相在 `tellurion-strategy:internal/asset/ddl.go` 的 `strategy_artifacts.status` 状态机（`built→validated→promoted/rejected/deprecated`）；本仓再存一份就是两处真相。
+> 1. `source_sha256` **不是** `version_hash` 也不是 `artifact_hash`。前者按 `tellurion-contracts:engine/provenance.go:65` 需要资产服务签发的 `strategy_id`，后者按 `:39` 只覆盖编译产物字节。**QT-32-B 起坐标列存的是资产服务返回的原值**（`pkg/ai/client` 取回、本仓不计算），但 `source_sha256` 仍只是同字节的指纹，别拿它当执行真相。
+> 2. **不存 promote 结论**。闸门真相在 `tellurion-strategy:internal/asset/ddl.go` 的 `strategy_artifacts.status` 状态机（`built→validated→promoted/rejected/deprecated`）；本仓再存一份就是两处真相。坐标是**身份**，不是结论。
 > 3. 它是 QT-17「逐表搬、不臆造」的**显式例外**，登记在 `pkg/aistore/schema_core_drift_test.go` 的 `agentOwnedTables`；那张豁免名单由 `TestSchema_AgentOwnedTablesAreDeclared` 四条腿钉住（没登记 / DDL 里没有 / 与 core 退役对照同时出现 / 理由为空 —— 任一都红）。
 
 > 迁入纪律（QT-17）：**以 core 现有 DDL 为准逐表搬**，不按类型名臆造表名。**2026-11-10 起**（`SVC-CORE-AI-RETIRE`）：七张 core 遗留 DDL 已删除，`TestSchema_ColumnsMatchCore` 的逐列对拍随之退场，改为 `TestSchema_RetiredCoreTablesAreGone` —— core 里七表零 `CREATE TABLE` 才绿。`ai.*` 的列形状从此以本仓 `Statements()` 为唯一真相。
