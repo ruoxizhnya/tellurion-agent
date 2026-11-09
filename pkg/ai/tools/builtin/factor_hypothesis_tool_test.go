@@ -152,7 +152,7 @@ func TestBuiltinFactorHypotheses_AreComplete(t *testing.T) {
 		domain.FactorOCFToNetProfit, domain.FactorROEDuPontLeverage,
 		domain.FactorInventoryTurnoverDelta,
 	} {
-		_, ok := domain.BuiltinHypothesisFor(ft)
+		_, ok := builtinHypothesisFor(ft)
 		assert.True(t, ok, "内置因子 %s 缺少假设来源", ft)
 	}
 }

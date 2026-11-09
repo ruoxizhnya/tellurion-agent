@@ -153,7 +153,7 @@ func (t *FactorHypothesisTool) Execute(ctx context.Context, args map[string]inte
 	}
 
 	// 库里没记过，回退到内置表并如实标注。
-	if b, ok := domain.BuiltinHypothesisFor(ft); ok {
+	if b, ok := builtinHypothesisFor(ft); ok {
 		return &factorHypothesisResult{
 			FactorName:  string(b.FactorName),
 			SourceKind:  b.SourceKind,
@@ -239,6 +239,24 @@ func (t *FactorHypothesisTool) listAll(ctx context.Context) (interface{}, error)
 }
 
 func isBuiltinFactor(ft domain.FactorType) bool {
-	_, ok := domain.BuiltinHypothesisFor(ft)
+	_, ok := builtinHypothesisFor(ft)
 	return ok
+}
+
+// builtinHypothesisFor 查内置因子的假设来源。
+//
+// CT-06-A（2026-11-09）：本函数原在 `tellurion-contracts/domain`，实测只有
+// 本仓一个使用方；按契约 C4 准入规则（≥2 使用方才留在公共包）迁回本仓。
+// 内置表 `domain.BuiltinFactorHypotheses` 仍有 core + 本仓两个使用方，留在
+// contracts 不迁。
+//
+// 找不到时返回 ok=false —— 调用方应当据此如实上报"来源未记录"，
+// 而不是编一个。
+func builtinHypothesisFor(ft domain.FactorType) (domain.FactorHypothesis, bool) {
+	for _, h := range domain.BuiltinFactorHypotheses {
+		if h.FactorName == ft {
+			return h, true
+		}
+	}
+	return domain.FactorHypothesis{}, false
 }
