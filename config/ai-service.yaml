@@ -28,6 +28,15 @@ auth:
 rate_limit:
   per_minute: 100
 
+# 数据库。口令**只能**从 env 注入（DATABASE_PASSWORD），本文件永远留空：
+# 它是入库的，写空串不是「随便填」，而是让 kitdb.BuildDSN 在启动期就
+# 拒绝空口令（fail-closed），而不是拖到连接时才报认证失败。
+#
+# 本机直跑（宿主 PG，scram-sha-256）的最小注入：
+#   DATABASE_PASSWORD=<本机 postgres 用户的口令>
+# 需要覆盖整个连接串时才用 DATABASE_URL（逐字段拼装的替代品）；
+# 两者都给时 url 优先（kitdb.BuildDSN 的约定）。容器里由 compose 的
+# environment 注入，见 deploy/compose.yaml。
 database:
   url: ""
   host: "localhost"

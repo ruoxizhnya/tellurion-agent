@@ -47,10 +47,15 @@ CI（`.github/workflows/ci.yml`）单仓 checkout（不拉 core、不改 replace
 
 ```bash
 # 本机直跑（需可达的 PG；配置默认读 config/ai-service.yaml）
+# 口令只从 env 注入（config/ai-service.yaml 的 database.password 恒为空，
+# 空口令会在启动期被 kitdb.BuildDSN 拒绝，而不是连库时才报认证失败）：
 CONFIG_PATH=config/ai-service.yaml \
-DATABASE_HOST=127.0.0.1 DATABASE_PASSWORD=postgres \
+DATABASE_HOST=127.0.0.1 DATABASE_PASSWORD='<本机 postgres 用户的口令>' \
 AUTH_INSECURE=true SERVER_HOST=127.0.0.1 \
   go run ./cmd/ai
+
+# 若本机 PG 用 scram-sha-256（宿主默认即是），上面的 DATABASE_PASSWORD 必须
+# 是真实口令；不想用无鉴权模式就改注入 JWT_SECRET=<至少 32 字节随机值>。
 
 # 或容器（单仓 compose；自带 PG / Redis，ai-service 发布 127.0.0.1:8086）
 docker compose -f deploy/compose.yaml up --build

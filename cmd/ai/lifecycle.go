@@ -60,6 +60,12 @@ func loadConfig(defaultPath string) (*viper.Viper, error) {
 	_ = v.BindEnv("auth.jwt_secret", "JWT_SECRET", "AUTH_JWT_SECRET")
 	_ = v.BindEnv("auth.allow_insecure", "AUTH_INSECURE")
 	_ = v.BindEnv("auth.insecure_exposure", "AUTH_INSECURE_EXPOSURE")
+	// 数据库口令同样只从 env 注入：YAML 里是空串（入库文件不放真值）。
+	// 这里显式 BindEnv 而不是只靠 AutomaticEnv —— 嵌套键的自动映射属于
+	// 实现细节，把 env 名钉死后口令来源只有一处，可被部署清单核对。
+	// 空口令由 kitdb.BuildDSN 在启动期拒绝（fail-closed），不会拖到第一次
+	// 查询才报 "password authentication failed"（那读起来像密码写错）。
+	_ = v.BindEnv("database.password", "DATABASE_PASSWORD")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, err
