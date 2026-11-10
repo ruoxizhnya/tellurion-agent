@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +14,6 @@ import (
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/loop"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/validation"
@@ -329,85 +327,13 @@ func TestExploreHandler_RejectsMissingDescription(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// P2-4：偏差维的池子来源必须跟引擎的实际口径一致。
-//
-// 写死 PoolSourceCurrent 会让每一条裁决都带一条 blocking 质疑 —— 那在
-// P2-4 修好之前是对的（看得见的债才是债）。但修好之后还这么报就是假警报，
-// 而假警报比没警报更糟：它会训练人忽略质疑清单。
-
-func TestExploreBias_NoListingCalendarKeepsCurrentPool(t *testing.T) {
+// P2-4：上市窗口今天没有任何服务提供（core QT-67 已随 SVC-CORE-DATA-RETIRE
+// 退役，data 也还没有 point-in-time 端点），所以池子来源只能照实报 current。
+// 重开条件见 tellurion-data 仓 TASKS.md 的 ⏸ 条目 —— 届时再加 point_in_time 腿。
+func TestExploreBias_KeepsCurrentPoolWithoutListingSource(t *testing.T) {
 	h := &ExploreHandler{}
-	in := h.biasInput(context.Background(), "")
-	if in.PoolSource != validation.PoolSourceCurrent {
-		t.Fatalf("没有上市日历时必须报 PoolSourceCurrent，got %q", in.PoolSource)
-	}
-	// core 返回空日历（stocks 表为空）同样算没修好。
-	h.listing = func(context.Context, string) ([]client.ListingWindow, error) { return nil, nil }
-	if got := h.biasInput(context.Background(), "").PoolSource; got != validation.PoolSourceCurrent {
-		t.Fatalf("空日历时仍须报 current，got %q", got)
-	}
-}
-
-// 读不到不能当成「没有数据」：fetch 失败保持最保守口径，不能凭一次失败
-// 就宣称池子是按日在市的。
-func TestExploreBias_ListingFetchErrorKeepsCurrentPool(t *testing.T) {
-	h := &ExploreHandler{
-		listing: func(context.Context, string) ([]client.ListingWindow, error) {
-			return nil, errors.New("core unavailable")
-		},
-	}
-	if got := h.biasInput(context.Background(), "tok").PoolSource; got != validation.PoolSourceCurrent {
-		t.Fatalf("上市窗口读不到时必须报 current，got %q", got)
-	}
-}
-
-func TestExploreBias_ListingCalendarSwitchesToPointInTime(t *testing.T) {
-	listDate := "1999-11-10"
-	delistDate := time.Now().AddDate(-1, 0, 0).Format("2006-01-02")
-	h := &ExploreHandler{
-		listing: func(context.Context, string) ([]client.ListingWindow, error) {
-			return []client.ListingWindow{
-				{Symbol: "600519.SH", ListDate: &listDate},
-				{Symbol: "600001.SH", ListDate: &listDate, DelistDate: &delistDate},
-			}, nil
-		},
-	}
-
-	in := h.biasInput(context.Background(), "tok")
-	if in.PoolSource != validation.PoolSourcePointInTime {
-		t.Fatalf("core 真的返回了上市窗口，就该报 point_in_time，got %q", in.PoolSource)
-	}
-	if in.PoolSize != 2 {
-		t.Errorf("PoolSize = %d, want 2", in.PoolSize)
-	}
-	if in.DelistedInPool != 1 {
-		t.Errorf("DelistedInPool = %d, want 1", in.DelistedInPool)
-	}
-}
-
-// QT-17 ③：凭证从入站请求转发给 core 的 QT-67 只读动作，本进程不自己签发。
-func TestExploreHandler_ForwardsBearerTokenToListing(t *testing.T) {
-	tokens := make(chan string, 1)
-	h := NewExploreHandler(&fakeExploreRunner{}, nil)
-	h.listing = func(_ context.Context, token string) ([]client.ListingWindow, error) {
-		tokens <- token
-		return nil, nil
-	}
-	r := newExploreRouter(h)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/explore/runs",
-		strings.NewReader(`{"description":"做一个动量策略","max_tries":1}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer forwarded-jwt")
-	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-
-	select {
-	case got := <-tokens:
-		assert.Equal(t, "forwarded-jwt", got, "必须原样转发入站 JWT")
-	case <-time.After(2 * time.Second):
-		t.Fatal("listing 端口没有被调用")
+	if got := h.biasInput().PoolSource; got != validation.PoolSourceCurrent {
+		t.Fatalf("没有上市窗口服务时必须报 PoolSourceCurrent，got %q", got)
 	}
 }
 

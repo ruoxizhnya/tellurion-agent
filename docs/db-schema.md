@@ -8,7 +8,7 @@ verified-by: QT-32-B —— `ai.generation_chain` 并列加资产坐标四列（
 
 > **所有权声明**：本仓**拥有 `ai` schema 的 DDL 与迁移**（目标态，QT-17）。
 
-**现状（QT-17 ⑤，2026-10-25；④ 2026-10-24；③ 2026-10-25）**：`ai` schema 七张表的 DDL 与迁移入口在本仓 [`pkg/aistore`](../pkg/aistore)（逐列对照 core 定义搬入，`parent_id` 自引用与外键改指 `ai.*`）；自有 `Store`（`kit/db` 连接池 + 启动迁移 + 内置种子）已装配进 `cmd/ai`。**写路径已停写 legacy**（QT-17 ④）：`cmd/ai/main.go` 直接把 `*aistore.Store` 注入 pipeline / explore 的 sink，双写适配器 `cmd/ai/experiment_dualwrite.go` 已整体删除；`public.experiments` 冻结在 30 行（2026-10-24 一次性回填归档进 `ai.experiments`，行级 `EXCEPT` 双向对拍 0 差异）。**读路径已切 `ai.*`**（research 域三表与 `factor_hypothesis`），仪器域日历/上市窗口走 core 的 QT-67 只读端点（QT-17 ③）。core 侧这七张表的遗留 DDL 已于 **2026-11-10（`SVC-CORE-AI-RETIRE`）删除**（原在 `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`）——存量环境的旧表只保留不删，core 侧导出符号随 DDL 一并退役；`ai.*` 的列形状以本仓 `pkg/aistore` 的 `Statements()` 为运行时真值。**基因池读写已切 `ai.*`**（QT-17 ⑤，2026-10-25）：`pkg/ai/gene_pool` 的表引用全部显式限定 `ai.factor_genes` / `ai.strategy_genes`，连接池改为 `aistore.Store.Pool()`（自持句柄），不再借 core 的 `store.DB()` 按 `search_path` 落到 `public.*`。
+**现状（QT-17 ⑤，2026-10-25；④ 2026-10-24；③ 2026-10-25）**：`ai` schema 七张表的 DDL 与迁移入口在本仓 [`pkg/aistore`](../pkg/aistore)（逐列对照 core 定义搬入，`parent_id` 自引用与外键改指 `ai.*`）；自有 `Store`（`kit/db` 连接池 + 启动迁移 + 内置种子）已装配进 `cmd/ai`。**写路径已停写 legacy**（QT-17 ④）：`cmd/ai/main.go` 直接把 `*aistore.Store` 注入 pipeline / explore 的 sink，双写适配器 `cmd/ai/experiment_dualwrite.go` 已整体删除；`public.experiments` 冻结在 30 行（2026-10-24 一次性回填归档进 `ai.experiments`，行级 `EXCEPT` 双向对拍 0 差异）。**读路径已切 `ai.*`**（research 域三表与 `factor_hypothesis`），仪器域日历走 tellurion-data 的 `GET /api/v1/trading/calendar`，上市窗口无服务提供（QT-17 ③；core QT-67 已退役）。core 侧这七张表的遗留 DDL 已于 **2026-11-10（`SVC-CORE-AI-RETIRE`）删除**（原在 `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`）——存量环境的旧表只保留不删，core 侧导出符号随 DDL 一并退役；`ai.*` 的列形状以本仓 `pkg/aistore` 的 `Statements()` 为运行时真值。**基因池读写已切 `ai.*`**（QT-17 ⑤，2026-10-25）：`pkg/ai/gene_pool` 的表引用全部显式限定 `ai.factor_genes` / `ai.strategy_genes`，连接池改为 `aistore.Store.Pool()`（自持句柄），不再借 core 的 `store.DB()` 按 `search_path` 落到 `public.*`。
 > 上级依据：`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §1 —— **DDL 只有一个 owner**，同一个 PG 实例、每服务一个 schema，将来拆库是"按 schema 搬走"而不是重写。
 > 本文件是本仓表结构的**变更权威**：要改表结构，先改本文件（结构级变更还要立 ADR）再改代码；代码里 [`pkg/aistore/schema.go`](../pkg/aistore/schema.go) 的 `Statements()` 是运行时真值，两者不一致即缺陷。
 
@@ -40,10 +40,10 @@ verified-by: QT-32-B —— `ai.generation_chain` 并列加资产坐标四列（
 |---|---|
 | 行情 / 因子值 | `tellurion-data` |
 | 回测结果 | core / `run` |
-| 交易日历 / 上市窗口（仪器域） | core —— 经**只读 port** 取，不直连表 |
+| 交易日历 / 上市窗口（仪器域） | tellurion-data（日历，`GET /api/v1/trading/calendar`）/ 无服务（上市窗口，重开见 data `TASKS.md` ⏸）—— 经**只读 HTTP** 取，不直连表 |
 | 规则快照 | `tellurion-risk` |
 
-**红线**：本仓生产代码不 import core 的 `pkg/storage`。2026-10-25（QT-17 ③）起过渡期白名单**已清零**：`cmd/ai/main.go`（改走 `kit/db.BuildDSN`）、`cmd/ai/experiment_dualwrite.go`（随停写删除）、`cmd/ai/handlers_explore.go`（仪器域 `ListingWindow` 改走 core QT-67 只读端点）三条全部收回。`storageWhitelist` 现在是空登记簿，由 AST 护栏钉住（任何新 import 当场红；条目失效同样红）。
+**红线**：本仓生产代码不 import core 的 `pkg/storage`。2026-10-25（QT-17 ③）起过渡期白名单**已清零**：`cmd/ai/main.go`（改走 `kit/db.BuildDSN`）、`cmd/ai/experiment_dualwrite.go`（随停写删除）、`cmd/ai/handlers_explore.go`（仪器域 `ListingWindow` 改走只读端口；core QT-67 已于 2026-11-11 退役，上市窗口无服务提供）三条全部收回。`storageWhitelist` 现在是空登记簿，由 AST 护栏钉住（任何新 import 当场红；条目失效同样红）。
 
 ## 3. 红线
 
@@ -72,7 +72,7 @@ verified-by: QT-32-B —— `ai.generation_chain` 并列加资产坐标四列（
 2. **`research.*` 的「停写」是无操作，且表已退役**：全工作区不存在 `research.profile/conclusion/question` 的生产写入方；core 的只读实现 `pkg/storage/research.go` 与三表 DDL 已于 2026-11-10 随 `SVC-CORE-AI-RETIRE` 删除，真库 0 行（历史数据未删，留给运维归档）。此前本文与 `docs/TASKS.md` 写的「写方在 core / core 侧停写是它的待办」**与代码事实不符**，已在本版订正。因此这三表不存在「停写」动作，只存在「将来接写时直写 `ai.*`」的约束。
 3. **`ai.research_*` 目前也没有写入方**：本仓只有 `aistore.GetResearchProfile`（读）；`research.profile` 工具的降级回退是 vault 镜像，不是写库。将来接写时直接写 `ai.*`。
 4. **core 侧 deprecated 标记与删除期限**：已于 2026-11-10 随 `SVC-CORE-AI-RETIRE` 一次性删除（比建议期限 2027-01-31 提前）；交接件见 `docs/TASKS.md` QT-17 的「core 侧交接件」小节（历史记录保留）。
-5. **`grep -r "pkg/storage"` 的现状**：**生产代码已 0 处**（QT-17 ③，2026-10-25：仪器域上市窗口改走 core QT-67 只读端点）；剩余命中只在 `_test.go`（如 `pkg/ai/validation/live_backtest_integration_test.go` 查仪器域）、文档与护栏注释里。整体归零依赖 S3 删 `replace`（QT-50），见 `docs/TASKS.md` QT-17 的 S3 前置状态。
+5. **`grep -r "pkg/storage"` 的现状**：**生产代码已 0 处**（QT-17 ③，2026-10-25：仪器域上市窗口改走只读端口；core QT-67 已于 2026-11-11 退役）；剩余命中只在 `_test.go`（如 `pkg/ai/validation/live_backtest_integration_test.go` 查仪器域）、文档与护栏注释里。整体归零依赖 S3 删 `replace`（QT-50），见 `docs/TASKS.md` QT-17 的 S3 前置状态。
 6. **`ai.generation_chain` 里 `artifact_hash` / `version_hash` 一个都没有（QT-32-A 有意留空，不是漏做）**：本仓 `go build` 的临时可执行文件不是资产服务认可的载体，产不出 `artifact_hash`；`version_hash` 的六项输入含资产服务签发的 `strategy_id`，本仓自算只会造一个没人认的地址。等「AI 生成物的载体」裁下来（wasm + host ABI / so / 维持 ADR-024 的「只审阅不执行」）再立单接 `PUT /api/strategies/{id}/source` + `POST .../build`。**不留空列**：留了就是给将来的假 hash 预留位置。
 7. **链的第五环（core 的 run 身份）今天接不上**：`BacktestResponse.ID` 其实已经解到 `BacktestOutcome.JobID`（`pkg/ai/client/backtest_client.go:285`），丢在适配层 `cmd/ai/http_runner.go:163`；但 `contracts.BacktestRunner` 的签名不带它（`pkg/ai/pipeline/backtest_runner_alias_test.go` 还钉着那是个类型别名）→ 要穿过这一层是跨仓契约变更，另单。落点已登记在 `docs/TASKS.md` QT-32-A ⑦-2。
 8. **真库腿本机未跑**：`pkg/aistore/generation_chain_integration_test.go` 的**三条** opt-in（同 `(job_id, attempt)` 写两次 = 一行且是最后状态、再写第三个 attempt = 两行且按序且指纹不同 / DDL `CHECK` 拒未登记状态 / 未知 job 读回空列表不是 error）都要 `TEST_DATABASE_DSN` 才跑；本机无 PG 监听、本轮未起 PG 容器（Docker 已达，2026-10-26 订正）→ 只证到显式 skip，不装成通过。第四条 `RejectsEmptyJobID` 刻意**不连库**（校验在 `Exec` 之前）。不需要库、CI 真在跑的是静态腿：`generation_chain_sql_test.go` 四条（`INSERT`/`SELECT`/`DO UPDATE SET` 列集与 DDL 逐列对拍 + 冲突键 + 词表↔`CHECK`）与 `cmd/ai/chain_sink_test.go` 五条（两套词表映射闭合、未登记值报错不传库）。

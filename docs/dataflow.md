@@ -103,7 +103,7 @@ POST /api/copilot/generate
 1. `ai.*` 与 core 旧表在停写切换时行级一致（回填归档 + `EXCEPT` 双向 0 差异，见 ODR-001）；停写后 `public.experiments` 行数与序列不再前进。**2026-11-10 起** core DDL 已退役：存量环境该表仍在但冻结，新环境不存在（`experiment_stopwrite_integration_test.go` 用 `to_regclass` 判在不在，两种环境都验）。
 2. 同一实验配置 → 同一结果（引擎确定性 + 三 hash 留痕）。
 3. 断线不影响 run 的生命周期。
-4. 本仓生产代码不出现 `pkg/storage` 的 import——**白名单已清零（QT-17 ③，2026-10-25）**：仪器域上市窗口改走 core QT-67 的只读端点（`POST /api/v1/listing-windows`，凭证从入站请求转发），由 `internal/repoguard` AST 护栏钉住；**QT-17 S3-d 起全仓源码对 core 的 import 字面量归零**（`grep '"tellurion/'` 无命中），`replace` 已删除。
+4. 本仓生产代码不出现 `pkg/storage` 的 import——**白名单已清零（QT-17 ③，2026-10-25）**：仪器域不再 import core，交易日历改走 tellurion-data 的 `GET /api/v1/trading/calendar`（凭证从入站请求转发），上市窗口无服务提供（core QT-67 已随 `SVC-CORE-DATA-RETIRE` 退役），由 `internal/repoguard` AST 护栏钉住；**QT-17 S3-d 起全仓源码对 core 的 import 字面量归零**（`grep '"tellurion/'` 无命中），`replace` 已删除。
 5. **未过 promote 闸门的 AI 产物不进回测**（QT-32-A）：`pkg/copilot` 的生产源码里不出现 `plugin.Open` / `"generated-strategy"` / `RunBacktest(` 三种形状，由 `TestQT32A_NoFabricatedStrategyPathInProductionSource` 读源码钉住（守卫自身的牙齿靠破坏验证取证，见 `docs/TASKS.md` QT-32-A 施工记录）。
 6. **每一次生成都留下一条链**（QT-32-A）：留痕写不进去就中止，不产出无法复查的产物；`ai.generation_chain` 的 `INSERT / SELECT / DO UPDATE` 三处列清单由静态护栏与 DDL 逐列对拍（`pkg/aistore/generation_chain_sql_test.go`）。
 7. **链上的资产坐标只能来自资产服务**（QT-32-B）：`strategy_id` / `version_hash` / `artifact_hash` 由 `pkg/ai/client` 从 `POST /api/strategies` → `PUT .../source`（→ `POST .../build` + 轮询）取回，本仓不算；未注入登记端口则编译通过也中止（`TestQT32B_NilRegistrarFailsClosedAfterBuild`），登记失败不会被写成 `blocked_reason=promote_gate`（`TestQT32B_RegistrationFailureIsNotGateBlock`）。

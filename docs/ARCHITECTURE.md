@@ -24,7 +24,7 @@ HTTP 面（:8086）
 执行（HTTP 粗粒度，QT-17 S3-c-3 起）
   core analysis-service :8085
     POST /api/backtest · POST /api/walkforward · POST /api/expression/validate
-    GET  /api/expression/catalog · POST /api/v1/listing-windows · POST /api/risk/detect_regime
+    GET  /api/expression/catalog · POST /api/risk/detect_regime
         ↓
 数据
   ai.*（自持，QT-17）· run（结果）· market（数据）
@@ -109,7 +109,7 @@ tellurion-agent
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| QT-17 | `ai.*` 自持 + 双写对拍 + 停写 | ✅ **完成（2026-10-25，①~⑤ + ④ 停写复核；本仓台账 `docs/TASKS.md:192`）**：① DDL + 迁移机制已落 `pkg/aistore`（2026-10-23）；② 自有 store / 双写 / 切读已落（2026-10-23）；**④ 停写已落（2026-10-24，ODR-001）**：写路径只剩 `ai.experiments`，旧表冻结；~~③ 仪器域只读 port 等 D24 第 7 类动作~~ → **③ 已落（2026-10-25）**：D24 第 7 类由 core `QT-67` 提供两条只读端点，本仓 `pkg/ai/client/reference_data_client.go` 消费并与 openapi 逐键对拍 |
+| QT-17 | `ai.*` 自持 + 双写对拍 + 停写 | ✅ **完成（2026-10-25，①~⑤ + ④ 停写复核；本仓台账 `docs/TASKS.md:192`）**：① DDL + 迁移机制已落 `pkg/aistore`（2026-10-23）；② 自有 store / 双写 / 切读已落（2026-10-23）；**④ 停写已落（2026-10-24，ODR-001）**：写路径只剩 `ai.experiments`，旧表冻结；~~③ 仪器域只读 port 等 D24 第 7 类动作~~ → **③ 已落（2026-10-25）**；**2026-11-11 订正**：core `QT-67` 两条端点已随 `SVC-CORE-DATA-RETIRE` 退役，交易日历改指 tellurion-data `GET /api/v1/trading/calendar`，上市窗口无服务提供（见 data 仓 `TASKS.md` ⏸） |
 | S3 | 删 `replace ../tellurion`，改 HTTP | ✅ 2026-10-25：S3-a/b/c-1~4/d 全部落；`go.mod` 无 core require / replace，CI 单仓 checkout，`grep '"tellurion/'` 零命中 |
 | DBT-18 | 候选生成归 agent + 确定性 MCTS 提议器 | ✅ 2026-11-07：归属 (a) 已落（§2.1 + ADR-0003）；MCTS / 落库 / seed 留痕已落；`-race` 腿 2026-11-10 经 Docker + CGO 实跑通过（归档 `docs/archive/tasks-archive-2026-11.md#DBT-18`） |
 | — | SSE 已上线（OPS-01-A ✅ 2026-10-15） | ✅ |

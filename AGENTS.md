@@ -29,7 +29,7 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 
 - 实验循环 / 基因池 / 验证 / 工具编排 / Copilot
 - `ai.*` schema 的 DDL 与迁移（QT-17）
-- 通过 core 的**只读 port** 取仪器域数据（交易日历 / 上市窗口 —— **D24 第 7 类已落，不再是待办**：core `QT-67` 的 `GET /api/v1/trading-calendar` 与 `POST /api/v1/listing-windows`，本仓 `pkg/ai/client/reference_data_client.go` 于 2026-10-25 消费；护栏 `internal/repoguard/storage_import_test.go` 的仪器域白名单已清零）
+- 通过**只读 HTTP** 取仪器域数据：交易日历走 tellurion-data 的 `GET /api/v1/trading/calendar`（`pkg/ai/client/reference_data_client.go`，契约见 data 仓 `docs/api-schema.md`）；上市窗口**今天没有任何服务提供**（core QT-67 已随 `SVC-CORE-DATA-RETIRE` 退役），重开条件见 tellurion-data 仓 `TASKS.md` 的 ⏸ 条目；护栏 `internal/repoguard/storage_import_test.go` 的仪器域白名单仍为零
 
 **禁止**
 

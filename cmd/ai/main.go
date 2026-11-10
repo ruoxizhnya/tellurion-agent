@@ -139,9 +139,7 @@ func main() {
 		expSink = aiStore
 	}
 	registerPipelineRoutes(router, backtestRunner, expSink)
-	// QT-17 ③：上市窗口改走 core 的 QT-67 只读端点（D24 第 7 类），
-	// 不再 import core 的 pkg/storage。
-	registerExploreRoutes(router, backtestRunner, expSink, client.NewReferenceDataClient(analysisURL))
+	registerExploreRoutes(router, backtestRunner, expSink)
 
 	// AUD-02 (ODR-065 H5)：WithToolsAuth 按工具的审计副作用类做 per-tool
 	// RBAC —— save_factor / save_strategy 要 trader-or-admin，其余未分类

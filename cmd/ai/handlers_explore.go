@@ -53,13 +53,6 @@ var exploreBias = validation.BiasInput{
 	// 探索这条链路没查过。于是前视子维度是「未评估」并给 note。
 }
 
-// listingWindowsSource 读仪器域上市窗口（D24 第 7 类只读动作，core QT-67）。
-//
-// 返回**全部标的**的窗口：偏差维要的是池子大小与其中已摘牌的数量，不是
-// 某个标的的上市日。nil = 未装配，偏差维退回最保守口径。
-// token 从入站请求转发 —— 本进程不签发、不刷新凭证。
-type listingWindowsSource func(ctx context.Context, bearerToken string) ([]client.ListingWindow, error)
-
 // ExploreHandler 是 P1-2 循环控制器的 HTTP 入口。
 //
 // 控制器本身只是个库，没有这一层它就只是躺在包里的能力 —— 跟 P1-1b 的 sink
@@ -77,9 +70,6 @@ type ExploreHandler struct {
 	// narrator 是因果维（P2-9f）的叙述者。nil = 因果维未评估 —— 没讲就是
 	// 没讲，不拿剩下五维凑一个"看起来完整"的结论。
 	narrator validation.Narrator
-	// listing 读仪器域上市窗口（P2-4）。nil 或返回空 = core 这次没能给出
-	// 上市窗口，偏差维必须照实记上 PoolSourceCurrent。
-	listing listingWindowsSource
 
 	mu   sync.Mutex
 	runs map[string]*exploreRun
@@ -87,32 +77,12 @@ type ExploreHandler struct {
 
 // biasInput 组装这一轮的偏差维输入（P2-4）。
 //
-// 池子来源按 core 的实测数据决定，不再是写死的常量：core 的 QT-67 端点
-// 返回了上市窗口（与引擎同源的 stocks 表），就说明这一轮取池子有按日在市
-// 的依据，那条 blocking 该消失；取不到（端点不可用 / 表空 / 没连库），
-// 就仍然报 PoolSourceCurrent —— 这时候债还在，藏起来它就会变成错误的自信。
-func (h *ExploreHandler) biasInput(ctx context.Context, bearerToken string) validation.BiasInput {
-	in := exploreBias
-	if h.listing == nil {
-		return in // 无从判断，保持最保守的口径
-	}
-	windows, err := h.listing(ctx, bearerToken)
-	if err != nil {
-		// 读不到 ≠ 没有数据：保持最保守口径，并把原因留在日志里。
-		log.Printf("explore: 上市窗口未取到，偏差维按 current 池子记: %v", err)
-		return in
-	}
-	if len(windows) == 0 {
-		return in
-	}
-	in.PoolSource = validation.PoolSourcePointInTime
-	in.PoolSize = len(windows)
-	for _, w := range windows {
-		if w.DelistDate != nil {
-			in.DelistedInPool++
-		}
-	}
-	return in
+// 上市窗口今天没有任何服务提供：core 的 QT-67 已随 SVC-CORE-DATA-RETIRE 退役，
+// data 也还没有 point-in-time 端点。旧实现会去调一条永远 404 的端点再退回同一个
+// 常量 —— 那只是把「没有」伪装成「查过了」。所以这里照实报 current：债还在，
+// 藏起来它会变成错误的自信。重开条件见 tellurion-data 仓 TASKS.md 的 ⏸ 条目。
+func (h *ExploreHandler) biasInput() validation.BiasInput {
+	return exploreBias
 }
 
 // bearerTokenFromHeader 取 `Authorization: Bearer <jwt>` 里的 token，
@@ -209,20 +179,12 @@ func (h *ExploreHandler) RegisterExploreRoutes(router *gin.RouterGroup) {
 //
 // 探索用的 pipeline 实例**必须带上实验日志落点** —— 否则这一路的尝试一行
 // 都不会记，而「试了多少次」正是过拟合检测唯一依赖的数字。
-func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, sink pipeline.ExperimentSink, refData *client.ReferenceDataClient) {
+func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, sink pipeline.ExperimentSink) {
 	var opts []pipeline.PipelineOption
 	if sink != nil {
 		opts = append(opts, pipeline.WithExperimentSink(sink))
 	}
 	handler := NewExploreHandler(pipeline.NewPipeline(opts...), runner)
-	// P2-4：上市日历读到什么口径，偏差维就报什么口径。refData 可能为 nil
-	//（未配置 core 地址），那种情况下 listing 保持 nil，偏差维退回最保守的
-	// PoolSourceCurrent —— 债还在就照实记。
-	if refData != nil {
-		handler.listing = func(ctx context.Context, bearerToken string) ([]client.ListingWindow, error) {
-			return refData.ListingWindows(ctx, bearerToken, nil)
-		}
-	}
 	// 实验日志落点若同时能写裁决（*aistore.Store 满足），就把裁决
 	// 也接上；不满足就只记日志不记裁决。main.go 里 aiStore 在初始化失败时
 	// 进程已退出，sink 只可能是非 nil 的 *aistore.Store。
@@ -319,7 +281,7 @@ func (h *ExploreHandler) Start(c *gin.Context) {
 			RunID:       runID,
 			Description: req.Description,
 			MaxTries:    req.MaxTries,
-			Bias:        h.biasInput(ctx, bearerToken),
+			Bias:        h.biasInput(),
 			OnAttempt: func(a loop.Attempt) {
 				run.mu.Lock()
 				run.attempts = append(run.attempts, a)

@@ -18,6 +18,14 @@ var clientEndpointGaps = map[string]string{
 	"/api/factor/evaluate": "IC/IR 求值的入参形状（formula + symbols）与 core /api/factor/compute-ic 不同；QT-50 ③-② 补粗粒度端点后删除本行",
 }
 
+// nonCoreClientEndpoints：由 core 以外的服务提供、因此不要求出现在 core openapi 的端点。
+// 与 clientEndpointGaps 的区别：这里不是「core 漏登记」，而是归属别的服务。
+// TestNonCoreClientEndpoints_AreStillExternal 会断言它们仍被源码引用、且 core openapi
+// 仍然没有 —— 任一侧变化都会红，逼着重新判断归属。
+var nonCoreClientEndpoints = map[string]string{
+	"/api/v1/trading/calendar": "由 tellurion-data 提供（GET /api/v1/trading/calendar，契约见 tellurion-data:docs/api-schema.md）；agent CI 不 checkout data，故不纳入 core openapi 对拍",
+}
+
 var endpointLiteralRE = regexp.MustCompile(`"(/(?:api|health|metrics)[^"\s]*)"`)
 
 // TestClientEndpoints_AreRegisteredInCoreOpenAPI 是 C2 ③ 的「粗粒度对齐」腿：
@@ -41,6 +49,9 @@ func TestClientEndpoints_AreRegisteredInCoreOpenAPI(t *testing.T) {
 		if _, allowed := clientEndpointGaps[endpoint]; allowed {
 			continue
 		}
+		if _, external := nonCoreClientEndpoints[endpoint]; external {
+			continue
+		}
 		unknown = append(unknown, endpoint)
 	}
 	if len(unknown) > 0 {
@@ -56,6 +67,24 @@ func TestClientEndpointGaps_AreStillGaps(t *testing.T) {
 	for endpoint, why := range clientEndpointGaps {
 		if endpointRegistered(doc, endpoint) {
 			t.Errorf("openapi 已登记 %q，把它从 clientEndpointGaps 删掉（登记理由：%s）", endpoint, why)
+		}
+	}
+}
+
+// TestNonCoreClientEndpoints_AreStillExternal 是归属表两侧的防腐腿：
+// 端点必须仍出现在客户端源码里，且 core openapi 必须仍然没有它。
+func TestNonCoreClientEndpoints_AreStillExternal(t *testing.T) {
+	doc, _ := loadCoreOpenAPI(t)
+	scanned := map[string]bool{}
+	for _, endpoint := range scanClientEndpoints(t) {
+		scanned[endpoint] = true
+	}
+	for endpoint, why := range nonCoreClientEndpoints {
+		if !scanned[endpoint] {
+			t.Errorf("%q 已不在客户端源码里，删掉这条登记（%s）", endpoint, why)
+		}
+		if endpointRegistered(doc, endpoint) {
+			t.Errorf("core openapi 已登记 %q，把它从 nonCoreClientEndpoints 删掉（%s）", endpoint, why)
 		}
 	}
 }
