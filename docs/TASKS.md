@@ -8,6 +8,8 @@ verified-by: 2026-11-10 补真库腿——`TestSaveFactorCandidates_Integration`
 
 > 本仓（AI 实验员层）的任务台账。**六字段规范同 core 仓 `AGENTS.md` §8.5**（`tellurion` 仓）：目标 / 上下文 / 要求 / 约束与非目标 / 验收 / 边界，且须满足「独立 agent 拿着本单 + 它显式引用的冻结契约，不需读其他实现、不需问人，就能完成并自证」。
 > 状态：`⬜ 待做` / `🔶 进行中` / `⛔ 阻塞` / `✅ 完成（附日期）`。
+>
+> **台账终扫（2026-11-10）**：任务标题带 `⬜` / `🔶` / `⛔` 的 = **0 条**；正文旧标记以标题与最新「收口」块为准。**无开放项**。
 > 本文件自 core 台账 OPS-01 改判（2026-10-14）派生——原单前提（core 侧做 explore SSE）因 AI 拆仓失效，实现落此仓。
 
 > **第三轮裁决指针（2026-10-25）**：⑩ AI 生成物载体 = **默认 `carrier="dsl"`**，仅 L3（自定义状态机 / L2 表达不了）才 `carrier="wasm"`，**`carrier="so"` 删除**；`artifact_hash` 用 `contracts.engine.StrategyVersionInput{Carrier:"dsl", Source:<配置文本>}.Hash()`，复用 QT-41 资产服务。正文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` §五。
