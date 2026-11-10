@@ -193,7 +193,7 @@ verified-by: QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pk
 - **⑤ 验收**：core 侧这四张表零写入；`grep` 写方法零生产调用；本仓 `ai.*` 行数持续增长而旧表不增长。**以上均已由 core 侧验收并回写；本仓腿见上。**
 - **⑥ 边界**：跨仓任务，正文归 `tellurion:docs/TASKS.md` §六之二 串行第 10（原指向 `SVC-RETIRE-INDEX`，2026-11-10 迁单）；本仓只留指针与本仓停写验收。
 
-## DBT-18 · mining 的真实候选生成器（LLM / MCTS / 基因池 → `ai.*`）[P3] 🔶（归属已裁 = 本仓；2026-11-07 已落，`-race` 腿未执行）
+## DBT-18 · mining 的真实候选生成器（LLM / MCTS / 基因池 → `ai.*`）[P3] ✅（归属已裁 = 本仓；2026-11-07 已落；2026-11-10 `-race` 腿经 Docker + CGO 实跑通过）
 
 > **立单依据（把押下的那半补齐）**：core 侧 DBT-18 已 ✅，但它的 ⑤ 验收原文是「归属结论成文 + 指针登记；**跨仓那半在其归属仓台账里写全六字段**」，而裁决 ⑧ 在本仓「QT-17 前置核对」那段（条目 7，**按锚点找：全文搜 `DBT-18（mining 的真实 Proposer）归属本仓`**）写的「本仓的动作：**立自己的六字段单**（含 LLM/MCTS Proposer 的实现位置）」此前**没有条目**（实测本文件只有那条裁决指针，无 `DBT-18` 单）。本单就是那半。裁决全文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` ⑧。
 
@@ -223,7 +223,7 @@ verified-by: QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pk
 > **门禁（真实退出码）**：`gofmt -l .` 无输出（EXIT=0；顺带移除 `pkg/ai/drift/detector.go`、`pkg/ai/validation/redundancy.go` 两个**既有** BOM，仅 BOM，无逻辑改动）；`go build ./...` EXIT=0；`go vet ./...` EXIT=0；`go test ./... -count=1` EXIT=0（cmd/ai 0.563s、pkg/ai/mining 0.293s、pkg/aistore 0.075s）。
 >
 > **未执行 / 如实登记**：
-> - `go test ./cmd/ai/... -race -count=1` **未执行**：本机 `CGO_ENABLED=0`（任务硬性纪律），真实输出 `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`，退出码 2。不是跳过，是环境不支持。
+> - `go test ./cmd/ai/... -race -count=1`：**2026-11-10 已补跑**——本机无 C 编译器（`CGO_ENABLED=0`），改用 Docker 官方 `golang:1.25` 镜像（CGO 可用）挂载本仓：`docker run --rm -v <agent>:/src -w /src -e CGO_ENABLED=1 golang:1.25 sh -c "go test ./cmd/ai/... -race -count=1"` → **`ok tellurion-agent/cmd/ai 1.211s`，RACE_EXIT=0**（真实 race 检测，非 skip；未改任何代码）。
 > - `TestSaveFactorCandidates_Integration` 本机无 PG / 无 `TEST_DATABASE_DSN` → `SKIP`，未编造真库结果；CI 有库时生效。
 > - LLM 提议器未实现（本单选 MCTS + 基因池变异）；将来接入时必须走 `pkg/ai/cost.go` 的 `CostTable`，已在 ADR-0003 与 ARCHITECTURE §2.1 写明。
 > - core 侧 mining 落库腿 / DDL 的删除不在本仓，仍归 `SVC-CORE-AI-RETIRE`。
