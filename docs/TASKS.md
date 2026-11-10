@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-10
-verified-by: QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pkg/ai/client` 新客户端（建定义 → 传源码 → 产物载体 build+轮询）、copilot 登记端口 fail-closed、`ai.generation_chain` 并列四列坐标（幂等 ALTER 兼容存量库）；4 条破坏验证改坏即红、还原复绿；真库 round-trip 通过；gofmt/build/vet 0，全仓仅两条 QT-17 ③ 前置既有红（本文件 :187）。此前 SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；本仓反向护栏翻面 + 停写腿兼容旧表不存在）。此前 2026-10-25 QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
+verified-by: 2026-11-10 补真库腿——`TestSaveFactorCandidates_Integration` 在独立 PG 实例（`127.0.0.1:5433`，库 `tellurion`）上真跑通过（此前记「无库 SKIP」已失效），`pkg/aistore` 全包绿。此前 QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pkg/ai/client` 新客户端（建定义 → 传源码 → 产物载体 build+轮询）、copilot 登记端口 fail-closed、`ai.generation_chain` 并列四列坐标（幂等 ALTER 兼容存量库）；4 条破坏验证改坏即红、还原复绿；真库 round-trip 通过；gofmt/build/vet 0，全仓仅两条 QT-17 ③ 前置既有红（本文件 :187）。此前 SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；本仓反向护栏翻面 + 停写腿兼容旧表不存在）。此前 2026-10-25 QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -224,7 +224,7 @@ verified-by: QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pk
 >
 > **未执行 / 如实登记**：
 > - `go test ./cmd/ai/... -race -count=1`：**2026-11-10 已补跑**——本机无 C 编译器（`CGO_ENABLED=0`），改用 Docker 官方 `golang:1.25` 镜像（CGO 可用）挂载本仓：`docker run --rm -v <agent>:/src -w /src -e CGO_ENABLED=1 golang:1.25 sh -c "go test ./cmd/ai/... -race -count=1"` → **`ok tellurion-agent/cmd/ai 1.211s`，RACE_EXIT=0**（真实 race 检测，非 skip；未改任何代码）。
-> - `TestSaveFactorCandidates_Integration` 本机无 PG / 无 `TEST_DATABASE_DSN` → `SKIP`，未编造真库结果；CI 有库时生效。
+> - `TestSaveFactorCandidates_Integration`：**2026-11-10 已补真库腿**——系统 PG（`:5432`）不可用（本会话早前一次 `Set-Content -Encoding utf8` 给宿主 `pg_hba.conf` 写了 BOM，服务端拒绝加载；文件待授权按字节还原），改用 `initdb` 起的独立实例 `127.0.0.1:5433`（库 `tellurion`，trust）；`TEST_DATABASE_DSN=postgres://postgres:postgres@127.0.0.1:5433/tellurion?sslmode=disable go test ./pkg/aistore/ -count=1` → **绿**（`TestSaveFactorCandidates_Integration` / `TestMigrate_*` / `TestStore_*` 均真跑，`-v` 逐条确认无 SKIP）。
 > - LLM 提议器未实现（本单选 MCTS + 基因池变异）；将来接入时必须走 `pkg/ai/cost.go` 的 `CostTable`，已在 ADR-0003 与 ARCHITECTURE §2.1 写明。
 > - core 侧 mining 落库腿 / DDL 的删除不在本仓，仍归 `SVC-CORE-AI-RETIRE`。
 
