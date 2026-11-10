@@ -43,7 +43,7 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 | 依赖 | 版本 | 说明 |
 |---|---|---|
 | `github.com/ruoxizhnya/tellurion-contracts` | `v0.9.0` | 2026-11-07 发版序列（CT-03 `risk/` / CT-04 `run/` / CT-05 `broker/` 三个新增包），tag 与 `main` 于 2026-11-08 推远端；**本仓 2026-11-08 按裁决 #6 切到 `v0.9.0`**（裁决原文写 `v0.7.0`，按「取最新兼容序列」前移，待主任追认） |
-| `github.com/ruoxizhnya/tellurion-kit` | `v0.1.4` | 2026-10-25 发版（KT-11：`role=service` 的非数字 subject 不再误判 401）；`pkg/aistore` 用 `kit/db` 的迁移机制（QT-17 ①），连接池由调用方持有；**本仓 2026-11-08 由 `v0.1.0` 升到 `v0.1.4`**（裁决 #6） |
+| `github.com/ruoxizhnya/tellurion-kit` | `v0.2.0` | 2026-10-25 发版（KT-11：`role=service` 的非数字 subject 不再误判 401）；`pkg/aistore` 用 `kit/db` 的迁移机制（QT-17 ①），连接池由调用方持有；**本仓 2026-11-08 由 `v0.1.0` 升到 `v0.1.4`**（裁决 #6），**2026-11-10 随 kit `KT-13` 升到 `v0.2.0`** |
 | `github.com/jackc/pgx/v5` | `v5.7.3` | `pkg/aistore` 直连 PG（连接池 / `ErrNoRows` 哨兵，QT-17 ①②）；随 `kit/db` 同版本，未单独升级 |
 
 > **契约一致性（QT-09 ③）**：`internal/conformance` 读 `tellurion-contracts:conformance/cases.json`（三仓唯一真相）实算——`fee_defaults_via_yaml` 钉住生成器的 `commission_rate`/`slippage_rate` 必须等于 `fees.DefaultCommissionRate`/`DefaultSlippageRate`（历史漂移点：滑点写成 0.001、佣金写成 0.00025）。语料定位失败一律 `t.Fatalf`，不许 `t.Skip`。core 侧编排：`cd ../tellurion && make contracts-conformance`。
