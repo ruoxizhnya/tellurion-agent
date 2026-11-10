@@ -15,7 +15,11 @@ The generated code must implement the Strategy interface:
 
     package plugins
 
-    import "` + coreStrategyImport + `"
+    import (
+        "github.com/ruoxizhnya/tellurion-contracts/domain/market"
+        "tellurion/pkg/domain"
+        "` + coreStrategyImport + `"
+    )
 
     type Parameter struct {
         Name        string
@@ -40,7 +44,7 @@ The generated code must implement the Strategy interface:
         Name() string
         Description() string
         Parameters() []Parameter
-        GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]Signal, error)
+        GenerateSignals(ctx context.Context, bars map[string][]market.OHLCV, portfolio *domain.Portfolio) ([]Signal, error)
         Configure(params map[string]any) error
         Weight(signal Signal, portfolioValue float64) float64
         Cleanup()
@@ -54,17 +58,21 @@ If your strategy uses pre-computed factor z-scores, implement FactorAware:
         SetFactorCache(reader strategy.FactorZScoreReader)
     }
 
-    type FactorZScoreReader func(factor domain.FactorType, date time.Time, symbol string) (float64, bool)
+    type FactorZScoreReader func(factor cdom.FactorType, date time.Time, symbol string) (float64, bool)
 
-    Available factors: domain.FactorMomentum, domain.FactorValue, domain.FactorQuality
+    Available factors: cdom.FactorMomentum, cdom.FactorValue, cdom.FactorQuality
 
-## Domain types (github.com/ruoxizhnya/tellurion-contracts/domain)
+## Domain types
+
+Price bars (import "github.com/ruoxizhnya/tellurion-contracts/domain/market"):
 
     type OHLCV struct {
         Symbol    string
         Date      time.Time
         Open, High, Low, Close, Volume float64
     }
+
+Portfolio and orders (import "tellurion/pkg/domain"):
 
     type Portfolio struct {
         Cash      float64
@@ -87,7 +95,7 @@ If your strategy uses pre-computed factor z-scores, implement FactorAware:
 ## Rules
 
 1. Package name MUST be "plugins"
-2. Include these imports: "context", "time", "github.com/ruoxizhnya/tellurion-contracts/domain", "` + coreStrategyImport + `"
+2. Include these imports: "context", "time", cdom "github.com/ruoxizhnya/tellurion-contracts/domain", "github.com/ruoxizhnya/tellurion-contracts/domain/market", "tellurion/pkg/domain", "` + coreStrategyImport + `"
 3. Implement ALL Strategy interface methods exactly as shown above
 4. Include an init() function that calls strategy.GlobalRegister(&yourImpl{})
 5. Return "hold" for all stocks by default; only return "buy"/"sell" when indicators give a clear signal
@@ -108,7 +116,9 @@ import (
     "sort"
     "time"
 
-    "github.com/ruoxizhnya/tellurion-contracts/domain"
+    cdom "github.com/ruoxizhnya/tellurion-contracts/domain"
+    "github.com/ruoxizhnya/tellurion-contracts/domain/market"
+    "tellurion/pkg/domain"
     "` + coreStrategyImport + `"
 )
 
@@ -131,7 +141,7 @@ func (s *strategyImpl) Weight(sig strategy.Signal, pv float64) float64 { w := si
 func (s *strategyImpl) Cleanup() {}
 func (s *strategyImpl) SetFactorCache(reader strategy.FactorZScoreReader) { s.factorReader = reader }
 
-func (s *strategyImpl) GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]strategy.Signal, error) {
+func (s *strategyImpl) GenerateSignals(ctx context.Context, bars map[string][]market.OHLCV, portfolio *domain.Portfolio) ([]strategy.Signal, error) {
     // TODO: implement strategy logic
     return nil, nil
 }

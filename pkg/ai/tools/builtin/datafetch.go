@@ -119,7 +119,7 @@ func (c *DataSourceClient) FetchOHLCV(ctx context.Context, symbol, startDate, en
 // Input: symbol, start_date, end_date (all required, YYYY-MM-DD)
 // Output: []map[string]interface{} (the OHLCV records as JSON objects)
 //
-// The output is a slice of generic maps rather than []domain.OHLCV to
+// The output is a slice of generic maps rather than []market.OHLCV to
 // keep this package free of a pkg/domain dependency — the HTTP layer
 // marshals it directly to JSON for the external agent, and the schema
 // documents the fields.

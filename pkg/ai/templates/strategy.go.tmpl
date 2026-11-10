@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ruoxizhnya/tellurion-contracts/domain/market"
 	"tellurion/pkg/domain"
 )
 
@@ -61,7 +62,7 @@ func (s *{{.Name}}Strategy) Configure(params map[string]interface{}) error {
 }
 
 // GenerateSignals generates trading signals based on the strategy logic.
-func (s *{{.Name}}Strategy) GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]Signal, error) {
+func (s *{{.Name}}Strategy) GenerateSignals(ctx context.Context, bars map[string][]market.OHLCV, portfolio *domain.Portfolio) ([]Signal, error) {
 	var signals []Signal
 
 	for symbol, ohlcv := range bars {

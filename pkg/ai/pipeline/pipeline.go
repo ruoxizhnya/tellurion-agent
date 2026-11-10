@@ -602,7 +602,7 @@ Timeframe: %s
 Requirements:
 1. Package must be "plugins"
 2. Implement all Strategy interface methods
-3. Use domain.OHLCV for price data
+3. Use market.OHLCV for price data
 4. Return []strategy.Signal with Action "buy" or "sell"
 5. Include init() function that calls strategy.GlobalRegister()
 6. No fmt.Print, log.Print, or side effects
