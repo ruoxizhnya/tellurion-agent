@@ -19,7 +19,7 @@ Quant Lab 的 **AI 实验员层**。从 monorepo `tellurion` 拆出（2026-10-09
 | `pkg/copilot/` | `CopilotService`（自然语言 → 生成代码 → 沙箱编译 → 回测）——自 core 的 `pkg/strategy/copilot.go` 归位 |
 | `cmd/ai/` | **ai-service**（:8086）：Copilot / pipeline / explore / tools 四族 HTTP 面 + AI 侧装配 builder |
 | `config/ai-service.yaml` | 本仓自持的 ai-service 配置（内容取自 core，只读复制） |
-| `deploy/compose.yaml` | 单仓本地栈：本仓自带 PG / Redis，ai-service 发布 `127.0.0.1:8086` |
+| `deploy/compose.yaml` | 单仓本地栈：本仓自带 PG（**无 Redis**：代码零读取点），ai-service 发布 `127.0.0.1:8086` |
 | `deploy/wait-for-deps.sh` | 容器启动的有界依赖等待（取自 core，需 `nc`） |
 | `docs/hermes/` | Hermes agent 的配置 / 提示词 / 技能 / 系统设计 / 工具契约 |
 
@@ -57,7 +57,7 @@ AUTH_INSECURE=true SERVER_HOST=127.0.0.1 \
 # 若本机 PG 用 scram-sha-256（宿主默认即是），上面的 DATABASE_PASSWORD 必须
 # 是真实口令；不想用无鉴权模式就改注入 JWT_SECRET=<至少 32 字节随机值>。
 
-# 或容器（单仓 compose；自带 PG / Redis，ai-service 发布 127.0.0.1:8086）
+# 或容器（单仓 compose；自带 PG、无 Redis，ai-service 发布 127.0.0.1:8086）
 docker compose -f deploy/compose.yaml up --build
 ```
 

@@ -22,7 +22,7 @@
 
 | # | Condition | Verification |
 |---|-----------|-------------|
-| 1 | Hermes discovers all 19 tools via `GET /api/tools` | `curl` returns `count: 19` |
+| 1 | Hermes discovers all 21 tools via `GET /api/tools` | `curl` returns `count: 21` |
 | 2 | Hermes calls `list_factors` to avoid duplicates | trajectory log shows `list_factors` call |
 | 3 | Hermes calls `get_market_regime` for market context | trajectory log shows `get_market_regime` call |
 | 4 | Hermes generates a valid DSL expression (L1 passes) | `validate_factor` returns `passed: true` |
@@ -44,16 +44,18 @@
 |-----------|------|-------------|
 | Ollama (hermes-3:8b) | :11434 | `curl http://localhost:11434/api/tags` lists `hermes-3:8b` |
 | Hermes Agent | — | `~/.hermes/` directory exists with config/skills/prompts |
-| analysis-service | :8085 | `curl http://localhost:8085/api/tools` returns `count: 19` |
+| analysis-service | :8085 | 反代入口：`curl http://localhost:8085/api/tools` returns `count: 21`（真身在 ai-service :8086，见下） |
 | data-service | :8081 | `curl http://localhost:8081/health` returns 200 |
-| PostgreSQL | :5432 | `psql` can connect; `gene_pool_factors` table exists |
-| Redis | :6379 | `redis-cli ping` returns `PONG` |
+| PostgreSQL | :5432 | `psql -d tellurion` can connect; `ai.factor_genes` / `ai.strategy_genes` tables exist |
+| Redis | :6379 | **本链路不需要**：agent 代码零 Redis 读取点（`go-redis` 仅经 `tellurion-kit/db` 间接引入）；只有 core analysis 的缓存启用时才用 |
+
+> **四族端点的真身在 `tellurion-agent`（ai-service :8086）**：`/api/{copilot,pipeline,explore,tools}` 由 core analysis 在 :8085 纯反代，响应带 `x-served-by: agent`。验收可直接打 :8086，也可走 :8085；两者契约相同。
 
 ### Data Requirements
 
 - OHLCV data for CSI 300 stocks covering `2020-01-01` to `2024-12-31`
 - At least 200 trading days for `000300.SH` (needed by `get_market_regime`)
-- `gene_pool_factors` and `gene_pool_strategies` tables exist (can be empty)
+- `ai.factor_genes` and `ai.strategy_genes` tables exist (can be empty; 由 `cmd/ai` 启动迁移创建)
 
 ### Hermes Deployment
 
@@ -70,7 +72,7 @@ cp docs/hermes/tools-quant-backtest.yaml ~/.hermes/tools/quant-backtest.yaml
 
 # 3. Verify Hermes can discover tools
 # (Hermes CLI depends on the framework — see Hermes docs for invocation)
-# Expected: Hermes reports 19 tools discovered from http://localhost:8085/api/tools
+# Expected: Hermes reports 21 tools discovered from http://localhost:8085/api/tools
 ```
 
 ---
@@ -82,12 +84,12 @@ cp docs/hermes/tools-quant-backtest.yaml ~/.hermes/tools/quant-backtest.yaml
 Before running the full autonomous loop, verify the MCP bridge works:
 
 ```bash
-# Verify all 19 tools are discoverable
+# Verify all 21 tools are discoverable
 curl -s http://localhost:8085/api/tools | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 print(f'Tool count: {data[\"count\"]}')
-assert data['count'] == 19, f'Expected 19 tools, got {data["count"]}'
+assert data['count'] == 21, f'Expected 21 tools, got {data["count"]}'
 for t in data['tools']:
     print(f'  - {t[\"name\"]}: {t[\"description\"][:60]}...')
 print('✅ Tool discovery OK')
@@ -296,11 +298,11 @@ print(f'Records: {len(data)}')
 The gene pool tables may not exist. Run migrations:
 
 ```bash
-# Verify gene_pool_factors table exists
-psql -h localhost -U postgres -d quant_trading -c "\d gene_pool_factors"
+# Verify ai.factor_genes table exists
+psql -h localhost -U postgres -d tellurion -c "\d ai.factor_genes"
 
-# If missing, run migrations
-# (see migrations/ directory for SQL files)
+# If missing, start ai-service —— cmd/ai 启动期会执行 pkg/aistore 的 ai.* 迁移
+# （本仓没有独立 migrations/ 目录；DDL 的唯一来源是 pkg/aistore/schema.go）
 ```
 
 ### "Hermes cannot discover tools"

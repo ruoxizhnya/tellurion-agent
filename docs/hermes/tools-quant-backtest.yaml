@@ -1,22 +1,25 @@
 # MCP Tool Configuration — A-Share Quant Backtest Engine
 #
 # This file is the declarative MCP tool registry for the Hermes Agent.
-# It mirrors the 19 tools registered in the Go backend's Tools Registry
-# (cmd/analysis/setup.go → buildToolsRegistry). Hermes loads this at
+# It mirrors the 21 tools registered in the Go backend's Tools Registry
+# (cmd/ai/builders.go → buildToolsRegistry). Hermes loads this at
 # startup for static tool discovery; the live schemas are also available
-# via GET /api/tools on the analysis-service.
+# via GET /api/tools.
 #
-# Source of truth: the Go implementation in pkg/tools/builtin/*.go.
+# Source of truth: the Go implementation in pkg/ai/tools/builtin/*.go.
 # This YAML is a human-readable mirror — if parameters drift, run
 # GET /api/tools to verify the canonical schema.
 #
-# Base URL: http://localhost:8085 (analysis-service)
+# Base URL: http://localhost:8086 (ai-service —— 真身)
+#   :8085 是 core analysis 的纯反代入口，响应带 x-served-by: agent；两者契约相同。
 # Endpoint pattern: POST /api/tools/{tool_name}
 #
 # Phase 1 (Hermes Agent Integration): 16 tools across 7 groups.
 # Phase 2.2: +1 tool (get_strategy_lineage) — 17 tools across 8 groups.
 # Phase 2.3: +1 tool (get_market_regime) — 18 tools across 9 groups.
 # EQD-P2-1: +1 tool (research.profile) — 19 tools across 10 groups.
+# P2-3 / P2-6: +2 tools (factor.hypothesis, monitor.strategy_health)
+#   — 21 tools across 12 groups（与 cmd/ai/builders.go 的 21 次 Register 一致）。
 
 # ─── Connection ──────────────────────────────────────────────────────
 base_url: "http://localhost:8085"

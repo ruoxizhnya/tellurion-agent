@@ -46,7 +46,7 @@ database:
   database: "tellurion"
   sslmode: "disable"
 
-# 服务间地址：**本文件是宿主机直跑视角**（与 database / redis 同口径）。
+# 服务间地址：**本文件是宿主机直跑视角**（与 database 同口径）。
 # 容器里由 deploy/compose.yaml 的 env 覆盖成服务名（compose 服务名只在
 # 容器网络内可解析）。启动期逐项解析（cmd/ai/endpoints.go），宿主机上留着
 # 容器 DNS 会直接报错并点名该注入哪个 env，而不是在第一次工具调用时远处 404。

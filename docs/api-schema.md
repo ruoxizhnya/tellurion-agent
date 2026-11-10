@@ -1,29 +1,31 @@
 ---
 status: active
 last-verified: 2026-11-11
-verified-by: 代码-文档对齐审计 —— 补 `/readyz` / `/api/readyz`（`cmd/ai/readyz.go` 实际注册，README 已写）；此前 QT-32-A 登记 promote 闸门与留痕 fail-closed，QT-32-B 复核字段实况
+verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完整定义**（参数 / 响应 / 错误码），并钉住 core 侧只做纯反代 + `x-served-by: agent`；此前补 `/readyz` / `/api/readyz`（`cmd/ai/readyz.go` 实际注册）、QT-32-A promote 闸门与留痕 fail-closed、QT-32-B 字段实况
 ---
 
 # API Schema — tellurion-agent
 
 > **契约地位**：HTTP（ai-service，默认 :8086）。
 
-**契约权威在 core 的 `openapi.yaml`**：本仓实现它，不另立一份。改端点 = 先改 core 的 openapi，再改这里。
+**这四组的契约权威就是本文**（2026-11-11 裁决）：`/api/{copilot,pipeline,explore,tools}` 的唯一完整定义在这里，core 侧只做纯反代。core 的 `openapi.yaml` 若仍列这些路径，只是前端索引，以本文为准；改端点 = 改本文 + 本仓实现。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
 
 ## 1. 接口面
 
+> **真相源归属（2026-11-11 裁决）**：`/api/{copilot,pipeline,explore,tools}` 的**实现与契约都在本仓**（ai-service，缺省 :8086）。core 的 analysis-service 对这四个前缀**只做纯反代**：不重新定义参数、响应或错误码，只转发并在响应上加 `x-served-by: agent`。core 侧保留的是反代入口与这一个头，**不是第二份定义**。改契约 = 只改本文 + 本仓实现；core 侧无需跟改。
+
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/api/explore/runs` | 启动一轮探索（实验循环） |
+| POST | `/api/explore/runs` | 启动一轮探索（实验循环），立即返回 `run_id` |
 | GET | `/api/explore/runs/{runID}` | 查状态（快照） |
-| GET | `/api/explore/runs/{runID}/stream` | SSE 推状态（替代 2.5s 轮询） |
+| GET | `/api/explore/runs/{runID}/stream` | SSE 推状态（`progress` / `complete`） |
 | POST | `/api/explore/runs/{runID}/stop` | 停止（只停调度，不 cancel 已开跑的回测） |
 | POST | `/api/copilot/generate` | 自然语言 → 代码生成（异步 job） |
 | GET | `/api/copilot/generate/{job_id}` | 生成任务状态 |
 | GET | `/api/copilot/stats` | Copilot 生成统计（接受率） |
-| POST | `/api/pipeline/run` | 跑 pipeline |
+| POST | `/api/pipeline/run` | 跑 pipeline（同步返回整条结果） |
 | GET | `/api/pipeline/jobs` · `/jobs/{id}` | pipeline 任务列表 / 详情 |
 | GET | `/api/tools` · `/api/tools/{name}` | 工具注册表 |
 | POST | `/api/tools/{name}` | 执行工具 |
@@ -31,6 +33,129 @@ verified-by: 代码-文档对齐审计 —— 补 `/readyz` / `/api/readyz`（`c
 | GET | `/readyz` · `/api/readyz` | 就绪面：DB ping + `ai.*` 迁移关键表；未就绪 503，`/health` 仍 200 |
 
 > 这四族（copilot / pipeline / explore / tools）是对外全部；**没有第五族**。加族要先改 openapi 与本文。
+> 路径前缀：`explore` / `copilot` / `pipeline` 挂 `/api/*`；`tools` 同时接受 `/api/tools` 与 `/api/tools/`（尾斜杠变体）。
+
+### 1.1 Explore（`cmd/ai/handlers_explore.go`）
+
+**`POST /api/explore/runs`** — 请求体 `StartExploreRequest`：
+
+| 字段 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| `description` | string | 是 | — | 自然语言目标，例如「做一个动量策略」 |
+| `max_tries` | int | 否 | `20` | `<=0` 时取 20 |
+| `lookback_min` | int | 否 | `5` | 回看窗口搜索下界；`<=0` 时取 5 |
+| `lookback_max` | int | 否 | `250` | 上界；`<=lookback_min` 时取 250 |
+| `seed` | int64 | 否 | 墙上时钟 | 提议器随机种子；实际使用值在响应 / 状态 / 日志回显 |
+| `proposer` | string | 否 | `tpe` | 仅 `tpe` / `mcts`；其他值 400 |
+
+响应 `200`：`{"run_id": "<uuid>", "max_tries": <int>, "seed": <int64>, "proposer": "<tpe|mcts>"}`
+错误：`400`（JSON 非法 / 未知 proposer）。
+
+**`GET /api/explore/runs/{runID}`** — 响应 `200` `ExploreStatusResponse`：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `run_id` | string | 本轮标识 |
+| `running` | bool | 是否仍在跑 |
+| `stopped` | string | 仅停止后出现 |
+| `attempts` | `AttemptView[]` | 逐次尝试（见下） |
+| `best_seq` | int? | 当前最优尝试序号，无则省略 |
+| `seed` | int64 | 本轮实际种子 |
+| `proposer` | string | 本轮提议器 |
+
+`AttemptView`：`seq`(int) / `hypothesis`(string) / `params`(object) / `experiment_id`(int64) / `sharpe`(float) / `ok`(bool) / `error`(string, 仅失败) / `verdict`(object, 仅成功尝试；失败为 null)。
+错误：`404` `run not found`。
+
+**`GET /api/explore/runs/{runID}/stream`** — SSE；`progress` 的 payload 与上面的快照**同 JSON 形状**，跑完推一帧 `complete`；`404` 同快照端点。断线只停推，不取消 run。
+
+**`POST /api/explore/runs/{runID}/stop`** — 响应 `200` `{"run_id": "...", "stopping": true}`；`404`。
+
+### 1.2 Copilot（`cmd/ai/handlers_copilot.go` · `pkg/copilot`）
+
+**`POST /api/copilot/generate`** — 请求体 `GenerateParams`：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `description` | string | 是 | 自然语言策略描述 |
+| `universe` | string | 否 | `csi300` / `csi500` / `csi800` / `all` |
+| `start_date` | string | 否 | `YYYY-MM-DD` |
+| `end_date` | string | 否 | `YYYY-MM-DD` |
+
+响应 `202`：`{"job_id": "...", "status": "pending"}`。
+错误：`503` `AI not configured (set AI_API_KEY and AI_API_URL)`；`400` `invalid request: <原因>`。
+
+**`GET /api/copilot/generate/{job_id}`** — 响应 `200`：
+
+| 字段 | 出现条件 | 说明 |
+|---|---|---|
+| `job_id` | 恒有 | — |
+| `status` | 恒有 | 今天实际取值：`pending`（运行中）/ `sandbox_rejected` / `build_failed` / `llm_failed`。契约另预留 `generated` / `backtest_complete` / `backtest_failed`（前端白名单在消费，今天不产生） |
+| `generated_code` | 非空时 | 生成的 Go 源码 |
+| `build_error` | 非空时 | 给人看的失败解释（编译失败 / 闸门拦下 / 资产登记失败） |
+| `strategy_name` | 非空时 | 今天恒不出现（promote 闸门拦在生产回测之外） |
+| `backtest_result` | 非空时 | 今天恒不出现（同上） |
+| `backtest_error` | 非空时 | 今天恒不出现（同上） |
+
+错误：`404` `job not found`。
+
+**`GET /api/copilot/stats`** — 响应 `200`：`{"generated": int, "buildable": int, "backtest_valid": int, "acceptance_rate": float}`。`backtest_valid` / `acceptance_rate` 结构上恒为 0（promote 闸门之后没有回测跳；不是回归，见 §2 注）。
+
+### 1.3 Pipeline（`cmd/ai/handlers_pipeline.go` · `pkg/ai/pipeline`）
+
+**`POST /api/pipeline/run`** — 请求体 `{"description": "<string，必填>"}`。同步执行整条流水线，响应 `200` `PipelineJobResponse`（即使某阶段失败也返回**部分结果**，不抛 5xx）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | string | 作业 ID |
+| `status` | string | pipeline 结果状态 |
+| `intent` | object? | 意图解析结果 |
+| `yaml_config` | string? | 生成的策略 YAML |
+| `generated_code` | string? | 生成的 Go 源码 |
+| `build_error` | string? | 编译失败原因 |
+| `backtest_result` | object? | 回测结果 |
+| `backtest_error` | string? | 回测失败原因 |
+| `started_at` | string | `2006-01-02T15:04:05Z` |
+| `completed_at` | string? | 同上格式，未完成省略 |
+| `duration_ms` | int64 | 耗时 |
+| `logs` | string[]? | 阶段日志 |
+
+错误：`400`（请求体非法）。
+
+**`GET /api/pipeline/jobs`** — 响应 `200`，**今天恒为 `[]`**：pipeline 任务未持久化，列表端点没有数据源（不是空指针，是明确的空数组）。
+**`GET /api/pipeline/jobs/{id}`** — 响应 `200` `PipelineJobResponse`；`404` `job not found`。
+
+### 1.4 Tools（`cmd/ai/handlers_tools.go` · `pkg/ai/tools`）
+
+**`GET /api/tools`** — 响应 `200`：`{"tools": ToolInfo[], "count": int}`（按 name 升序）。
+`ToolInfo`：`name`(string) / `description`(string) / `parameters`(object[]，实现 `SchemaProvider` 才有) / `output_schema`(object，同上)。
+**`GET /api/tools/{name}`** — 响应 `200` 单个 `ToolInfo`；错误 `404` `{"error":"...","code":"TOOL_NOT_REGISTERED"}`。
+**`POST /api/tools/{name}`** — 请求体 `{"args": {<tool 参数>}}`；成功 `200` `{"result": <任意 JSON>}`。
+
+执行的鉴权在**路由内**按工具的副作用等级判定（路由是通配 `:name`，无法用中间件表达）：
+
+| 工具等级 | 允许角色 |
+|---|---|
+| read | `viewer` / `trader` / `admin` |
+| write | `trader` / `admin` |
+| admin（含未登记分类，fail-closed） | `admin` |
+
+错误体统一为 `{"error": "...", "code": "<CODE>"}`：
+
+| HTTP | code | 触发 |
+|---|---|---|
+| 400 | `INVALID_BODY` | 请求体不是合法 JSON / 缺 `args` 结构 |
+| 400 | `INVALID_ARGS` | 工具参数校验失败（`tools.ErrInvalidArgs`） |
+| 401 | `UNAUTHENTICATED` | 鉴权开启但上下文无身份 |
+| 403 | `INSUFFICIENT_ROLE` | 角色不足（另带 `tool` / `effect` / `have` / `need`） |
+| 404 | `TOOL_NOT_REGISTERED` | 工具名未注册 |
+| 404 | `NOT_FOUND` | 请求合法但记录不存在（如 `research.profile` 无档案） |
+| 500 | `TOOL_EXECUTION_FAILED` | 下游 / 执行错误 |
+
+> 鉴权未装配或服务未启用时不做 RBAC（open-access，与全局中间件同语义）。
+
+### 1.5 运维面
+
+`GET /health`（存活，不碰库）/ `GET /metrics` / `GET /readyz` · `/api/readyz`（DB ping + `ai.*` 关键表；未就绪 503，`/health` 仍 200）。
 
 ## 2. 错误码与 fail-closed 语义
 
