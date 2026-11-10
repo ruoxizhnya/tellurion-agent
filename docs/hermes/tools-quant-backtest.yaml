@@ -453,3 +453,42 @@ tools:
         type: "[]string"
         description: "Which sections to include: any of 'conclusions', 'questions'. Omitted or empty = both."
         required: false
+
+  # ══ Group 11: Factor hypothesis (P2-3) ═════════════════════════════
+
+  - name: "factor.hypothesis"
+    description: >
+      Explain why a factor is believed to work: return the recorded hypothesis
+      (economic mechanism / source) for one factor, or list every recorded
+      hypothesis when factor_name is omitted. The 'recorded' flag separates
+      rows persisted in ai.factor_hypothesis from builtin fallbacks, so the
+      caller knows whether the claim can be cited. Falls back to the builtin
+      table when the DB is unavailable.
+    endpoint: "/api/tools/factor.hypothesis"
+    parameters:
+      - name: factor_name
+        type: string
+        description: "Factor identifier. Omitted = list all recorded hypotheses."
+        required: false
+
+  # ══ Group 12: Strategy health (P2-6) ═══════════════════════════════
+
+  - name: "monitor.strategy_health"
+    description: >
+      Judge whether a strategy is starting to fail: run the recent return
+      series through rolling metrics (Sharpe / max drawdown / win rate /
+      consecutive losses), monitor alerts, and drift detection (mean /
+      variance / distribution). Returns a verdict plus structured alerts and
+      drift findings. Stateless: each call rebuilds the monitor from the
+      supplied series.
+    endpoint: "/api/tools/monitor.strategy_health"
+    parameters:
+      - name: series
+        type: array
+        description: "Daily performance points, oldest first. Each item: {\"daily_return\": 0.01, \"equity\": 1000000}; daily_return is a fraction."
+        required: true
+      - name: strategy
+        type: string
+        description: "Strategy name (used in alerts). Defaults to 'ad-hoc'."
+        required: false
+        default: "ad-hoc"

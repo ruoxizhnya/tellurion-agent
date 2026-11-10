@@ -15,7 +15,7 @@ Quant Lab 的 **AI 实验员层**。从 monorepo `tellurion` 拆出（2026-10-09
 
 | 路径 | 内容 |
 |---|---|
-| `pkg/ai/` | AI 编排层（loop / pipeline / gene_pool / tools / agents / causal / …，24 包）——**自 core 仓迁入（2026-10-09，AI 拆仓阶段 2）** |
+| `pkg/ai/` | AI 编排层（loop / pipeline / gene_pool / tools / agents / causal / …，20 包 = 根包 + 19 子包）——**自 core 仓迁入（2026-10-09，AI 拆仓阶段 2）** |
 | `pkg/copilot/` | `CopilotService`（自然语言 → 生成代码 → 沙箱编译 → 回测）——自 core 的 `pkg/strategy/copilot.go` 归位 |
 | `cmd/ai/` | **ai-service**（:8086）：Copilot / pipeline / explore / tools 四族 HTTP 面 + AI 侧装配 builder |
 | `config/ai-service.yaml` | 本仓自持的 ai-service 配置（内容取自 core，只读复制） |

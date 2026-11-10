@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: QT-32-A —— copilot 的 promote 闸门与留痕 fail-closed 登记；端点与状态取值集合未变（§2 补两行 + 一段字段实况）
+last-verified: 2026-11-11
+verified-by: 代码-文档对齐审计 —— 补 `/readyz` / `/api/readyz`（`cmd/ai/readyz.go` 实际注册，README 已写）；此前 QT-32-A 登记 promote 闸门与留痕 fail-closed，QT-32-B 复核字段实况
 ---
 
 # API Schema — tellurion-agent
@@ -27,7 +27,8 @@ verified-by: QT-32-A —— copilot 的 promote 闸门与留痕 fail-closed 登�
 | GET | `/api/pipeline/jobs` · `/jobs/{id}` | pipeline 任务列表 / 详情 |
 | GET | `/api/tools` · `/api/tools/{name}` | 工具注册表 |
 | POST | `/api/tools/{name}` | 执行工具 |
-| GET | `/health` · `/metrics` | 运维面 |
+| GET | `/health` · `/metrics` | 运维面（存活 / 指标） |
+| GET | `/readyz` · `/api/readyz` | 就绪面：DB ping + `ai.*` 迁移关键表；未就绪 503，`/health` 仍 200 |
 
 > 这四族（copilot / pipeline / explore / tools）是对外全部；**没有第五族**。加族要先改 openapi 与本文。
 

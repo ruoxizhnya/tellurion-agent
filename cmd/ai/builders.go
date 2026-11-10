@@ -127,7 +127,7 @@ func BuildCopilot(v *viper.Viper, chain copilot.ChainSink, assets copilot.AssetR
 // 内置工具组。registry 经 ToolsHandler 暴露在 /api/tools/*，让外部 agent
 // 服务（如 Hermes）无需读 SPEC.md 即可发现与调用平台能力。
 //
-// S7-P3-4（Hermes Phase 1.7 + Phase 2.2-2.3）起 hosting 19 个工具、12 组：
+// S7-P3-4（Hermes Phase 1.7 + Phase 2.2-2.3）起 hosting 21 个工具、12 组：
 //   - backtest.run          (S7-P3-3, L3 gate)
 //   - factor.compute/.evaluate / validate_factor / compute_factor_ic
 //   - data.ohlcv/.stocks/.fundamentals
@@ -284,7 +284,7 @@ func BuildToolsRegistry(
 
 	logger.Info().
 		Int("tool_count", len(reg.List())).
-		Msg("Tools Registry initialized (S7-P3-3 + Hermes Phase 1.7 + Phase 2.2-2.3 + EQD-P2-1): 19 tools exposed at /api/tools/* — backtest/factor/data/strategy/gene-pool/walk-forward/summarize/lineage/regime/research")
+		Msg("Tools Registry initialized (S7-P3-3 + Hermes Phase 1.7 + Phase 2.2-2.3 + EQD-P2-1): 21 tools exposed at /api/tools/* — backtest/factor/data/strategy/gene-pool/walk-forward/summarize/lineage/regime/research/hypothesis/health")
 	return reg
 }
 

@@ -38,14 +38,15 @@ func (stubResearchProfile) GetResearchProfile(_ context.Context, _ string) (*ais
 	return nil, nil
 }
 
-// TestBuildToolsRegistry_RegistersAll19Tools verifies that
-// buildToolsRegistry registers all 19 tools (8 original S7-P3-3 tools +
+// TestBuildToolsRegistry_RegistersAll21Tools verifies that
+// buildToolsRegistry registers all 21 tools (8 original S7-P3-3 tools +
 // 8 Hermes Phase 1 tools + 1 Hermes Phase 2.2 tool + 1 Hermes Phase 2.3 tool
-// + 1 EQD-P2-1 tool) with the correct names. This is the wiring-level test —
-// individual tool behavior is covered in pkg/ai/tools/builtin/*_test.go.
+// + 1 EQD-P2-1 tool + 1 P2-3 tool + 1 P2-6 tool) with the correct names.
+// This is the wiring-level test — individual tool behavior is covered in
+// pkg/ai/tools/builtin/*_test.go.
 //
 // Reuses stubBacktestRunner from handlers_pipeline_test.go (same package).
-func TestBuildToolsRegistry_RegistersAll19Tools(t *testing.T) {
+func TestBuildToolsRegistry_RegistersAll21Tools(t *testing.T) {
 
 	// Minimal viper config — only the keys buildToolsRegistry reads.
 	v := newTestViper(t)
@@ -67,7 +68,7 @@ func TestBuildToolsRegistry_RegistersAll19Tools(t *testing.T) {
 		names[tool.Name] = true
 	}
 
-	// Verify all 19 expected tool names are present.
+	// Verify all 21 expected tool names are present.
 	expectedTools := []string{
 		// ── Original 8 (S7-P3-3) ──
 		"backtest.run",

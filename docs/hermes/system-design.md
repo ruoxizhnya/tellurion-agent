@@ -28,8 +28,8 @@ verified-by: 从 pkg/tools/builtin/ 的实现与注释反推（P2-11）
 
 ## §3.2 工具参数契约
 
-工具层是 Hermes 唯一能操作底座的通道（19 → 20 个工具，见
-`docs/hermes/tools-quant-backtest.yaml`）。每个工具的输入参数在设计文档
+工具层是 Hermes 唯一能操作底座的通道（21 个工具，见
+`docs/hermes/tools-quant-backtest.yaml`；以 `BuildToolsRegistry` 实际注册为准）。每个工具的输入参数在设计文档
 里都有约定，实现相对约定有 **3 处偏离**，全部记录在下表，并在对应源码
 注释里留了 `Design deviation` 标记。
 

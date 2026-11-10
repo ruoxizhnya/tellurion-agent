@@ -1,9 +1,9 @@
 # ai-service 配置（AI 拆仓阶段 1，ADR-027 §5 第 8 步的前置切片）。
 #
 # 只承载 AI 实验员侧（cmd/ai）：Copilot / pipeline / explore / tools。
-# 引擎装配（risk_manager / backtest / trading / database）与
-# analysis-service.yaml **逐值一致** —— 同一个实验在两个进程跑出
-# 不同结果是不可接受的；改一处必须同步另一处（两处都读同名键）。
+# QT-17 S3-c-3 起本进程不再装配回测引擎：risk_manager / backtest / trading
+# 等引擎配置只在 core 的 analysis-service.yaml，本文件不读，也不参与
+# 「逐值一致」（回测对等由「同一个 core 进程执行」保证）。
 #
 # 宿主机直跑视角（数据库/缓存在 localhost），与 analysis-service.yaml
 # 同一口径；容器内由 docker-compose 的 env 覆盖。
@@ -64,58 +64,18 @@ data_service:
 ai_service:
   factor_api_url: "http://127.0.0.1:8085"
 
-# 与 analysis-service.yaml 逐值一致（回测行为对等的来源）。
-risk_manager:
-  target_volatility: 0.15
-  max_position_weight: 0.10
-  min_position_weight: 0.01
-  stoploss:
-    atr_period: 14
-    base_multiplier: 2.5
-    bull_multiplier: 2.0
-    bear_multiplier: 3.5
-    sideways_multiplier: 2.5
-  take_profit:
-    atr_multiplier: 3.0
-  volatility:
-    lookback_days: 20
-    annualization_factor: 16.0
-  regime:
-    fast_ma_period: 10
-    slow_ma_period: 20
-    vol_lookback: 60
-
-backtest:
-  initial_capital: 1000000.0
-  commission_rate: 0.0003
-  slippage_rate: 0.0001
-  risk_free_rate: 0.03
-
-# 引擎读顶层 trading 键（v.UnmarshalKey("trading", ...)）—— 与
-# analysis-service.yaml **逐值一致**（详见那边 AUD-37 / AUD-06 注记；
-# 改这里必须同步那边，反之亦然）。
-trading:
-  # 印花税（仅卖出）：0.05%。2023-08-28 起从 0.1% 减半。
-  stamp_tax_rate: 0.0005
-  stamp_tax_rate_before: 0.001
-  min_commission: 5.0            # 最低佣金 5元
-  transfer_fee_rate: 0.00001     # 过户费 0.001%
-  price_limit:
-    normal: 0.10                 # 主板股票涨跌幅限制 ±10%
-    st: 0.10                     # 主板 ST 涨跌幅限制 ±10%（2026-07-06 起）
-    st_before: 0.05              # 主板 ST 涨跌幅限制 ±5%（2026-07-06 之前）
-    new: 0.20                    # 新股涨跌幅限制 ±20%
-  new_stock_days: 60             # 新股判断阈值（已知不准，见 TASKS AUD-07）
-  # ai-service 不暴露下单端点，emergency_token 与 execution 无关；键保留
-  # 只为与 analysis 的引擎装配假设完全一致。
-  emergency_token: ""
-
 copilot:
   # LLM 生成代码的编译沙箱目录，必须含能解析
   # github.com/ruoxizhnya/tellurion-contracts/domain 的 go.mod（QT-05 B1 起 domain
   # 类型住在契约仓，本仓已无 pkg/domain；消费方实现以 tellurion-agent 的 copilot 为准）。
   # 空 = 拒绝构建（fail closed, status="sandbox_rejected"）。
   working_dir: ""
+
+# equitydeep 研究档案（EQD-P2-1 的 research.profile 工具）：vault 回退路径。
+# 键 equitydeep.vault_path（env EQUITYDEEP_VAULT_PATH）；空 = 关闭 vault 回退，
+# 只读 research.* 投影。挂载点由部署决定，默认不配。
+equitydeep:
+  vault_path: ""
 
 # QT-32-B：AI 生成物登记到 tellurion-strategy 的资产服务（拿服务端签发的
 # strategy_id / version_hash；产物载体再加 artifact_hash）。

@@ -8,9 +8,9 @@ verified-by: QT-32-B —— `ai.generation_chain` 并列加资产坐标四列（
 
 > **所有权声明**：本仓**拥有 `ai` schema 的 DDL 与迁移**（目标态，QT-17）。
 
-**现状（QT-17 ⑤，2026-10-25；④ 2026-10-24；③ 2026-10-25）**：`ai` schema 七张表的 DDL 与迁移入口在本仓 [`pkg/aistore`](../pkg/aistore)（逐列对照 core 定义搬入，`parent_id` 自引用与外键改指 `ai.*`）；自有 `Store`（`kit/db` 连接池 + 启动迁移 + 内置种子）已装配进 `cmd/ai`。**写路径已停写 legacy**（QT-17 ④）：`cmd/ai/main.go` 直接把 `*aistore.Store` 注入 pipeline / explore 的 sink，双写适配器 `cmd/ai/experiment_dualwrite.go` 已整体删除；`public.experiments` 冻结在 30 行（2026-10-24 一次性回填归档进 `ai.experiments`，行级 `EXCEPT` 双向对拍 0 差异）。**读路径已切 `ai.*`**（research 域三表与 `factor_hypothesis`），仪器域日历/上市窗口走 core 的 QT-67 只读端点（QT-17 ③）。core 侧 DDL 唯一在 `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`（`experiments` :424、`factor_hypothesis` :575、`factor_genes` :930、`strategy_genes` :954、研究域 :361-398）——**旧表只保留不删**，core 侧导出符号已标 `Deprecated`，删除期限登记在 `tellurion:docs/TASKS.md` QT-05 ④（2027-01-31，S3 之后）。**基因池读写已切 `ai.*`**（QT-17 ⑤，2026-10-25）：`pkg/ai/gene_pool` 的表引用全部显式限定 `ai.factor_genes` / `ai.strategy_genes`，连接池改为 `aistore.Store.Pool()`（自持句柄），不再借 core 的 `store.DB()` 按 `search_path` 落到 `public.*`。
+**现状（QT-17 ⑤，2026-10-25；④ 2026-10-24；③ 2026-10-25）**：`ai` schema 七张表的 DDL 与迁移入口在本仓 [`pkg/aistore`](../pkg/aistore)（逐列对照 core 定义搬入，`parent_id` 自引用与外键改指 `ai.*`）；自有 `Store`（`kit/db` 连接池 + 启动迁移 + 内置种子）已装配进 `cmd/ai`。**写路径已停写 legacy**（QT-17 ④）：`cmd/ai/main.go` 直接把 `*aistore.Store` 注入 pipeline / explore 的 sink，双写适配器 `cmd/ai/experiment_dualwrite.go` 已整体删除；`public.experiments` 冻结在 30 行（2026-10-24 一次性回填归档进 `ai.experiments`，行级 `EXCEPT` 双向对拍 0 差异）。**读路径已切 `ai.*`**（research 域三表与 `factor_hypothesis`），仪器域日历/上市窗口走 core 的 QT-67 只读端点（QT-17 ③）。core 侧这七张表的遗留 DDL 已于 **2026-11-10（`SVC-CORE-AI-RETIRE`）删除**（原在 `tellurion:pkg/storage/postgres.go` 的 `migrationStatements()`）——存量环境的旧表只保留不删，core 侧导出符号随 DDL 一并退役；`ai.*` 的列形状以本仓 `pkg/aistore` 的 `Statements()` 为运行时真值。**基因池读写已切 `ai.*`**（QT-17 ⑤，2026-10-25）：`pkg/ai/gene_pool` 的表引用全部显式限定 `ai.factor_genes` / `ai.strategy_genes`，连接池改为 `aistore.Store.Pool()`（自持句柄），不再借 core 的 `store.DB()` 按 `search_path` 落到 `public.*`。
 > 上级依据：`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §1 —— **DDL 只有一个 owner**，同一个 PG 实例、每服务一个 schema，将来拆库是"按 schema 搬走"而不是重写。
-> 本文件是本仓表结构的**唯一真相源**：代码里的建表语句与它不一致时，**改代码**；要改表结构，先改本文件（结构级变更还要立 ADR）。
+> 本文件是本仓表结构的**变更权威**：要改表结构，先改本文件（结构级变更还要立 ADR）再改代码；代码里 [`pkg/aistore/schema.go`](../pkg/aistore/schema.go) 的 `Statements()` 是运行时真值，两者不一致即缺陷。
 
 ## 1. 归属表
 
@@ -32,7 +32,7 @@ verified-by: QT-32-B —— `ai.generation_chain` 并列加资产坐标四列（
 > 2. **不存 promote 结论**。闸门真相在 `tellurion-strategy:internal/asset/ddl.go` 的 `strategy_artifacts.status` 状态机（`built→validated→promoted/rejected/deprecated`）；本仓再存一份就是两处真相。坐标是**身份**，不是结论。
 > 3. 它是 QT-17「逐表搬、不臆造」的**显式例外**，登记在 `pkg/aistore/schema_core_drift_test.go` 的 `agentOwnedTables`；那张豁免名单由 `TestSchema_AgentOwnedTablesAreDeclared` 四条腿钉住（没登记 / DDL 里没有 / 与 core 退役对照同时出现 / 理由为空 —— 任一都红）。
 
-> 迁入纪律（QT-17）：**以 core 现有 DDL 为准逐表搬**，不按类型名臆造表名。**2026-11-10 起**（`SVC-CORE-AI-RETIRE`）：七张 core 遗留 DDL 已删除，`TestSchema_ColumnsMatchCore` 的逐列对拍随之退场，改为 `TestSchema_RetiredCoreTablesAreGone` —— core 里七表零 `CREATE TABLE` 才绿。`ai.*` 的列形状从此以本仓 `Statements()` 为唯一真相。
+> 迁入纪律（QT-17）：**以 core 现有 DDL 为准逐表搬**，不按类型名臆造表名。**2026-11-10 起**（`SVC-CORE-AI-RETIRE`）：七张 core 遗留 DDL 已删除，`TestSchema_ColumnsMatchCore` 的逐列对拍随之退场，改为 `TestSchema_RetiredCoreTablesAreGone` —— core 里七表零 `CREATE TABLE` 才绿。`ai.*` 的列形状以本仓 `Statements()` 为运行时真值（本文件同步登记）。
 
 ## 2. 只读输入（不属于本仓，禁止写入）
 
@@ -49,13 +49,13 @@ verified-by: QT-32-B —— `ai.generation_chain` 并列加资产坐标四列（
 
 1. **实验域数据自持**：写 `ai.*`，不写 core 的表（双写期已于 2026-10-24 结束，例外收回）。
 2. **不 import core 实现包**（`pkg/storage` / `pkg/backtest` / `pkg/strategy`）；跨边界只走 contracts。
-3. **逐 bar / 逐笔零远程**：回测循环里出现 HTTP 就是错的（当前引擎在进程内，这点天然成立）。
+3. **逐 bar / 逐笔零远程**：回测循环里出现 HTTP 就是错的。引擎在 core 进程内执行；本仓只按整段区间发起一次 HTTP 请求（QT-17 S3-c-3），逐 bar 仍在单个进程内完成。
 4. **停写后旧表零增长**：`public.experiments` 行数与序列不再前进，由 `cmd/ai` 的真库腿 `TestStopWrite_LegacyExperimentsFrozen` 与 `internal/repoguard` 的 import 护栏共同钉住。
 5. 实验记录必须能回答"用哪份策略 / 数据 / 规则"（三 hash，X0）。
 
 ## 4. 建表与迁移
 
-**现状（必须先知道）**：core 的迁移是「**启动时按序执行一组幂等 DDL**」——唯一真相是 `pkg/storage/postgres.go` 的 `migrationStatements()` 数组（`migrate()` 在服务启动时逐条跑）；**没有版本表、没有 down、没有执行记录**（有意取舍，理由见 core 的 `migrations/README.md`）。`migrations/`（14 个）与 `docs/migrations/`（25 个）里的 `.sql` 是**历史镜像，不执行**——改它们不会改库。
+**现状（必须先知道）**：本仓的迁移是「**启动时按序执行一组幂等 DDL**」——唯一真相是 [`pkg/aistore/schema.go`](../pkg/aistore/schema.go) 的 `statements` 数组（`kit/db.Migrate` 在服务启动时逐条跑）；**没有版本表、没有 down、没有执行记录**（与 core 同口径，理由见 core 的 `migrations/README.md`）。core 的 `pkg/storage/postgres.go` 已随 `SVC-CORE-AI-RETIRE`（2026-11-10）删除这七张表的 DDL；core 的 `migrations/` 与 `docs/migrations/` 只是 core 自己的历史镜像，与本仓无关。
 
 **本仓约定**（从建仓第一天执行）：
 
