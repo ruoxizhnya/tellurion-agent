@@ -61,6 +61,20 @@ AUTH_INSECURE=true SERVER_HOST=127.0.0.1 \
 docker compose -f deploy/compose.yaml up --build
 ```
 
+服务间地址默认是**宿主机视角**（`data_service.url` / `ai_service.factor_api_url` /
+`strategy_asset.url` 都是 `http://127.0.0.1:<port>`），容器里由
+`deploy/compose.yaml` 的 `DATA_SERVICE_URL` / `AI_SERVICE_FACTOR_API_URL` /
+`STRATEGY_ASSET_URL` 覆盖成服务名。启动期会逐项解析这些主机名
+（[cmd/ai/endpoints.go](file:///c:/Users/ruoxi/Workspace/tellurion-agent/cmd/ai/endpoints.go)）：
+宿主机上误留容器 DNS 会在启动时报错并点名该注入哪个 env，不会拖到第一次
+工具调用才 404。探针：`/health`（存活，不碰库）与 `/readyz`（就绪，校验
+DB ping + `ai.*` 迁移关键表）。
+
+```bash
+curl -sS http://127.0.0.1:8086/health
+curl -sS http://127.0.0.1:8086/readyz
+```
+
 ## ai-service 的镜像构建
 
 单仓构建即可（go.mod 已无 replace，不再需要 core 作为命名构建上下文）：

@@ -47,6 +47,10 @@ func main() {
 	logger := kitlogging.Logger
 	m := initMetrics(logger)
 
+	// 出站地址启动期体检：宿主机上若还留着容器 DNS（data-service 等），
+	// 在这里点名该注入的 env 并退出，而不是等第一次工具调用远处报错。
+	validateOutboundEndpoints(v, logger)
+
 	// QT-17 ②：实验/研究/假设域的自有 store（ai schema，幂等迁移 + 内置
 	// 假设种子）。DSN 与 core store 同源同键（database.*），只是落自己的表；
 	// 连接能力用 kit（D10），不借 core 的 storage.BuildDSN。
