@@ -9,7 +9,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rs/zerolog v1.33.0
 	github.com/ruoxizhnya/tellurion-contracts v0.9.0
-	github.com/ruoxizhnya/tellurion-kit v0.1.4
+	github.com/ruoxizhnya/tellurion-kit v0.2.0
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/time v0.15.0
