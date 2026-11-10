@@ -117,6 +117,9 @@ func main() {
 			"status":  "ok",
 		})
 	})
+	// 就绪探针：/health 只看进程活着，/readyz 还要看「库能连 + ai.* 启动迁移
+	// 到位」。库断开时这里 503、/health 仍 200 —— 编排器摘流量但不重启进程。
+	registerReadiness(router, aiStore, logger)
 	router.GET("/metrics", kitobservability.Handler(m))
 
 	// ── 四族 AI 路由（自 analysis 迁入，路径不变）────────────────────
@@ -170,6 +173,8 @@ var aiPublicPaths = []string{
 	"/api/auth/bootstrap",
 	"/health",
 	"/api/health",
+	"/readyz",
+	"/api/readyz",
 	"/metrics",
 }
 

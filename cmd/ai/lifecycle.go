@@ -129,12 +129,16 @@ func newRateLimiter(rate int, window time.Duration) *rateLimiter {
 // rateLimitExemptPaths 是**永远不许限流**的请求路径。
 //
 // 判据是「限流它会不会让客户端分不清 429 与 401」：探针拿到 429 会被前端
-// 当作未登录，整站弹登录页；`/api/auth/status` 必须豁免。`/api/auth/login`
-// 与 `/api/auth/refresh` 不豁免 —— 它们是口令爆破的第一道闸。逐字相等匹配，
-// 不做前缀匹配（前缀匹配会被 `..` 之类的写法绕过）。
+// 当作未登录，整站弹登录页；`/api/auth/status` 必须豁免。`/readyz` 同理，
+// 且编排器会把 429 读成「实例没准备好」而反复摘流量 —— 库故障时它本来就
+// 要连续失败，不能叠一层限流。`/api/auth/login` 与 `/api/auth/refresh`
+// 不豁免 —— 它们是口令爆破的第一道闸。逐字相等匹配，不做前缀匹配（前缀
+// 匹配会被 `..` 之类的写法绕过）。
 var rateLimitExemptPaths = []string{
 	"/health",
 	"/api/health",
+	"/readyz",
+	"/api/readyz",
 	"/api/auth/status",
 }
 
