@@ -37,15 +37,17 @@ type ToolsHandler struct {
 	logger   zerolog.Logger
 
 	// authSvc, when non-nil, enables per-tool RBAC on POST
-	// /api/tools/:name. nil means "no role enforcement" — used by
-	// tests and by deployments that run with auth disabled.
+	// /api/tools/:name. authMode is the process-wide 鉴权三态 fixed at
+	// startup: enforced (RBAC), unavailable (503 auth_unavailable) or
+	// open (explicitly declared insecure mode).
 	//
 	// AUD-02 (ODR-065 H5): this must be a *TokenService, not a bare
 	// gin.HandlerFunc, because the role requirement depends on the
 	// tool being called — and the tool name is only known inside the
 	// handler (the route is /api/tools/:name, a wildcard, so no
 	// per-route middleware can express it).
-	authSvc *kitauth.TokenService
+	authSvc  *kitauth.TokenService
+	authMode authMode
 }
 
 // ToolsHandlerOption configures a ToolsHandler.
@@ -56,22 +58,28 @@ func WithToolsLogger(l zerolog.Logger) ToolsHandlerOption {
 	return func(h *ToolsHandler) { h.logger = l }
 }
 
-// WithToolsAuth enables per-tool RBAC using svc. When set, POST
-// /api/tools/:name requires a role derived from the tool's class:
+// WithToolsAuth enables per-tool RBAC using svc. POST /api/tools/:name
+// requires a role derived from the tool's class:
 //
 //	read  -> viewer, trader, admin
 //	write -> trader, admin
 //	admin -> admin
 //
-// When svc is disabled (no JWT secret), authorizeTool short-circuits and
-// nothing is enforced — matching the documented open-access mode.
+// mode is the same 鉴权三态 the router uses (decideAuthStartup):
 //
-// When this option is not passed at all (authSvc == nil), no RBAC is
-// applied either. That is intentionally the same behaviour as a
-// disabled service so the existing test constructors keep working;
-// production wiring in cmd/ai/main.go always passes it.
-func WithToolsAuth(svc *kitauth.TokenService) ToolsHandlerOption {
-	return func(h *ToolsHandler) { h.authSvc = svc }
+//   - authModeEnforced: RBAC applies (svc must be enabled).
+//   - authModeUnavailable: every execution is 503 auth_unavailable —
+//     there is no identity to authorize, so execution is not allowed.
+//   - authModeOpen: explicitly declared insecure mode; no RBAC.
+//
+// The zero value (no option passed) is authModeUnavailable, i.e.
+// fail-closed: constructing a handler without auth wiring never
+// silently opens tool execution.
+func WithToolsAuth(svc *kitauth.TokenService, mode authMode) ToolsHandlerOption {
+	return func(h *ToolsHandler) {
+		h.authSvc = svc
+		h.authMode = mode
+	}
 }
 
 // NewToolsHandler constructs a ToolsHandler backed by reg. Panics if
@@ -183,13 +191,29 @@ func (h *ToolsHandler) handleExecute(c *gin.Context) {
 // Returns true if the request may proceed; on false it has already
 // written the error response.
 //
+// 鉴权三态在这里显式分流（与全局中间件同源，见 decideAuthStartup）：
+//
+//   - authModeOpen: 显式声明的放开形态，不做 RBAC；
+//   - authModeUnavailable: 没有可用身份 → 503 auth_unavailable（fail-closed，
+//     绝不 return true）；
+//   - authModeEnforced: 按副作用等级做 RBAC；svc 缺失/未启用属于装配错误，
+//     同样 503 auth_unavailable 而不是放行。
+//
 // Fail-closed: tools classified SideEffectAdmin (which includes every
 // tool missing from the classification table) require admin.
 func (h *ToolsHandler) authorizeTool(c *gin.Context, name string) bool {
-	if h.authSvc == nil || !h.authSvc.Enabled() {
-		// Auth not wired or not enabled — open-access mode, same
-		// semantics as Service.Middleware().
+	if h.authMode == authModeOpen {
 		return true
+	}
+	if h.authMode != authModeEnforced || h.authSvc == nil || !h.authSvc.Enabled() {
+		// 无 secret 且未声明放开，或 RBAC 装配缺失：没有可判定身份的闸门。
+		// 写面与工具执行一律不可用，避免把「没配鉴权」静默变成「谁都能跑」。
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+			"error": "authentication is not configured: tool execution is unavailable " +
+				"until JWT_SECRET is set",
+			"code": authUnavailableCode,
+		})
+		return false
 	}
 
 	var allowed []string

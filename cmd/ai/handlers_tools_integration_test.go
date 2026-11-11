@@ -98,7 +98,7 @@ func newIntegrationRegistry(t *testing.T) (*tools.Registry, *httpTestFactorPool)
 func newIntegrationHandler(t *testing.T, reg *tools.Registry) *gin.Engine {
 	t.Helper()
 	router := gin.New()
-	h := NewToolsHandler(reg, zerolog.Nop())
+	h := NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(nil, authModeOpen))
 	h.RegisterRoutes(router)
 	return router
 }

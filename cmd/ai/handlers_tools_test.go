@@ -108,7 +108,7 @@ func newTestRegistry(t *testing.T, toolList ...tools.Tool) *tools.Registry {
 func doToolsRequest(t *testing.T, reg *tools.Registry, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	r := gin.New()
-	NewToolsHandler(reg, zerolog.Nop()).RegisterRoutes(r)
+	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(nil, authModeOpen)).RegisterRoutes(r)
 
 	var reader *bytes.Reader
 	if body != nil {
@@ -317,7 +317,7 @@ func TestHandler_Tools_ExecuteTool_ToolError(t *testing.T) {
 func TestHandler_Tools_ExecuteTool_InvalidBody(t *testing.T) {
 	reg := newTestRegistry(t, echoTool{})
 	r := gin.New()
-	NewToolsHandler(reg, zerolog.Nop()).RegisterRoutes(r)
+	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(nil, authModeOpen)).RegisterRoutes(r)
 
 	req := httptest.NewRequest("POST", "/api/tools/echo", bytes.NewReader([]byte("not-json{")))
 	req.Header.Set("Content-Type", "application/json")

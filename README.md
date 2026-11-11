@@ -53,8 +53,15 @@ CI（`.github/workflows/ci.yml`）单仓 checkout（不拉 core、不改 replace
 # 空口令会在启动期被 kitdb.BuildDSN 拒绝，而不是连库时才报认证失败）：
 CONFIG_PATH=config/ai-service.yaml \
 DATABASE_HOST=127.0.0.1 DATABASE_PASSWORD='<本机 postgres 用户的口令>' \
-AUTH_INSECURE=true SERVER_HOST=127.0.0.1 \
+AUTH_INSECURE=true AUTH_INSECURE_EXPOSURE=loopback-published SERVER_HOST=127.0.0.1 \
   go run ./cmd/ai
+
+# 鉴权三态（详见 config/ai-service.yaml 注释与 docs/api-schema.md §1.0）：
+#   - 配 JWT_SECRET             → 全闸；
+#   - 只 AUTH_INSECURE=true     → 进程能起，但写面/工具执行 503 auth_unavailable，
+#                                 读面公开；
+#   - 再加 AUTH_INSECURE_EXPOSURE=loopback-published → 显式放开（本地/回环发布）。
+# 非回环绑定 + 无 secret + 无声明会直接拒绝启动。
 
 # 若本机 PG 用 scram-sha-256（宿主默认即是），上面的 DATABASE_PASSWORD 必须
 # 是真实口令；不想用无鉴权模式就改注入 JWT_SECRET=<至少 32 字节随机值>。

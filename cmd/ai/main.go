@@ -80,7 +80,7 @@ func main() {
 
 	// QT-17 S3-b：本进程只消费 token claims（kit/auth 解析 + 本仓角色常量），
 	// 不再经 bootstrap.InitAuth 借 core 连接池读 users 表。用户库留在 core。
-	authSvc := initTokenService(v, logger)
+	authSvc, authMode := initTokenService(v, logger)
 
 	// ── 回测 / walk-forward 只走 HTTP（QT-17 S3-c-3）───────────────
 	//
@@ -120,7 +120,7 @@ func main() {
 	)
 
 	applyGinMode(v, logger)
-	router := buildRouter(authSvc, v, logger)
+	router := buildRouter(authSvc, authMode, v, logger)
 
 	// 健康探针（local-stack netstat 断言 + compose healthcheck 消费）。
 	router.GET("/health", func(c *gin.Context) {
@@ -152,7 +152,7 @@ func main() {
 	// AUD-02 (ODR-065 H5)：WithToolsAuth 按工具的审计副作用类做 per-tool
 	// RBAC —— save_factor / save_strategy 要 trader-or-admin，其余未分类
 	// 一律 admin（fail-closed）。
-	NewToolsHandler(toolsRegistry, logger, WithToolsAuth(authSvc)).RegisterRoutes(router)
+	NewToolsHandler(toolsRegistry, logger, WithToolsAuth(authSvc, authMode)).RegisterRoutes(router)
 
 	srv := startHTTPServer(router, v, logger, "AI Service (ai-service)")
 
@@ -189,12 +189,11 @@ var aiPublicPaths = []string{
 }
 
 // initTokenService 构造 kit 的 token 服务，并执行本仓的启动门
-// （`decideAuthStartup`：没有密钥就拒绝启动，唯一豁免是显式声明的
-// 本地/容器回环形态）。
+// （`decideAuthStartup`：三态裁决，非回环绑定 + 无 secret + 无声明直接拒绝启动）。
 //
 // 与旧 `bootstrap.InitAuth` 的差别（S3-b 有意为之）：不持有连接池、不读写
 // users、不写 audit_logs —— 本进程只验证 token 签名与 claims。
-func initTokenService(v *viper.Viper, logger zerolog.Logger) *kitauth.TokenService {
+func initTokenService(v *viper.Viper, logger zerolog.Logger) (*kitauth.TokenService, authMode) {
 	d := decideAuthStartup(
 		v.GetString("auth.jwt_secret"),
 		v.GetBool("auth.allow_insecure"),
@@ -212,15 +211,22 @@ func initTokenService(v *viper.Viper, logger zerolog.Logger) *kitauth.TokenServi
 		Issuer:          v.GetString("auth.issuer"),
 		PublicPaths:     aiPublicPaths,
 	})
-	if svc.Enabled() {
+	switch d.Mode {
+	case authModeEnforced:
 		logger.Info().
 			Int("access_ttl_sec", int(svc.AccessTTL().Seconds())).
 			Msg("auth: JWT enabled (token claims only; users live in core)")
-	} else {
+	case authModeUnavailable:
 		logger.Warn().
-			Msg("auth: INSECURE open-access mode — NO authentication, loopback only, do not use outside local dev")
+			Msg("auth: JWT secret missing — reads stay public; write endpoints and tool " +
+				"execution return 503 auth_unavailable. Set JWT_SECRET to enable them")
+	case authModeOpen:
+		logger.Warn().
+			Msg("auth: INSECURE open-access mode — write surface and tool execution are " +
+				"UNAUTHENTICATED (AUTH_INSECURE_EXPOSURE=loopback-published). " +
+				"loopback/local only, do not use outside local dev")
 	}
-	return svc
+	return svc, d.Mode
 }
 
 // buildRouter 组装 HTTP 中间件链：recovery、CORS、限流、请求日志、鉴权。
@@ -228,22 +234,29 @@ func initTokenService(v *viper.Viper, logger zerolog.Logger) *kitauth.TokenServi
 // 为什么本仓自持而不是继续用 `bootstrap.BuildRouter`：后者形参是 core 的
 // `*auth.Service`（带连接池、audit 写库）。S3-d 起路由生命周期与限流/回环门
 // 全部由本仓持有，kit 只提供 CORS 与错误响应。
-func buildRouter(authSvc *kitauth.TokenService, v *viper.Viper, logger zerolog.Logger) *gin.Engine {
+func buildRouter(authSvc *kitauth.TokenService, mode authMode, v *viper.Viper, logger zerolog.Logger) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(kithttpserver.CORS(kithttpserver.AllowedOrigins(v)))
 	router.Use(newRateLimiter(rateLimitPerMinute(v), time.Minute).Middleware())
 	router.Use(requestLogger(logger))
-	if authSvc.Enabled() {
+	switch mode {
+	case authModeEnforced:
 		router.Use(authSvc.Middleware())
 		// 回测 / walk-forward / 表达式校验要打 core 的变更端点；以调用者
 		// 本人身份转发（本进程不签发 token）。显式放进请求 ctx，异步链路
 		// 由调用方用 context.WithoutCancel 保留值。
 		router.Use(forwardBearerToken())
-	} else if isLoopbackHost(v.GetString("server.host")) {
-		// insecure 模式逐请求回环门：启动期只判绑定网卡，同机进程 / 端口
-		// 转发仍能打到管理面，故运行期还要判来源（fail-closed）。
-		router.Use(loopbackOnly())
+	case authModeOpen:
+		// 明确放开的形态：逐请求回环来源门只在绑定回环时生效；容器绑
+		// 0.0.0.0 的暴露面由 AUTH_INSECURE_EXPOSURE=loopback-published 的
+		// 发布层声明 + 部署静态护栏保证（ADR-025）。
+		if isLoopbackHost(v.GetString("server.host")) {
+			router.Use(loopbackOnly())
+		}
+	default: // authModeUnavailable
+		// 无 secret 且未声明放开：读面公开，写面与工具执行 503。
+		router.Use(writeSurfaceUnavailable())
 	}
 	return router
 }

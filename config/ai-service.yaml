@@ -15,7 +15,16 @@ server:
   cors:
     allowed_origins: []
 
-# P0-4 鉴权（与 analysis 同一套不变量：无密钥拒启动，豁免须显式声明）。
+# 鉴权三态（与 analysis 同一套不变量，本轮加固后口径）：
+#   1) 有 JWT_SECRET              → 全闸（写面与读面都验 token）；
+#   2) 无 secret + 回环绑定 + 无显式声明
+#                                 → 进程能起：读面公开，写面与工具执行
+#                                   一律 503 auth_unavailable；
+#   3) 无 secret + AUTH_INSECURE=true +
+#      AUTH_INSECURE_EXPOSURE=loopback-published
+#                                 → 明确放开（容器形态：绑 0.0.0.0、发布层限
+#                                   127.0.0.1），启动 WARN 点名写面无鉴权。
+# 「非回环绑定 + 无 secret + 无声明」直接拒绝启动（旧实现是反的，已修）。
 # 密钥只从 env 注入：JWT_SECRET / AUTH_INSECURE / AUTH_INSECURE_EXPOSURE。
 auth:
   jwt_secret: ""

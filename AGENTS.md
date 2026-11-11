@@ -23,6 +23,17 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 - 不要把 core 的实现抄进来"消除依赖"（那是把边界搞坏，不是修好）；
 - 需要 core 的数据 / 计算 → 走它已登记的 HTTP 粗粒度端点（见 `docs/dataflow.md`）。
 
+### 2.1 鉴权三态（硬约束）
+
+启动期 `decideAuthStartup`（`cmd/ai/lifecycle.go`）一次性定形态，**禁止**在运行期改判：
+
+1. 有 `JWT_SECRET` → 全闸；
+2. 无 secret + 回环绑定 + 无显式声明 → 进程能起，**读面公开、写面与工具执行 503 `auth_unavailable`**；
+3. 无 secret + `AUTH_INSECURE=true` + `AUTH_INSECURE_EXPOSURE=loopback-published` → 显式放开（启动 WARN）。
+
+「非回环绑定 + 无 secret + 无声明」必须拒绝启动；`authorizeTool` 在无鉴权时不得 `return true`。
+口径细节见 `docs/api-schema.md` §1.0。改这三态 = 改接口安全语义，须同步本文与 api-schema。
+
 ## 3. 边界（硬约束）
 
 **允许**

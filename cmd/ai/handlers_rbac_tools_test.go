@@ -40,7 +40,7 @@ func toolsRBACRouter(t *testing.T, svc *kitauth.TokenService) *gin.Engine {
 	require.NoError(t, reg.Register(newStubTool("save_factor")))
 	require.NoError(t, reg.Register(newStubTool("backtest.run")))
 
-	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(svc)).RegisterRoutes(r)
+	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(svc, authModeEnforced)).RegisterRoutes(r)
 	return r
 }
 
@@ -132,7 +132,7 @@ func TestTools_UnclassifiedTool_FailsClosed(t *testing.T) {
 	r.Use(svc.Middleware())
 	reg := tools.NewRegistry()
 	require.NoError(t, reg.Register(newStubTool("brand.new.unclassified")))
-	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(svc)).RegisterRoutes(r)
+	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(svc, authModeEnforced)).RegisterRoutes(r)
 
 	// trader is NOT enough for an unclassified tool.
 	w := callTool(t, r, "brand.new.unclassified", tokenFor(t, svc, RoleTrader))
@@ -144,20 +144,55 @@ func TestTools_UnclassifiedTool_FailsClosed(t *testing.T) {
 	assert.NotEqual(t, http.StatusForbidden, w.Code)
 }
 
-func TestTools_AuthDisabled_OpenAccess(t *testing.T) {
+// TestTools_AuthUnavailable_ExecuteReturns503 钉住第 2 态：无 JWT_SECRET
+// 且未显式声明放开时，工具执行不得 return true（放行），必须 503
+// auth_unavailable。带副作用的工具（save_factor）同样如此。
+func TestTools_AuthUnavailable_ExecuteReturns503(t *testing.T) {
 	t.Parallel()
 	svc := kitauth.NewTokenService(kitauth.Config{})
 	require.False(t, svc.Enabled())
 
 	r := gin.New()
-	r.Use(svc.Middleware())
 	reg := tools.NewRegistry()
 	require.NoError(t, reg.Register(newStubTool("save_factor")))
-	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(svc)).RegisterRoutes(r)
+	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(svc, authModeUnavailable)).RegisterRoutes(r)
 
 	w := callTool(t, r, "save_factor", "")
-	assert.NotEqual(t, http.StatusForbidden, w.Code,
-		"auth disabled must stay open-access for tools too")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code,
+		"auth unavailable must fail closed on tool execution; body=%s", w.Body.String())
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, authUnavailableCode, body["code"])
+}
+
+// TestTools_ZeroMode_FailsClosed 钉住「没装配鉴权选项」也不得静默放行：
+// authMode 的零值就是 unavailable。
+func TestTools_ZeroMode_FailsClosed(t *testing.T) {
+	t.Parallel()
+	r := gin.New()
+	reg := tools.NewRegistry()
+	require.NoError(t, reg.Register(newStubTool("backtest.run")))
+	NewToolsHandler(reg, zerolog.Nop()).RegisterRoutes(r)
+
+	w := callTool(t, r, "backtest.run", "")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code,
+		"unwired auth must not open tool execution; body=%s", w.Body.String())
+}
+
+// TestTools_AuthOpen_AllowsExecution 钉住第 3 态：显式声明放开后，
+// 工具执行不做 RBAC（与全局中间件同语义）。
+func TestTools_AuthOpen_AllowsExecution(t *testing.T) {
+	t.Parallel()
+
+	r := gin.New()
+	reg := tools.NewRegistry()
+	require.NoError(t, reg.Register(newStubTool("save_factor")))
+	NewToolsHandler(reg, zerolog.Nop(), WithToolsAuth(nil, authModeOpen)).RegisterRoutes(r)
+
+	w := callTool(t, r, "save_factor", "")
+	assert.Equal(t, http.StatusOK, w.Code,
+		"explicit open-access mode must allow tool execution; body=%s", w.Body.String())
 }
 
 // TestTools_ListEndpoint_NotGated ensures the discovery endpoints

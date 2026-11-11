@@ -237,6 +237,24 @@ func loopbackOnly() gin.HandlerFunc {
 	}
 }
 
+// writeSurfaceUnavailable 是「无 secret 且未声明放开」形态下的写面闸：
+// 读面（GET/HEAD/OPTIONS）保持公开，其余方法一律 503 auth_unavailable。
+// 按方法而不是按路由清单判定 —— 将来新增写端点无需记得来这张表登记。
+func writeSurfaceUnavailable() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+			"error": "authentication is not configured: write endpoints and tool execution " +
+				"are unavailable until JWT_SECRET is set",
+			"code": authUnavailableCode,
+		})
+	}
+}
+
 // isLoopbackRemoteAddr 报告 `host:port` 形式的来源地址是否为本机回环。
 // 空串、解析失败、非回环 IP 一律 false（fail-closed；不猜）。
 func isLoopbackRemoteAddr(remoteAddr string) bool {
@@ -279,18 +297,49 @@ func isLoopbackHost(host string) bool {
 // 保证；真实暴露面由部署静态护栏 + 运行时 netstat 断言保证。
 const insecureExposureLoopbackPublished = "loopback-published"
 
+// authUnavailableCode 是「鉴权未配置」时写面的机器码。六仓统一口径：
+// 无 JWT_SECRET 且未显式声明放开时，读面保持公开，写面与工具执行一律
+// 503 + 这个码，不允许静默降级成「整体放行」。
+const authUnavailableCode = "auth_unavailable"
+
+// authMode 是进程启动时定下的鉴权形态（三态，启动后不再变化）。
+type authMode uint8
+
+const (
+	// authModeUnavailable：无 secret 且未显式声明放开（回环绑定，进程可起）。
+	// 读面公开；写面与工具执行返回 503 auth_unavailable。
+	authModeUnavailable authMode = iota
+	// authModeEnforced：有 JWT_SECRET，全闸。
+	authModeEnforced
+	// authModeOpen：无 secret 但显式声明 loopback-published，明确放开。
+	// 回环绑定时运行期再叠一层来源门。
+	authModeOpen
+)
+
 type authStartup struct {
-	Secret   []byte // 空 = open-access
-	Insecure bool   // 明确处于「无鉴权」模式
-	Refuse   bool   // 拒绝启动
-	Reason   string // 拒绝原因
+	Mode   authMode
+	Secret []byte // 空 = 无鉴权
+	Refuse bool   // 拒绝启动
+	Reason string // 拒绝原因
 }
 
-// decideAuthStartup 裁决启动期的鉴权配置：**没有密钥就拒绝启动**。
-// 唯一豁免是 auth.allow_insecure=true 且（绑定回环 或 声明 loopback-published）。
+// decideAuthStartup 裁决启动期的鉴权配置（三态）：
+//
+//  1. 有 JWT_SECRET                        → 全闸（authModeEnforced）
+//  2. 无 secret + AUTH_INSECURE=true + 回环绑定
+//     → 进程可起（authModeUnavailable）：
+//     读面公开，写面/工具执行 503
+//  3. 无 secret + AUTH_INSECURE=true + 显式声明
+//     AUTH_INSECURE_EXPOSURE=loopback-published
+//     → 明确放开（authModeOpen），启动 WARN
+//
+// 其余组合一律拒绝启动 —— **尤其是「非回环绑定 + 无 secret + 无声明」**：
+// 容器里 host 是 0.0.0.0，不装门直接放行会把它暴露给整个网络。
+// AUTH_INSECURE 仍是显式 opt-in（双开关，ADR-025）：只给 exposure 声明
+// 而没开 AUTH_INSECURE 不算放开。
 func decideAuthStartup(secret string, allowInsecure bool, bindHost, insecureExposure string) authStartup {
 	if s := strings.TrimSpace(secret); s != "" {
-		return authStartup{Secret: []byte(s)}
+		return authStartup{Mode: authModeEnforced, Secret: []byte(s)}
 	}
 	if !allowInsecure {
 		return authStartup{
@@ -300,19 +349,20 @@ func decideAuthStartup(secret string, allowInsecure bool, bindHost, insecureExpo
 				"Local dev only: set AUTH_INSECURE=true AND server.host=127.0.0.1",
 		}
 	}
-	if isLoopbackHost(bindHost) {
-		return authStartup{Insecure: true}
-	}
 	if strings.TrimSpace(insecureExposure) == insecureExposureLoopbackPublished {
-		return authStartup{Insecure: true}
+		return authStartup{Mode: authModeOpen}
+	}
+	if isLoopbackHost(bindHost) {
+		return authStartup{Mode: authModeUnavailable}
 	}
 	return authStartup{
 		Refuse: true,
 		Reason: fmt.Sprintf("auth: AUTH_INSECURE=true but server.host=%q is not loopback — "+
 			"open-access would be reachable from other hosts. "+
-			"Set server.host=127.0.0.1, or configure JWT_SECRET instead. "+
-			"Containers (which must bind 0.0.0.0) must instead publish on loopback and declare "+
-			"AUTH_INSECURE_EXPOSURE=%s", bindHost, insecureExposureLoopbackPublished),
+			"Bind loopback (degraded mode: writes return 503), or declare "+
+			"AUTH_INSECURE_EXPOSURE=%s behind a loopback-only publish, or set JWT_SECRET. "+
+			"Refusing to start with an unauthenticated write surface reachable off-host",
+			bindHost, insecureExposureLoopbackPublished),
 	}
 }
 

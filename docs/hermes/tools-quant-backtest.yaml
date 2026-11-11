@@ -14,6 +14,12 @@
 #   :8085 是 core analysis 的纯反代入口，响应带 x-served-by: agent；两者契约相同。
 # Endpoint pattern: POST /api/tools/{tool_name}
 #
+# 鉴权（2026-11-12 加固，详见 docs/api-schema.md §1.0）：
+#   工具执行属于写面。无 JWT_SECRET 且未显式声明 AUTH_INSECURE_EXPOSURE=
+#   loopback-published 时，执行一律 503 {"code":"auth_unavailable"}；
+#   有 JWT_SECRET 时按工具副作用等级做 RBAC（裸 token 的角色由 core 签发）。
+#   Hermes 调用方必须持有 token，或在本地显式声明的 open-access 栈上运行。
+#
 # Phase 1 (Hermes Agent Integration): 16 tools across 7 groups.
 # Phase 2.2: +1 tool (get_strategy_lineage) — 17 tools across 8 groups.
 # Phase 2.3: +1 tool (get_market_regime) — 18 tools across 9 groups.

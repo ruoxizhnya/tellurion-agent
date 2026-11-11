@@ -45,7 +45,8 @@ services:
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DATABASE_DATABASE: ${POSTGRES_DB:-tellurion}
       DATABASE_SSLMODE: disable
-      # 容器必须绑 0.0.0.0；发布层限定回环，故按既有不变量声明 open-access。
+      # 容器必须绑 0.0.0.0；发布层限定回环，故按既有不变量显式声明 open-access。
+      # 无 secret 且无此声明时进程会拒绝启动（非回环 + 无鉴权写面不可接受）。
       AUTH_INSECURE: ${AUTH_INSECURE:-true}
       AUTH_INSECURE_EXPOSURE: ${AUTH_INSECURE_EXPOSURE:-loopback-published}
       JWT_SECRET: ${JWT_SECRET:-}

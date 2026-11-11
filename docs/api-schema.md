@@ -38,6 +38,21 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 > 这四族（copilot / pipeline / explore / tools）是对外全部；**没有第五族**。加族要先改 openapi 与本文。
 > 路径前缀：`explore` / `copilot` / `pipeline` 挂 `/api/*`；`tools` 同时接受 `/api/tools` 与 `/api/tools/`（尾斜杠变体）。
 
+### 1.0 鉴权三态（`cmd/ai/lifecycle.go::decideAuthStartup`）
+
+启动期一次性裁决，进程生命周期内不再变化；口径与其余五仓统一：
+
+| 态 | 条件 | 行为 |
+|---|---|---|
+| 1. 全闸 | `JWT_SECRET` 非空 | 中间件校验 token；写面按 `role` 做 RBAC |
+| 2. 降级（`auth_unavailable`） | 无 secret + `AUTH_INSECURE=true` + 回环绑定 + 无显式声明 | 进程能起；**读面公开**；**全部写方法与工具执行一律 503** `{"code":"auth_unavailable"}` |
+| 3. 放开 | 无 secret + `AUTH_INSECURE=true` + `AUTH_INSECURE_EXPOSURE=loopback-published` | 整体放行；启动 WARN 点名「写面与工具执行无鉴权」；回环绑定时再叠逐请求来源门 |
+
+- 「非回环绑定 + 无 secret + 无声明」**直接拒绝启动**（容器绑 `0.0.0.0` 时不再出现「什么门都不装」）。
+- 第 2 态的判定按 **HTTP 方法**：`GET`/`HEAD`/`OPTIONS` 公开，其余方法 503；新增写端点无需来本文登记。
+- 第 3 态是**双开关**（ADR-025）：只给 `AUTH_INSECURE_EXPOSURE` 而不设 `AUTH_INSECURE=true` 不算放开。
+- 工具执行还有一层按副作用等级的路由内 RBAC（见 §1.4）；无鉴权（第 2 态）时不会 `return true` 放行，而是同样 503。
+
 ### 1.1 Explore（`cmd/ai/handlers_explore.go`）
 
 **`POST /api/explore/runs`** — 请求体 `StartExploreRequest`：
@@ -185,9 +200,11 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 | 403 | `INSUFFICIENT_ROLE` | 角色不足（另带 `tool` / `effect` / `have` / `need`） |
 | 404 | `TOOL_NOT_REGISTERED` | 工具名未注册 |
 | 404 | `NOT_FOUND` | 请求合法但记录不存在（如 `research.profile` 无档案） |
+| 503 | `auth_unavailable` | 未配置鉴权（无 `JWT_SECRET` 且未显式声明放开，见 §1.0）；工具执行 fail-closed |
 | 500 | `TOOL_EXECUTION_FAILED` | 下游 / 执行错误 |
 
-> 鉴权未装配或服务未启用时不做 RBAC（open-access，与全局中间件同语义）。
+> 鉴权第 3 态（显式声明放开）不做 RBAC；第 2 态（`auth_unavailable`）不放行任何执行；
+> 第 1 态按上表 RBAC。任何形态都不允许「没装配鉴权 ⇒ 默认放行」。
 
 ### 1.5 运维面
 
