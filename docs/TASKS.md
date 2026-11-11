@@ -67,7 +67,11 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑥ 边界**：本仓 `docs/hermes/`；core 侧端点事实归 `tellurion:CORE-SPEC-FACTOR-ENDPOINTS-STALE`。
 - **owner**：待定
 
-### AGENT-EXPERIMENT-COUNT-SURFACE · 实验计数是内存 seq+1，回测/走查工具零实验行 [P1] ⬜
+### AGENT-EXPERIMENT-COUNT-SURFACE · 实验计数是内存 seq+1，回测/走查工具零实验行 [P1] ✅
+
+> **施工记录（2026-11-12）**：计数不另立表，直接由 `ai.experiments` 行派生（生产单写者仍在 agent）。`pkg/aistore/experiment.go` 新增 `TrialStats` / `ExperimentTrialStats(runID)` / `CountExperiments()`；`pkg/ai/loop` 新增 `TrialCounter` 端口与 `WithTrialCounter`，`Run` 开场先读已落库计数（读失败整轮拒绝开跑），`NumTrials = 基数 + seq + 1`，`Attempt`/`AttemptView` 暴露 `num_trials`；`pkg/ai/tools/builtin` 新增 `ExperimentRecorder` 端口，`backtest.run` 与 `walk_forward_validate` 每次调用（成功/失败）都写一行并收尾；`cmd/ai` 把 `*aistore.Store` 经 `builders.go` 接入工具、经 `handlers_explore.go` 接入 loop，并新增读面 `GET /api/pipeline/experiments/count`（未接 → 503，不返回 0）。`docs/api-schema.md` 同步。
+>
+> **验收（真实输出）**：`go test ./pkg/ai/loop ./pkg/ai/tools/builtin ./cmd/ai` 全绿；真库腿 `TEST_DATABASE_DSN=...tellurion_agent_qt go test ./cmd/ai -run TestExperimentCount_PersistsAcrossRestart -count=1` → PASS（工具真跑 3 次 +3；新连接池模拟重启后计数不变；读面返回同值）。**破坏验证**：(a) `loop.go` 改回 `NumTrials = seq + 1` → `TestRun_NumTrialsIncludesPersistedBase` 红（expected 8 actual 1），逐字节还原后绿；(b) 集成腿去掉 `.WithExperimentRecorder` → 计数 +0 而非 +3，红；还原后绿。
 
 - **① 目标**：让「跑了多少次实验」有一个**持久、可回读**的计数面，而不是进程内 `seq+1`；让回测/走查工具真写实验行。
 - **② 上下文**：审查发现 W1-F8①②（ODR-068）。`pkg/ai/loop/loop.go:235` 的 `NumTrials` = 内存 seq+1（重启归零）；`pkg/ai/tools/builtin/backtest.go:126-154` 与 `walkforward_tool.go:199` 零实验行写入；`docs/db-schema.md:21` 的实验表只写不读。计数不可信 ⇒ 校准/对账无基础。

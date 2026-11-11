@@ -70,6 +70,9 @@ type ExploreHandler struct {
 	// narrator 是因果维（P2-9f）的叙述者。nil = 因果维未评估 —— 没讲就是
 	// 没讲，不拿剩下五维凑一个"看起来完整"的结论。
 	narrator validation.Narrator
+	// counter 是一轮已落库尝试计数的来源（实验计数持久化）。nil = 只用内存
+	// seq；生产装配从 sink 上探得 *aistore.Store 后必须接上。
+	counter loop.TrialCounter
 
 	mu   sync.Mutex
 	runs map[string]*exploreRun
@@ -134,9 +137,12 @@ type AttemptView struct {
 	Hypothesis   string         `json:"hypothesis"`
 	Params       map[string]any `json:"params"`
 	ExperimentID int64          `json:"experiment_id"`
-	Sharpe       float64        `json:"sharpe"`
-	OK           bool           `json:"ok"`
-	Error        string         `json:"error,omitempty"`
+	// NumTrials 是统计维实际使用的累计尝试数（含持久化基数）。重启后 Seq
+	// 会归零，这个数字不会 —— 观察页靠它判断多重检验校正的分母。
+	NumTrials int     `json:"num_trials"`
+	Sharpe    float64 `json:"sharpe"`
+	OK        bool    `json:"ok"`
+	Error     string  `json:"error,omitempty"`
 
 	// Verdict 是验证器链对这次尝试的裁决（P2-9）。失败的尝试为 null ——
 	// 没有回测结果就没有可被证伪的东西，不给一个看起来正常的裁决。
@@ -190,6 +196,10 @@ func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, s
 	// 进程已退出，sink 只可能是非 nil 的 *aistore.Store。
 	if vs, ok := sink.(verdictSink); ok {
 		handler.verdicts = vs
+	}
+	// 实验计数同样从 sink 上探：*aistore.Store 既能写日志也能按 run 计数。
+	if tc, ok := sink.(loop.TrialCounter); ok {
+		handler.counter = tc
 	}
 	// 因果维要真调一次模型：没配 key 就不配叙述者，那一维老老实实记成
 	// 未评估。配了却调不通也一样 —— ValidateCausal 返回的错误只记日志，
@@ -259,8 +269,12 @@ func (h *ExploreHandler) Start(c *gin.Context) {
 	ctx = client.WithBearerTokenInContext(ctx, bearerToken)
 
 	runID := uuid.New().String()
+	ctrl := loop.NewController(h.tryRunner, proposer, h.runner)
+	if h.counter != nil {
+		ctrl = ctrl.WithTrialCounter(h.counter)
+	}
 	run := &exploreRun{
-		ctrl:     loop.NewController(h.tryRunner, proposer, h.runner),
+		ctrl:     ctrl,
 		cancel:   cancel,
 		started:  time.Now(),
 		seed:     seed,
@@ -400,6 +414,7 @@ func (h *ExploreHandler) statusOf(runID string, run *exploreRun) ExploreStatusRe
 			Hypothesis:   a.Hypothesis,
 			Params:       a.Params,
 			ExperimentID: a.ExperimentID,
+			NumTrials:    a.NumTrials,
 			OK:           a.OK,
 			Verdict:      a.Verdict,
 		}

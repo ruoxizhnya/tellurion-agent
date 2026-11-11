@@ -77,6 +77,9 @@ type Attempt struct {
 	Err          error
 	Value        float64
 	OK           bool
+	// NumTrials 是喂给统计维的累计尝试数（含本轮之前的持久化计数）。它与
+	// Seq 不同：重启后 Seq 从 0 重来，NumTrials 不会。
+	NumTrials int `json:"num_trials"`
 
 	// Verdict 是验证器链对这次尝试的裁决（P2-9）。
 	//
@@ -120,11 +123,22 @@ type Config struct {
 	OnAttempt func(Attempt)
 }
 
+// TrialCounter 提供某一轮已落库的尝试计数。
+//
+// 控制器自己只有内存 seq，进程一重启就归零；这个端口把「试了多少次」重新
+// 接回 ai.experiments 的行。*aistore.Store 满足它。
+type TrialCounter interface {
+	ExperimentTrialStats(ctx context.Context, runID string) (aistore.TrialStats, error)
+}
+
 // Controller 驱动一轮探索。
 type Controller struct {
 	runner   TryRunner
 	backtest pipeline.BacktestRunner
 	proposer Proposer
+	// counter 是本轮已落库计数的来源。nil = 只用内存 seq（未连库的测试形态）。
+	// 生产装配必须接上，否则重启后的多重检验校正会把分母算小。
+	counter TrialCounter
 
 	mu      sync.Mutex
 	stopped bool
@@ -134,6 +148,12 @@ type Controller struct {
 // 阶段（用于只想看配置生成、不想真跑的场景）。
 func NewController(runner TryRunner, proposer Proposer, backtest pipeline.BacktestRunner) *Controller {
 	return &Controller{runner: runner, proposer: proposer, backtest: backtest}
+}
+
+// WithTrialCounter 接上持久化计数来源（nil 合法，回退到内存 seq）。
+func (c *Controller) WithTrialCounter(counter TrialCounter) *Controller {
+	c.counter = counter
+	return c
 }
 
 // Stop 请求停止。不等待正在跑的那次尝试结束 —— 它会在下一次尝试开始前生效。
@@ -169,6 +189,17 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 	}
 
 	out := &RunResult{RunID: cfg.RunID, Stopped: StopExhausted}
+	// 「试了多少次」从库里重新读一遍，而不是从 0 开始数。进程重启后 seq 会
+	// 归零，但实验行还在 —— 拿内存 seq 当分母会把多重检验校正算得过于乐观。
+	// 读失败就拒绝开跑：宁可这一轮不跑，也不拿一个偏小的分母去评显著性。
+	base := aistore.TrialStats{}
+	if c.counter != nil {
+		var err error
+		base, err = c.counter.ExperimentTrialStats(ctx, cfg.RunID)
+		if err != nil {
+			return nil, fmt.Errorf("读取 run %q 的已落库尝试计数失败: %w", cfg.RunID, err)
+		}
+	}
 	observed := make([]Observation, 0, cfg.MaxTries)
 	// 本轮已完成的成功尝试 —— 它天然就是稳健维要的「参数邻域」：
 	// 一轮探索里试过的那些相近参数，正是判断中心点是高原还是尖峰的素材。
@@ -229,11 +260,12 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 			// 验证器在**每次尝试后**跑，不是跑完整轮才跑 ——
 			// 观察者要能在中途就看见「这个方向被质疑了」，
 			// 而不是等几十次尝试跑完才知道该不该叫停。
+			a.NumTrials = base.Total + seq + 1 // 含当前这次，也含失败与重启前的行
 			v := validation.ValidateProposal(validation.Proposal{
 				Name:         cfg.Description,
 				Result:       res.BacktestResult,
-				NumTrials:    seq + 1, // 含当前这次，也含失败
-				FailedTrials: failed,
+				NumTrials:    a.NumTrials,
+				FailedTrials: base.Failed + failed,
 				Neighbors:    history,
 				Bias:         cfg.Bias,
 			})

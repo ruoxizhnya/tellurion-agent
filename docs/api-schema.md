@@ -27,6 +27,7 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 | GET | `/api/copilot/stats` | Copilot 生成统计（接受率） |
 | POST | `/api/pipeline/run` | 跑 pipeline（同步返回整条结果） |
 | GET | `/api/pipeline/jobs` · `/jobs/{id}` | pipeline 任务列表 / 详情 |
+| GET | `/api/pipeline/experiments/count` | 累计实验计数（由 `ai.experiments` 行派生） |
 | GET | `/api/tools` · `/api/tools/{name}` | 工具注册表 |
 | POST | `/api/tools/{name}` | 执行工具 |
 | GET | `/health` · `/metrics` | 运维面（存活 / 指标） |
@@ -63,7 +64,7 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 | `seed` | int64 | 本轮实际种子 |
 | `proposer` | string | 本轮提议器 |
 
-`AttemptView`：`seq`(int) / `hypothesis`(string) / `params`(object) / `experiment_id`(int64) / `sharpe`(float) / `ok`(bool) / `error`(string, 仅失败) / `verdict`(object, 仅成功尝试；失败为 null)。
+`AttemptView`：`seq`(int) / `num_trials`(int) / `hypothesis`(string) / `params`(object) / `experiment_id`(int64) / `sharpe`(float) / `ok`(bool) / `error`(string, 仅失败) / `verdict`(object, 仅成功尝试；失败为 null)。`num_trials` 是统计维实际使用的累计尝试数（含持久化基数），与进程内 `seq` 不同：重启后 `seq` 归零，`num_trials` 不会。
 错误：`404` `run not found`。
 
 **`GET /api/explore/runs/{runID}/stream`** — SSE；`progress` 的 payload 与上面的快照**同 JSON 形状**，跑完推一帧 `complete`；`404` 同快照端点。断线只停推，不取消 run。
@@ -123,6 +124,8 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 
 **`GET /api/pipeline/jobs`** — 响应 `200`，**今天恒为 `[]`**：pipeline 任务未持久化，列表端点没有数据源（不是空指针，是明确的空数组）。
 **`GET /api/pipeline/jobs/{id}`** — 响应 `200` `PipelineJobResponse`；`404` `job not found`。
+
+**`GET /api/pipeline/experiments/count`** — 响应 `200` `{"count": <int64>}`：`ai.experiments` 的累计行数（explore 尝试 + `backtest.run` / `walk_forward_validate` 工具直调写下的行）。计数由行派生，进程重启不丢。未接计数来源时 `503`（不返回 `0` 冒充「没跑过」）；读库失败 `500`。
 
 ### 1.4 Tools（`cmd/ai/handlers_tools.go` · `pkg/ai/tools`）
 

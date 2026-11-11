@@ -1,12 +1,19 @@
 package main
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ruoxizhnya/tellurion-kit/httpserver"
 	"tellurion-agent/pkg/ai/pipeline"
 )
+
+// ExperimentCounter 是累计实验计数的读面来源。*aistore.Store 满足它，
+// 计数由 ai.experiments 的行派生 —— 不另立计数表，也不放进程内存。
+type ExperimentCounter interface {
+	CountExperiments(ctx context.Context) (int64, error)
+}
 
 // PipelineHandler handles pipeline-related HTTP requests
 type PipelineHandler struct {
@@ -24,6 +31,9 @@ type PipelineHandler struct {
 	runner pipeline.BacktestRunner
 	// expSink 是实验日志的落点（P1-1b）。nil 表示这一路不记日志。
 	expSink pipeline.ExperimentSink
+	// counter 是累计实验计数的读面来源。nil = 读面返回 503，而不是一个
+	// 看起来正常的 0。
+	counter ExperimentCounter
 }
 
 // PipelineHandlerOption configures a PipelineHandler at construction
@@ -48,6 +58,13 @@ func WithBacktestRunner(r pipeline.BacktestRunner) PipelineHandlerOption {
 func WithExperimentSink(s pipeline.ExperimentSink) PipelineHandlerOption {
 	return func(h *PipelineHandler) {
 		h.expSink = s
+	}
+}
+
+// WithExperimentCounter 注入累计实验计数读面（experiment count surface）。
+func WithExperimentCounter(c ExperimentCounter) PipelineHandlerOption {
+	return func(h *PipelineHandler) {
+		h.counter = c
 	}
 }
 
@@ -80,6 +97,11 @@ func registerPipelineRoutes(router *gin.Engine, runner pipeline.BacktestRunner, 
 	opts := []PipelineHandlerOption{WithBacktestRunner(runner)}
 	if sink != nil {
 		opts = append(opts, WithExperimentSink(sink))
+	}
+	// *aistore.Store 同时满足 ExperimentSink 与 ExperimentCounter：接得上
+	// 读面就接，接不上端点显式 503，不拿 0 冒充「还没跑过」。
+	if counter, ok := sink.(ExperimentCounter); ok {
+		opts = append(opts, WithExperimentCounter(counter))
 	}
 	handler := NewPipelineHandler(opts...)
 	api := router.Group("/api")
@@ -118,7 +140,30 @@ func (h *PipelineHandler) RegisterPipelineRoutes(router *gin.RouterGroup) {
 		pipeline.POST("/run", h.RunPipeline)
 		pipeline.GET("/jobs", h.GetPipelineJobs)
 		pipeline.GET("/jobs/:id", h.GetPipelineJob)
+		pipeline.GET("/experiments/count", h.GetExperimentCount)
 	}
+}
+
+// GetExperimentCount 返回 ai.experiments 的累计行数 —— 探索 / 回测 / 走查
+// 写过的全部实验。重启后计数不丢，因为它由行派生。
+// @Summary      Get cumulative experiment count
+// @Description  Returns the cumulative number of experiment rows (explore attempts, tool backtests and walk-forward validations)
+// @Tags         AI Pipeline
+// @Produce      json
+// @Success      200  {object}  map[string]int64  "{\"count\": N}"
+// @Failure      503  {object}  map[string]string "counter not configured"
+// @Router       /pipeline/experiments/count [get]
+func (h *PipelineHandler) GetExperimentCount(c *gin.Context) {
+	if h.counter == nil {
+		httpserver.Fail(c, http.StatusServiceUnavailable, "experiment counter not configured")
+		return
+	}
+	n, err := h.counter.CountExperiments(c.Request.Context())
+	if err != nil {
+		httpserver.Error(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": n})
 }
 
 // RunPipeline runs the full AI strategy generation pipeline

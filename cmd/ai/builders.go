@@ -154,13 +154,19 @@ func BuildToolsRegistry(
 	factorPool builtin.FactorPoolClient,
 	strategyPool builtin.StrategyPoolClient,
 	researchProfile builtin.ResearchProfileClient,
-	hypothesisStore *aistore.Store,
+	aiStore *aistore.Store,
 	logger zerolog.Logger,
 ) *tools.Registry {
 	reg := tools.NewRegistry()
 
 	// ── Group 1: Backtest (S7-P3-3) ──────────────────────────────────
-	if err := reg.Register(builtin.NewBacktestTool(runner)); err != nil {
+	// 回测也是一次实验：接上 store 后每次调用都落 ai.experiments 行，
+	// 累计实验计数（/api/pipeline/experiments/count）由这些行派生。
+	backtestTool := builtin.NewBacktestTool(runner)
+	if aiStore != nil {
+		backtestTool = backtestTool.WithExperimentRecorder(aiStore)
+	}
+	if err := reg.Register(backtestTool); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register backtest.run tool")
 	}
 
@@ -214,7 +220,12 @@ func BuildToolsRegistry(
 	}
 
 	// ── Group 5: Walk-forward validation (Hermes Phase 1.3, L4 gate) ─
-	if err := reg.Register(builtin.NewWalkForwardValidateTool(wfRunner)); err != nil {
+	// 走查同样要记一行实验（失败也记），否则 Hermes 直调工具的试错不可见。
+	wfTool := builtin.NewWalkForwardValidateTool(wfRunner)
+	if aiStore != nil {
+		wfTool = wfTool.WithExperimentRecorder(aiStore)
+	}
+	if err := reg.Register(wfTool); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register walk_forward_validate tool")
 	}
 
@@ -263,12 +274,12 @@ func BuildToolsRegistry(
 	// ── Group 11: Factor hypothesis (P2-3) ─────────────────────────
 	// 「这个因子凭什么有效」—— 采用一个因子之前先看它的机制来自哪里。
 	//
-	// 显式判空而不是直接传 hypothesisStore：具体指针类型（*aistore.Store）
+	// 显式判空而不是直接传 aiStore：具体指针类型（*aistore.Store）
 	// 的 nil 塞进接口会变成非 nil 的接口值，工具会拿着空指针去查库
 	//（P1-1b 的老坑）。没连库时工具仍可用 —— 它回退到 domain 里的内置假设表。
 	var hs builtin.FactorHypothesisStore
-	if hypothesisStore != nil {
-		hs = hypothesisStore
+	if aiStore != nil {
+		hs = aiStore
 	}
 	if err := reg.Register(builtin.NewFactorHypothesisTool(hs)); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register factor.hypothesis tool")

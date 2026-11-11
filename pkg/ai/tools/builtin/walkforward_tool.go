@@ -7,6 +7,7 @@ import (
 
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"tellurion-agent/pkg/ai/tools"
+	"tellurion-agent/pkg/aistore"
 )
 
 // ─── WalkForwardRunner (narrow interface) ─────────────────────────────
@@ -74,6 +75,9 @@ type WalkForwardRunner interface {
 // + explicit `stock_pool`, matching the existing WalkForwardEngine API.
 type WalkForwardValidateTool struct {
 	runner WalkForwardRunner
+	// recorder 是实验日志落点（nil = 只跑不记账）。走查同样是一次实验，
+	// 接上后每次调用都写一行 ai.experiments。
+	recorder ExperimentRecorder
 }
 
 var _ tools.Tool = (*WalkForwardValidateTool)(nil)
@@ -88,6 +92,12 @@ func NewWalkForwardValidateTool(runner WalkForwardRunner) *WalkForwardValidateTo
 }
 
 func (t *WalkForwardValidateTool) Name() string { return "walk_forward_validate" }
+
+// WithExperimentRecorder 接上实验日志落点（nil 合法，等价于不记账）。
+func (t *WalkForwardValidateTool) WithExperimentRecorder(rec ExperimentRecorder) *WalkForwardValidateTool {
+	t.recorder = rec
+	return t
+}
 
 func (t *WalkForwardValidateTool) Description() string {
 	return "Run walk-forward validation to detect overfitting (L4 gate). Splits the date range into train/test windows, runs backtest on each, and measures out-of-sample performance degradation. Returns avg OOS Sharpe, degradation ratio, overfit score, and per-window breakdown. Slow (~minutes) — only call after L1-L3 gates pass."
@@ -196,12 +206,32 @@ func (t *WalkForwardValidateTool) Execute(ctx context.Context, args map[string]i
 		StepDays:  testDays, // non-overlapping rolling windows
 	}
 
+	// 与 backtest.run 同一口径：真跑之前先落一行，失败也要收尾成 failed。
+	expID := startToolExperiment(ctx, t.recorder, t.Name(), strategyName, map[string]any{
+		"strategy_name": strategyName,
+		"stock_pool":    stockPool,
+		"start_date":    startDate,
+		"end_date":      endDate,
+		"train_days":    trainDays,
+		"test_days":     testDays,
+	})
+
 	report, err := t.runner.RunWalkForward(ctx, strategyName, stockPool, startDate, endDate, params)
 	if err != nil {
+		finishToolExperiment(ctx, t.recorder, expID, nil, err.Error())
 		return nil, fmt.Errorf("walk_forward_validate: %w", err)
 	}
 
-	return summarizeWalkForwardReport(report), nil
+	summary := summarizeWalkForwardReport(report)
+	var metrics *aistore.ExperimentMetrics
+	if summary != nil {
+		metrics = &aistore.ExperimentMetrics{
+			SharpeRatio: summary.AvgTestSharpe,
+			TotalReturn: summary.AvgTestReturn,
+		}
+	}
+	finishToolExperiment(ctx, t.recorder, expID, metrics, "")
+	return summary, nil
 }
 
 // ─── summary types ─────────────────────────────────────────────────────

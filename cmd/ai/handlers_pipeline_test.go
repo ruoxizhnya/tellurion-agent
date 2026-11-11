@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -104,4 +107,43 @@ func TestNewPipelineHandler_WithRunner_NilStaysNil(t *testing.T) {
 // stubBacktestRunner satisfies the pipeline.BacktestRunner interface.
 func TestPipelineHandler_ImplementsRunnerContract(t *testing.T) {
 	var _ pipeline.BacktestRunner = (*stubBacktestRunner)(nil)
+}
+
+// fakeExperimentCounter 是读面的固定返回替身。
+type fakeExperimentCounter struct {
+	count int64
+	err   error
+}
+
+func (f fakeExperimentCounter) CountExperiments(context.Context) (int64, error) {
+	return f.count, f.err
+}
+
+func pipelineCountRouter(h *PipelineHandler) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h.RegisterPipelineRoutes(r.Group("/api"))
+	return r
+}
+
+// TestGetExperimentCount_Wired 锁读面：计数原样返回，不从进程内状态猜。
+func TestGetExperimentCount_Wired(t *testing.T) {
+	r := pipelineCountRouter(NewPipelineHandler(WithExperimentCounter(fakeExperimentCounter{count: 42})))
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/pipeline/experiments/count", nil))
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"count":42}`, w.Body.String())
+}
+
+// TestGetExperimentCount_NotWired503：没接计数来源时必须显式失败，
+// 而不是返回一个看起来正常的 0（那是把「没查」伪装成「没跑过」）。
+func TestGetExperimentCount_NotWired503(t *testing.T) {
+	r := pipelineCountRouter(NewPipelineHandler())
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/pipeline/experiments/count", nil))
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }

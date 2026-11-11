@@ -16,6 +16,7 @@ import (
 
 	"github.com/ruoxizhnya/tellurion-contracts/engine"
 	"tellurion-agent/pkg/ai/tools"
+	"tellurion-agent/pkg/aistore"
 )
 
 // BacktestTool wraps a contracts.BacktestRunner into a tools.Tool.
@@ -37,6 +38,9 @@ import (
 // Output: *domain.BacktestResult (JSON-serializable)
 type BacktestTool struct {
 	runner contracts.BacktestRunner
+	// recorder 是实验日志落点（nil = 只跑不记账）。接上后每次调用都写一行
+	// ai.experiments，累计计数由此派生。
+	recorder ExperimentRecorder
 }
 
 // Compile-time assertions that BacktestTool satisfies the Tool facets.
@@ -57,6 +61,13 @@ func NewBacktestTool(runner contracts.BacktestRunner) *BacktestTool {
 		panic("builtin: NewBacktestTool called with nil runner")
 	}
 	return &BacktestTool{runner: runner}
+}
+
+// WithExperimentRecorder 接上实验日志落点。nil 合法，等价于不记账
+// （测试 / 未连库的部署形态）；显式判空放在调用侧，避免 typed-nil 接口。
+func (t *BacktestTool) WithExperimentRecorder(rec ExperimentRecorder) *BacktestTool {
+	t.recorder = rec
+	return t
 }
 
 // Name returns the tool's HTTP-safe identifier.
@@ -141,8 +152,18 @@ func (t *BacktestTool) Execute(ctx context.Context, args map[string]interface{})
 		return nil, err
 	}
 
+	// 参数已校验通过、马上就要真跑 —— 这才是「一次实验」的起点。失败的执行
+	// 同样要留行（CompleteExperiment 落 failed），否则分母只会记录成功的那些。
+	expID := startToolExperiment(ctx, t.recorder, t.Name(), strategyName, map[string]any{
+		"strategy_name": strategyName,
+		"stock_pool":    stockPool,
+		"start_date":    startDate,
+		"end_date":      endDate,
+	})
+
 	result, err := t.runner.RunBacktest(ctx, strategyName, stockPool, startDate, endDate)
 	if err != nil {
+		finishToolExperiment(ctx, t.recorder, expID, nil, err.Error())
 		// Propagate the runner's error verbatim — callers use errors.Is
 		// to distinguish "not registered" (strategy not found) from
 		// "execution failed" (data missing, etc.). We do NOT wrap with
@@ -150,6 +171,15 @@ func (t *BacktestTool) Execute(ctx context.Context, args map[string]interface{})
 		// is downstream.
 		return nil, fmt.Errorf("backtest.run: %w", err)
 	}
+	var metrics *aistore.ExperimentMetrics
+	if result != nil {
+		metrics = &aistore.ExperimentMetrics{
+			SharpeRatio: result.SharpeRatio,
+			TotalReturn: result.TotalReturn,
+			TotalTrades: result.TotalTrades,
+		}
+	}
+	finishToolExperiment(ctx, t.recorder, expID, metrics, "")
 	return result, nil
 }
 

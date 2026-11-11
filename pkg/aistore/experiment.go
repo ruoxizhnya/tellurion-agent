@@ -167,6 +167,39 @@ func (s *Store) RecordVerdict(ctx context.Context, id int64, verdict json.RawMes
 	return nil
 }
 
+// TrialStats 是一轮探索已落库的尝试计数（含失败）。
+//
+// 它是「试了多少次」的唯一真相源：进程重启后 loop 的 seq 归零，但这段计数
+// 由 ai.experiments 的行派生，不会跟着丢。统计维的多重检验校正靠它。
+type TrialStats struct {
+	Total  int
+	Failed int
+}
+
+// ExperimentTrialStats 读某一轮已落库的尝试数与其中失败数。
+func (s *Store) ExperimentTrialStats(ctx context.Context, runID string) (TrialStats, error) {
+	var st TrialStats
+	err := s.pool.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE status = $2)
+		FROM ai.experiments
+		WHERE run_id = $1
+	`, runID, ExperimentStatusFailed).Scan(&st.Total, &st.Failed)
+	if err != nil {
+		return TrialStats{}, fmt.Errorf("failed to count experiments of run %q: %w", runID, err)
+	}
+	return st, nil
+}
+
+// CountExperiments 返回 ai.experiments 的累计行数 —— 探索 / 回测 / 走查写过的
+// 全部实验。读面 /api/pipeline/experiments/count 直接用它，不另立计数表。
+func (s *Store) CountExperiments(ctx context.Context) (int64, error) {
+	var n int64
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM ai.experiments`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("failed to count experiments: %w", err)
+	}
+	return n, nil
+}
+
 func marshalJSONBObject(m map[string]any) ([]byte, error) {
 	if m == nil {
 		return []byte("{}"), nil
