@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +37,32 @@ var _ LLMClient = (*Client)(nil)
 // Default HTTP timeout applied to the underlying transport. Without an
 // explicit timeout a misbehaving LLM server can hang the caller's goroutine
 // indefinitely (Sprint 6 P0-1 / TQ-003).
-const defaultHTTPTimeout = 30 * time.Second
+//
+// 2026-11-11：30s → 180s。真栈实测（容器内 ai-service 调 MiniMax
+// chat-completions）三次尝试全部 `context deadline exceeded`，而宿主对同一
+// URL 的一次 GET 就要 5.4s —— 生成整段策略代码本来就不是 30s 量级的请求。
+// 用 AI_HTTP_TIMEOUT 覆盖（Go duration 或裸秒数），重试次数**不动**：
+// 超时不够是配置问题，不该靠多试几次掩盖。
+const defaultHTTPTimeout = 180 * time.Second
+
+// httpTimeoutEnv 是覆盖出厂超时的环境变量名。
+const httpTimeoutEnv = "AI_HTTP_TIMEOUT"
+
+// resolveHTTPTimeout 读 AI_HTTP_TIMEOUT，空值 / 不可解析 / 非正值一律回落到
+// 出厂 180s（拼错不该把客户端变成"永不超时"）。
+func resolveHTTPTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(httpTimeoutEnv))
+	if raw == "" {
+		return defaultHTTPTimeout
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return defaultHTTPTimeout
+}
 
 // Client wraps an HTTP client for LLM chat completions with production-grade
 // resilience (timeout, retry, rate-limit, cost tracking, tracing) and
@@ -104,7 +130,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		apiKey:     os.Getenv("AI_API_KEY"),
 		apiURL:     os.Getenv("AI_API_URL"),
 		model:      resolveModel(),
-		httpClient: &http.Client{Timeout: defaultHTTPTimeout},
+		httpClient: &http.Client{Timeout: resolveHTTPTimeout()},
 		limiter:    NewLimiter(),
 		retry:      DefaultRetryPolicy,
 		costTable:  NewCostTable(),
