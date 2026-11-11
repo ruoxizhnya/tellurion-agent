@@ -55,7 +55,9 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **owner**：待定
 - **重开条件**：出现第二次「AI 路由失败但只能翻 api-schema 找原因」的排障经历，或接手人变更。
 
-### AGENT-HERMES-DOCS-ADR041 · Hermes 文档/技能仍把已不可用的因子工具写成现役 [P1] ⬜
+### AGENT-HERMES-DOCS-ADR041 · Hermes 文档/技能仍把已不可用的因子工具写成现役 [P1] ✅
+
+> **施工记录（2026-11-12）**：`docs/hermes/tools-quant-backtest.yaml`（三工具 Description 加 `[unavailable]` + ADR-041、`validate_factor`/`save_factor` 的 L2 表述同步订正）、`docs/hermes/prompts/quant-research.md`（Capabilities、硬约束第 1/2 条、工作流步骤 4、示例步骤 4/8）、`docs/hermes/skills/autonomous_factor_mining.md`（Step 4 改为「未提供，跳过」、验收标准第 4 条）、`docs/hermes/e2e-acceptance-test.md`（成功条件第 5 条、轨迹断言集合、排障节）统一改为「未提供（ADR-041），改走 backtest.run 读结果」，与 `pkg/ai/client/factor_client.go` 的哨兵一致。验收：`grep -rn "factor.compute\|factor.evaluate\|compute_factor_ic" docs/hermes` 无「现役/可用」表述，全部带 unavailable/ADR-041 标注；纯文档改动，Go 门禁不受影响（`go build ./...` 通过）。
 
 - **① 目标**：把 Hermes 配置/提示词/技能里对三个因子工具（`factor.compute`/`factor.evaluate`/`compute_factor_ic`）的「现役」表述订正为「未提供（ADR-041）」，与 `AGENT-FACTOR-TOOLS-UNAVAILABLE` 已落的代码事实对齐。
 - **② 上下文**：审查发现 W1-F2（ODR-068）。`docs/hermes/tools-quant-backtest.yaml:62-107,122-137`、`docs/hermes/prompts/quant-research.md:21,26-27,109,192`、`docs/hermes/skills/autonomous_factor_mining.md:89,284` 仍把因子求值工具写成可用；`8ace9b9` 已改三工具代码（返回 `ErrFactorCapabilityUnavailable`），文档未跟上。裁决见跨仓 ADR-041。

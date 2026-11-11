@@ -18,13 +18,13 @@
 
 ### 验证门禁（L1-L4，必须按序通过）
 - `validate_factor` — L1 语法检查（<1s）：验证因子 DSL 表达式语法
-- `compute_factor_ic` — L2 快速 IC（<10s）：计算因子历史信息系数
+- `compute_factor_ic` — **未提供（ADR-041）**：core 无 IC 求值端点，调用直接返回「该能力当前未提供」；替代路径是走 `backtest.run` 读回测结果
 - `backtest.run` — L3 标准回测（<2min）：运行完整策略回测
 - `walk_forward_validate` — L4 Walk-Forward（<10min）：过拟合检测
 
 ### 因子分析
-- `factor.compute` — 计算原始因子值
-- `factor.evaluate` — 评估因子 IC/IR/换手率
+- `factor.compute` — **未提供（ADR-041）**：core 无因子求值端点，调用直接返回「该能力当前未提供」，不发起 HTTP 请求
+- `factor.evaluate` — **未提供（ADR-041）**：同上，替代路径是提交回测读结果
 
 ### 数据获取
 - `data.ohlcv` — 获取 OHLCV K 线数据
@@ -51,8 +51,8 @@
 ## Constraints
 
 ### 验证门禁规则（硬约束）
-1. **L1 → L2 → L3 → L4 必须按序通过**，不可跳过
-2. **因子 IC 必须 > 0.02** 才有意义；> 0.05 为优秀；< 0.01 应放弃
+1. **L1 → L3 → L4 必须按序通过**，不可跳过；L2（`compute_factor_ic`）当前**未提供（ADR-041）**，不得反复调用，IC 从回测结果读
+2. **因子 IC 必须 > 0.02** 才有意义；> 0.05 为优秀；< 0.01 应放弃（IC 取回测结果，`compute_factor_ic` 不可用）
 3. **策略 Sharpe 必须 > 0.5** 才进入 L4；< 0.3 应重新设计
 4. **Walk-Forward degradation > 0.70** 为低过拟合（通过）；0.50-0.70 为中等（谨慎）；< 0.50 为高过拟合（**必须放弃**）
 5. **只有通过 L4 的因子/策略才能 save_factor/save_strategy**
@@ -107,9 +107,9 @@ expression:
    → 失败: 修正表达式，回到步骤 2
 
 4. compute_factor_ic(expression, start, end, symbols)
-   → L2 门禁: 快速 IC
-   → IC < 0.02: 尝试变体，回到步骤 2
-   → IC ≥ target: 继续
+   → L2 门禁：**未提供（ADR-041）**，调用会返回「该能力当前未提供」
+   → 不要反复调用；跳过本步，直接生成策略 YAML 走 L3 回测，
+     IC 从 backtest.run 的结果里读
 
 5. 生成策略 YAML（signal + sizing + risk）
    → 根据 market regime 调整 risk 参数（高波动 → 减仓，低波动 → 加仓）
@@ -190,8 +190,8 @@ Hermes:
      → {valid: true, inputs: ["close"], ast: "Call(ts_rank, [Field(close), Lit(20)])"}
 
   4. 调用 compute_factor_ic("ts_rank(close, 20)", "2022-01-01", "2024-01-01", ["000001.SZ", ...])
-     → {ic: 0.045, ir: 0.32, turnover: 0.28}
-     → IC > 0.04 ✓
+     → 未提供（ADR-041）：返回「该能力当前未提供」，不发起 HTTP 请求
+     → 跳过，IC 从第 6 步 backtest.run 的结果里读
 
   5. 生成策略 YAML:
      strategy:
@@ -217,6 +217,7 @@ Hermes:
      → degradation > 0.70 ✓
 
   8. 调用 save_factor(name="momentum_20d", category="momentum", formula="ts_rank(close, 20)", ic=0.045, ...)
+     （ic 取自第 6 步回测结果 —— compute_factor_ic 未提供，ADR-041）
      调用 save_strategy(name="momentum_20d", strategy_yaml="...", factor_ids=["fg_..."], sharpe=0.8, ...)
 
   9. ✅ 完成: 因子 IC=0.045, 策略 Sharpe=0.8, degradation=0.78

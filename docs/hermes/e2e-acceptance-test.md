@@ -26,7 +26,7 @@
 | 2 | Hermes calls `list_factors` to avoid duplicates | trajectory log shows `list_factors` call |
 | 3 | Hermes calls `get_market_regime` for market context | trajectory log shows `get_market_regime` call |
 | 4 | Hermes generates a valid DSL expression (L1 passes) | `validate_factor` returns `passed: true` |
-| 5 | Hermes calls `compute_factor_ic` (L2) with IC ≥ 0.04 | L2 result shows `ic ≥ 0.04` |
+| 5 | Hermes skips `compute_factor_ic` (L2) — capability unavailable per ADR-041 | tool returns "该能力当前未提供" and makes no HTTP request; IC is read from the L3 backtest result |
 | 6 | Hermes calls `backtest.run` (L3) + `summarize_backtest` | L3 result shows `sharpe ≥ 0.5` |
 | 7 | Hermes calls `walk_forward_validate` (L4) | L4 result shows `degradation ≥ 0.50` |
 | 8 | Hermes calls `save_factor` + `save_strategy` | gene pool has new entries |
@@ -185,8 +185,9 @@ print(f'Total tool calls: {len(tool_calls)}')
 print(f'Tools used: {sorted(set(tool_names))}')
 
 # Verify all expected tools were called
+# compute_factor_ic is intentionally absent: L2 is unavailable (ADR-041).
 expected = {'list_factors', 'get_market_regime', 'validate_factor',
-            'compute_factor_ic', 'walk_forward_validate', 'save_factor'}
+            'walk_forward_validate', 'save_factor'}
 missing = expected - set(tool_names)
 assert not missing, f'Missing tool calls: {missing}'
 print('✅ All expected tools called')
@@ -231,7 +232,7 @@ On success, Hermes should output:
 
 | Status | Cause | Debugging |
 |--------|-------|-----------|
-| `budget_exhausted` | Cost reached $2 before finding IC>0.04 factor | Check L2 IC values in trajectory; may need higher budget or different category |
+| `budget_exhausted` | Cost reached $2 before finding IC>0.04 factor | Check L3 backtest IC values in trajectory; may need higher budget or different category |
 | `iteration_limit` | 20 iterations exhausted without convergence | Check which gates failed; L1 failures suggest DSL syntax issues |
 | `convergence_stall` | 5 consecutive rounds with no IC improvement | Try different category or wider stock pool |
 | `l4_failed` | All factors had degradation < 0.50 (high overfitting) | Factor may be overfit to in-sample data; try simpler expressions |
@@ -279,19 +280,12 @@ assert len(data) >= 200, 'Need at least 200 bars for market regime detection'
 "
 ```
 
-### "compute_factor_ic returns IC=0"
+### "compute_factor_ic returns capability unavailable"
 
-The factor evaluation needs sufficient stock data. Verify the stock pool
-has data for the evaluation window:
-
-```bash
-# Check data availability for a sample stock
-curl -s "http://localhost:8081/ohlcv/000001.SZ?start_date=2022-01-01&end_date=2024-01-01" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-print(f'Records: {len(data)}')
-"
-```
+That is the expected behaviour, not a fault: core has no factor/IC
+evaluation endpoint (ADR-041), so `compute_factor_ic`, `factor.compute`
+and `factor.evaluate` return "该能力当前未提供" without any HTTP request.
+Use `backtest.run` and read the IC/metrics from its result instead.
 
 ### "save_factor returns 500 error"
 

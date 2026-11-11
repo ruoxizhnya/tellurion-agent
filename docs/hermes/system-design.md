@@ -35,6 +35,10 @@ verified-by: 从 pkg/tools/builtin/ 的实现与注释反推（P2-11）
 
 ### 偏离 1：`factor.evaluate` — `universe` vs `symbols`
 
+> **现状（2026-11-12，ADR-041）**：`factor.compute` / `factor.evaluate` /
+> `compute_factor_ic` 三个工具现已整体**不可用**（返回「该能力当前未提供」
+> 哨兵，不发 HTTP）。本节保留的是历史上参数契约的偏离记录，供查证使用。
+
 - 设计：参数叫 `universe`（默认 `"csi300"`），由 universe resolver 把
   命名池映射成具体标的列表。
 - 实现：直接接受 `symbols`（`[]string`）。

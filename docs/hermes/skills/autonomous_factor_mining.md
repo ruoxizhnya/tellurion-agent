@@ -83,22 +83,16 @@ validate_factor(expression=$factor_expression)
   - 连续 3 次 L1 失败 → 放弃当前假设方向 → 回到 Step 2 重新生成
 ```
 
-### Step 4: L2 快速 IC — 信息系数字门禁
+### Step 4: L2 快速 IC — 未提供（ADR-041），跳过
 
 ```
-compute_factor_ic(
-  expression=$factor_expression,
-  start_date=$start_date,
-  end_date=$end_date,
-  symbols=$symbols
-)
-  → {ic: float, ir: float, turnover: float, decay: [...], gate_decision: {level, passed, reason, recommendation}}
+compute_factor_ic(...) 当前不可用：
+  工具返回「该能力当前未提供」，不发起任何 HTTP 请求（ADR-041 裁决）。
 
-决策点 (per IC 范围):
-  - IC > 0.05       → 优秀因子，立即进入 Step 5
-  - 0.02 < IC ≤ 0.05 → 有意义，尝试 2-3 个变体（改窗口/字段）后决定
-  - IC < 0.02       → 放弃，换方向 → 回到 Step 2
-  - IC ≥ $target_ic → 继续 Step 5
+处理:
+  - 不要反复调用 compute_factor_ic / factor.compute / factor.evaluate
+  - 直接进入 Step 5 生成策略 YAML，IC 从 Step 6 backtest.run 的结果里读
+  - 原 L2 的 IC 决策点（IC < 0.02 放弃等）改在 Step 6 之后按回测结果执行
 ```
 
 ### Step 5: 生成策略 YAML
@@ -281,7 +275,7 @@ cost_model:
 1. 调用 `list_factors` 查询已有动量因子
 2. 调用 `get_market_regime` 获取市场状态
 3. 调用 `validate_factor` (L1) 至少 1 次
-4. 调用 `compute_factor_ic` (L2) 至少 1 次
+4. 跳过 `compute_factor_ic` (L2) —— **未提供（ADR-041）**，不反复调用
 5. 如果 IC ≥ 0.04：调用 `backtest.run` (L3) + `summarize_backtest`
 6. 如果 Sharpe ≥ 0.5：调用 `walk_forward_validate` (L4)
 7. 如果 degradation ≥ 0.50：调用 `save_factor` + `save_strategy` 保存

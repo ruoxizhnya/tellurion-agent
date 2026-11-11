@@ -58,12 +58,19 @@ tools:
         required: true
 
   # ═══ Group 2: Factor analysis (L1/L2 gates) ════════════════════════
+  #
+  # [unavailable] factor.compute / factor.evaluate / compute_factor_ic 三个工具
+  # 当前**不可用**：core 没有因子求值/IC 求值端点（ADR-041），调用会直接返回
+  # 「该能力当前未提供」哨兵错误，不发起任何 HTTP 请求。替代路径：走
+  # backtest.run（L3）→ walk_forward_validate（L4）读回测结果，不要反复调用。
 
   - name: "factor.compute"
     description: >
-      Compute raw factor values for a set of symbols over a date range.
-      Returns per-symbol-per-date factor values. Use this to inspect the
-      factor before evaluating its IC.
+      [unavailable] Compute raw factor values for a set of symbols over a
+      date range. This capability is NOT provided today: core has no factor
+      evaluation endpoint (ADR-041) and the tool returns a stable
+      "capability unavailable" error without making any HTTP request.
+      Alternative: submit a backtest (backtest.run) and read its result.
     endpoint: "/api/tools/factor.compute"
     parameters:
       - name: formula
@@ -85,8 +92,11 @@ tools:
 
   - name: "factor.evaluate"
     description: >
-      Evaluate a factor expression over symbols and date range with IC/IR
-      computation. Returns IC, IC IR, turnover, and IC decay analysis.
+      [unavailable] Evaluate a factor expression over symbols and date range
+      with IC/IR computation. This capability is NOT provided today: core has
+      no factor evaluation endpoint (ADR-041) and the tool returns a stable
+      "capability unavailable" error without making any HTTP request.
+      Alternative: submit a backtest (backtest.run) and read its result.
     endpoint: "/api/tools/factor.evaluate"
     parameters:
       - name: formula
@@ -110,8 +120,10 @@ tools:
     description: >
       Validate a factor DSL expression syntax (L1 gate, <1s). Checks that
       the expression parses correctly and lists required data fields.
-      Does NOT compute IC or run backtest. Always call this before
-      compute_factor_ic to catch syntax errors early.
+      Does NOT compute IC or run backtest. This is the only factor gate
+      still available today: the L2 IC gate (compute_factor_ic) is NOT
+      provided (ADR-041), so validate_factor is used before writing the
+      expression into a strategy YAML for backtest.run.
     endpoint: "/api/tools/validate_factor"
     parameters:
       - name: expression
@@ -121,10 +133,11 @@ tools:
 
   - name: "compute_factor_ic"
     description: >
-      Compute the historical Information Coefficient (IC) of a factor
-      expression (L2 gate, <10s). Returns IC, IC IR, turnover, and IC
-      decay. Call after validate_factor passes. IC > 0.02 is meaningful;
-      > 0.05 is strong.
+      [unavailable] Compute the historical Information Coefficient (IC) of a
+      factor expression (L2 gate). This capability is NOT provided today:
+      core has no IC evaluation endpoint (ADR-041) and the tool returns a
+      stable "capability unavailable" error without making any HTTP request.
+      Alternative: submit a backtest (backtest.run) and read its result.
     endpoint: "/api/tools/compute_factor_ic"
     parameters:
       - name: expression
@@ -272,8 +285,10 @@ tools:
 
   - name: "save_factor"
     description: >
-      Persist a validated factor to the gene pool. The factor must have
-      passed L1 (validate_factor) and L2 (compute_factor_ic) gates.
+      Persist a validated factor to the gene pool. The factor should have
+      passed L1 (validate_factor) and L3/L4 (backtest.run + walk_forward_validate).
+      Note: the L2 IC gate (compute_factor_ic) is NOT provided (ADR-041);
+      supply `ic` from the backtest result instead.
       Returns a unique factor_id (format: fg_<uuid>).
     endpoint: "/api/tools/save_factor"
     parameters:
@@ -299,7 +314,7 @@ tools:
         required: false
       - name: ic
         type: float
-        description: "Information Coefficient from compute_factor_ic."
+        description: "Information Coefficient; compute_factor_ic is unavailable (ADR-041), take it from the backtest result."
         required: true
       - name: turnover
         type: float
