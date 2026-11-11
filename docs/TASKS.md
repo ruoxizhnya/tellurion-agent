@@ -12,6 +12,16 @@ verified-by: 2026-11-11 `AGENT-COPILOT-WORKING-DIR` 取证与裁决：同进程�
 
 ## 一、未做 / 挂起 / 外部依赖
 
+### AGENT-FACTOR-TOOLS-UNAVAILABLE · 三个因子工具打向 core 不存在的端点 [P0] ⬜
+
+- **① 目标**：让 `factor.compute` / `factor.evaluate` / `compute_factor_ic` 在「core 无因子求值面」这个事实下**显式返回「该能力当前未提供」**，而不是发一个必失败的 HTTP 请求或返回空值；裁决见跨仓 ADR-041。
+- **② 上下文**：`pkg/ai/client/factor_client.go:51,93` 调 `POST /api/factor/compute` 与 `/api/factor/evaluate`；`compute_factor_ic` 走同一 `EvaluateFactor`（`pkg/ai/tools/builtin/factor_tools.go:336`）。2026-11-11 实测：core 只注册 `POST /api/factor/registrations`（`cmd/analysis/handlers_factor_registration.go:65`）与反代 `GET /api/factors/:factor_name`（`handlers_proxy.go:167`，已是死链）；`docs/openapi.yaml` 也只有这两条；`docs/SPEC.md:3197-3210` 列的 `compute-returns`/`compute-ic` **代码里从未实现**。链路上还有两处错误事实传播：`docker-compose.yml` 与 `cmd/ai/main.go:100-101` 的注释称「`/api/factor/*` 只在 core 注册」。
+- **③ 要求**：① `FactorClient` 的三个方法改为返回**稳定的「能力未提供」错误**（哨兵 + 明确文案「core 当前无因子求值/IC 求值端点；ADR-041」），不发起 HTTP；② 三个工具的 Description 与注册状态标为 `unavailable`（说明原因与替代路径：提交回测读结果），避免 LLM 反复调用必失败工具；③ `pkg/ai/client/endpoint_contract_test.go` 的 allowlist 改成**断言显式不可用**：core 将来真提供端点则红、工具偷偷改回发请求也红；④ 同批订正 `docker-compose.yml` 与 `cmd/ai/main.go` 的注释；⑤ `tellurion:docs/SPEC.md` 因子端点节标注「历史契约 / 当前未实现」（该处属 core 仓文档，跨仓单见 `tellurion:CORE-SPEC-FACTOR-ENDPOINTS-STALE`）。
+- **④ 约束与非目标**：**禁止**在 core 补 `/api/factor/compute|evaluate` 空壳端点；**禁止**为了让测试变绿改 allowlist 或放宽断言；不改 DSL 语义、不新造远程求值面（ADR-028 §6）。
+- **⑤ 验收**：`gofmt -l` 空、`go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿；三条工具调用各有一条用例断言返回「未提供」且**零 HTTP 请求**（用 `httptest` 计数为 0 证明）；破坏验证：把哨兵错误改回「发请求」⇒ 用例红；还原复绿。
+- **⑥ 边界**：本仓 `pkg/ai/client` 与 `pkg/ai/tools/builtin`；core 侧只改文档标注（另单），不新增运行时能力。
+- **重开条件**：core 真正实现「公式 × 符号」求值面、或 ADR-028 §6 的 strategy 侧求值落地并提供稳定 HTTP 面（ADR-041 §6）——届时重新接线并在 ADR-041 追加裁决。
+
 ### AGENT-COPILOT-WORKING-DIR · 容器里 `copilot.working_dir` 为空，代码生成必被沙箱拒绝 [P1] ⛔
 
 - **① 目标**：给容器形态的 copilot 一个**满足四条底线的构建沙箱**（每作业独立目录、路径不逃出沙箱根、跑完清理、命令白名单），让 `POST /api/copilot/generate` 能走到 build 腿；不是只填一个路径。
