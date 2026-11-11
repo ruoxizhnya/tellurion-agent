@@ -303,9 +303,9 @@ func TestValidateCausal_WeakSignalIsNotAccepted(t *testing.T) {
 	n := &stubNarrator{theory: &CausalTheory{
 		Mechanism: "弱势动量",
 		Predictions: []Prediction{
-			{Kind: PredictionWinRate, Statement: "胜率过半", Min: fptr(0.5)},            // 中（0.6）
-			{Kind: PredictionHoldingDays, Statement: "日内进出", Max: fptr(2)},          // 不中（12）
-			{Kind: PredictionTradeCount, Statement: "至少 100 笔", Min: fptr(100)},      // 不中（40）
+			{Kind: PredictionWinRate, Statement: "胜率过半", Min: fptr(0.5)},           // 中（0.6）
+			{Kind: PredictionHoldingDays, Statement: "日内进出", Max: fptr(2)},         // 不中（12）
+			{Kind: PredictionTradeCount, Statement: "至少 100 笔", Min: fptr(100)},    // 不中（40）
 			{Kind: PredictionMaxDrawdown, Statement: "回撤不超过 10%", Max: fptr(0.10)}, // 不中（18%）
 		},
 	}}
