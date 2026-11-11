@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/ruoxizhnya/tellurion-kit/httpserver"
 	aicausal "tellurion-agent/pkg/ai/causal"
@@ -20,7 +21,33 @@ import (
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/search"
 	"tellurion-agent/pkg/ai/validation"
+	"tellurion-agent/pkg/aistore"
 )
+
+// experimentReaper 是启动期收尸的能力面。*aistore.Store 满足它。
+type experimentReaper interface {
+	ReapRunningExperimentsBefore(ctx context.Context, before time.Time, reason string) (int64, error)
+}
+
+// reapExploreLeavings 在启动期收尸：把本进程启动前遗留的 running 实验行标记为
+// failed/orphan（AGENT-EXPLORE-STATE-REAP / D10=b）。
+//
+// 收尸失败只记日志、不阻断启动 —— 它修的是观测面，不该反过来让服务起不来。
+// 返回回收行数，供日志与测试口径。
+func reapExploreLeavings(ctx context.Context, store experimentReaper, before time.Time, logger zerolog.Logger) int64 {
+	if store == nil {
+		return 0
+	}
+	n, err := store.ReapRunningExperimentsBefore(ctx, before, aistore.ExperimentOrphanReason)
+	if err != nil {
+		logger.Warn().Err(err).Msg("explore 启动收尸失败：遗留 running 实验保持原状")
+		return 0
+	}
+	if n > 0 {
+		logger.Warn().Int64("reaped", n).Msg("explore 启动收尸：遗留 running 实验已标记 failed/orphan")
+	}
+	return n
+}
 
 // verdictSink 把验证器裁决写回实验日志那一行（P2-9 接线）。
 //

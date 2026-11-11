@@ -72,6 +72,12 @@ func main() {
 	}
 	defer aiStore.Close()
 
+	// AGENT-EXPLORE-STATE-REAP：启动期收尸。explore 的运行态是进程内 map
+	// （D10=b：接受易失），但每次尝试的 running 行落在 ai.experiments 里；
+	// 进程崩溃后没有任何存活者会收尾它们。把本进程启动前就已存在的 running
+	// 行标成 failed/orphan，观察面才不会永远显示「正在跑」。
+	reapExploreLeavings(context.Background(), aiStore, time.Now(), logger)
+
 	// QT-17 S3-b：本进程只消费 token claims（kit/auth 解析 + 本仓角色常量），
 	// 不再经 bootstrap.InitAuth 借 core 连接池读 users 表。用户库留在 core。
 	authSvc := initTokenService(v, logger)

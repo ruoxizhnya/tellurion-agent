@@ -15,13 +15,22 @@ import (
 // 落行、running 是「被叫停」的合法终态、两步写（先落行再补参数）。这一层
 // 只做存取，不做判断：不评最优、不排序、不打分。
 
-// 实验状态。running 既是初始态，也是被叫停时的终态 —— 中途叫停的实验永远
-// 停在 running，那正是回路断在哪一步的证据，不能被当成脏数据清掉。
+// 实验状态。running 是初始态；进程存活期间它也是「被叫停」的合法终态 ——
+// 中途叫停的实验停在 running，那正是回路断在哪一步的证据。
+//
+// AGENT-EXPLORE-STATE-REAP（D10=b）起补一条：**跨进程重启后**，没有任何
+// 存活的所有者会再收尾这些行，它们由启动期收尸统一标记为 failed/orphan
+// （见 ReapRunningExperimentsBefore）。所以「running 的终态语义」只在一个
+// 进程生命周期内成立；跨重启的遗留不是证据，是孤儿。
 const (
 	ExperimentStatusRunning   = "running"
 	ExperimentStatusCompleted = "completed"
 	ExperimentStatusFailed    = "failed"
 )
+
+// ExperimentOrphanReason 是启动期收尸写进 error_message 的固定原因。
+// 观察面按它区分「跑失败」与「进程崩了没跑完」。
+const ExperimentOrphanReason = "orphaned: process restarted before the attempt completed"
 
 // 数据集划分。一次尝试必须说清自己用的是哪份数据，否则保留期验证无从谈起。
 const (
@@ -198,6 +207,33 @@ func (s *Store) CountExperiments(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("failed to count experiments: %w", err)
 	}
 	return n, nil
+}
+
+// ReapRunningExperimentsBefore 是启动期收尸：把 before 之前就已存在、且仍停在
+// running 的实验行标记为 failed，并写上固定原因 ExperimentOrphanReason。
+//
+// 判据写死（AGENT-EXPLORE-STATE-REAP / D10=b）：
+//   - 只看 status = 'running'；
+//   - 只看 created_at < before（before 取本进程启动时刻）——启动时已经存在的
+//     running 行不可能属于本进程，也不会有任何存活者去收尾它；
+//   - 标 failed 而不是删除：失败行仍要留下「断在哪」的证据（实验日志的既有语义）；
+//   - 幂等：同一批行收过一次就不再是 running，重复执行返回 0。
+//
+// 多副本共享同一库时，本方法会把别的副本正在跑的行也收掉；本仓按
+// 「单写者」部署（ADR-027），多副本是另一个议题，不在这里兜底。
+func (s *Store) ReapRunningExperimentsBefore(ctx context.Context, before time.Time, reason string) (int64, error) {
+	if reason == "" {
+		reason = ExperimentOrphanReason
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE ai.experiments
+		SET status = $2, error_message = $3, finished_at = NOW()
+		WHERE status = $1 AND created_at < $4
+	`, ExperimentStatusRunning, ExperimentStatusFailed, reason, before)
+	if err != nil {
+		return 0, fmt.Errorf("failed to reap running experiments before %s: %w", before.UTC().Format(time.RFC3339), err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func marshalJSONBObject(m map[string]any) ([]byte, error) {

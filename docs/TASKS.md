@@ -119,7 +119,11 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑥ 边界**：本仓预算闸与成本写者；hermes.yaml 声明归 `AGENT-HERMES-DOCS-ADR041` 同批核对。
 - **owner**：待定
 
-### AGENT-EXPLORE-STATE-REAP · explore 运行态纯内存，崩溃即孤儿（D10=b）[P1] ⬜
+### AGENT-EXPLORE-STATE-REAP · explore 运行态纯内存，崩溃即孤儿（D10=b）[P1] ✅
+
+> **施工记录（2026-11-12）**：收尸落点选 `ai.experiments` 的 `running` 行 —— 那才是崩溃后真正遗留、且有观察面的东西（运行态 map 仍按 D10=b 保持易失，不新增持久 run 表）。`pkg/aistore/experiment.go` 新增 `ReapRunningExperimentsBefore(ctx, before, reason)`：`UPDATE ... SET status='failed', error_message=$reason, finished_at=NOW() WHERE status='running' AND created_at < before`，判据写死为「本进程启动前就已存在」；固定原因常量 `ExperimentOrphanReason`；标 failed 而不删行，保留「断在哪」的证据；重复执行返回 0（幂等）。同时修正该文件顶部关于 running 终态语义的注释：running 作为「被叫停」证据只在单进程生命周期内成立，跨重启遗留按孤儿收尸。`cmd/ai/handlers_explore.go` 新增 `reapExploreLeavings`（收尸失败只 WARN、不阻断启动），`cmd/ai/main.go` 在 Store 就绪后、路由注册前调用，`before = time.Now()`。
+>
+> **验收（真实输出）**：`go test ./cmd/ai ./pkg/aistore -run "Reap"` PASS。真库腿 `TestStore_ReapRunningExperimentsBefore`：插入 3 行（旧 running / 未来 created_at 的 running / 已 completed），收尸后旧行 `running → failed` 且 `error_message=orphaned: ...`、`finished_at` 非空，新行仍 running、completed 行不变；第二次收尸 0 行。装配腿 `TestReapExploreLeavings_*`：真实调用一次、cutoff 与原因原样传入、nil/错误不阻断。**破坏验证**：`reapExploreLeavings` 直接 `return 0` + `ReapRunningExperimentsBefore` 直接 `return 0, nil`（即删收尸）→ `cmd/ai` 与 `pkg/aistore` 的 Reap 用例全红（`expected: 1 actual: 0`、`遗留 running 必须标成 failed` 实际仍 `running`），逐字节还原后全绿（无残留标记）。
 
 - **① 目标**：给 explore 运行态一个**启动收尸**机制，让进程崩溃后遗留的 running 态能被回收，而不是永远卡在内存 map 里。
 - **② 上下文**：审查发现 W4-F2（ODR-071）+ 裁决 D10=b（run 态易失 + 启动收尸）。`pkg/ai/handlers/handlers_explore.go:262-272` 运行态是内存 map；全仓 grep `stale`/`reap`/`recover`/`orphan` 零命中；`pipeline.go:759-764` 尽力而为日志。D10=b：接受 run 态易失，但启动时须收尸（标记遗留 running 为 failed/orphan）。
