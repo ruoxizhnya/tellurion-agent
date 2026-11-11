@@ -31,6 +31,17 @@ verified-by: 2026-11-11 `AGENT-COPILOT-WORKING-DIR` 取证与裁决：同进程�
 - **退出条件**：① 若目标环境明确不允许容器运行时，退回 A，但必须先满足「`BuildExecutor` 支持 env + 作业目录内 GOCACHE/HOME/TMP + 命令白名单 + 启动期清扫」四条，任一条不满足继续停在 fail-closed；② 若 B 在目标环境不可落地，改 C，并把 `/api/copilot/generate` 终态从 `sandbox_rejected` 改为明确的 `code_ready_no_build`、删除 build 相关配置键，不留「看起来能编、实际没编」的中间态。
 - **重开条件**：目标部署环境提供容器运行时（Docker 套接字或等价隔离原语），且主任决定继续投入 Copilot 的编译门；或环境明确不允许容器运行时、转而接受 C 的退路。
 
+### AGENT-RUNBOOK-GAP · 本仓没有 runbook，起停与生成链失败只有 README 零散说明 [P1] ⬜
+
+- **① 目标**：给 agent 一份最小 runbook，让「起不来 / readyz 503 / 生成链失败 / LLM 未配置」有固定入口。
+- **② 上下文**：`SERVICE.md` 落地时实测——本仓 `docs/` 无 `runbook.md`；起停写在 `README.md`「启动 ai-service」，生成链失败语义散在 `docs/api-schema.md` §5 与 `docs/dataflow.md`。六个服务仓都有 `docs/runbook.md`，core / agent / ui 三个仓没有。
+- **③ 要求**：① 覆盖起停、`/health` 与 `/readyz` 的语义差异、DB 不可达、`ai.*` 迁移未执行、`AI not configured`、`chain sink not configured`、`sandbox_rejected` 四类失败原文；② 每节写「现象 → 先看什么 → 常见原因 → 对应日志 / job 终态」，不重复 `docs/api-schema.md` 的参数表；③ 完成后把 `SERVICE.md` 的 `truth.runbook` 改为该文件路径。
+- **④ 约束与非目标**：不写 SLO / 告警规则 / 值班表；不改生成链的 fail-closed 语义；不把 `config/ai-service.yaml` 的键值清单抄进 runbook。
+- **⑤ 验收**：按 runbook 从冷机起一次单仓栈成功；四类破坏场景（停 PG / 不给 `AI_API_KEY` / 不装留痕落点 / 故意让静态检查拒）都命中文中登记的失败原文与处置步骤。
+- **⑥ 边界**：本仓起停与生成链排查归本仓；core 的能力端点与错误语义归 `tellurion` 的 runbook / openapi。
+- **owner**：待定
+- **重开条件**：出现第二次「AI 路由失败但只能翻 api-schema 找原因」的排障经历，或接手人变更。
+
 **其余无未做 / 挂起 / 外部依赖项**（截至 2026-11-11 台账重整）。已收口单的正文、验收与施工记录全部在归档文件里；新增工作一律另立单，不得以「补充说明」形式挂在本节。
 
 ## 二、跨仓指针（不在本仓，勿双写）

@@ -1,5 +1,7 @@
 # tellurion-agent
 
+> 5 分钟了解本服务：[SERVICE.md](SERVICE.md)
+
 Quant Lab 的 **AI 实验员层**。从 monorepo `tellurion` 拆出（2026-10-09）。
 
 ## 定位与边界
