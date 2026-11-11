@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/ruoxizhnya/tellurion-kit/httpserver"
-	"tellurion-agent/pkg/ai"
 	aicausal "tellurion-agent/pkg/ai/causal"
 	"tellurion-agent/pkg/ai/client"
 	"tellurion-agent/pkg/ai/loop"
@@ -190,7 +189,7 @@ func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, s
 	if sink != nil {
 		opts = append(opts, pipeline.WithExperimentSink(sink))
 	}
-	handler := NewExploreHandler(pipeline.NewPipeline(opts...), runner)
+	handler := NewExploreHandler(buildPipeline(sink, opts...), runner)
 	// 实验日志落点若同时能写裁决（*aistore.Store 满足），就把裁决
 	// 也接上；不满足就只记日志不记裁决。main.go 里 aiStore 在初始化失败时
 	// 进程已退出，sink 只可能是非 nil 的 *aistore.Store。
@@ -204,7 +203,7 @@ func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, s
 	// 因果维要真调一次模型：没配 key 就不配叙述者，那一维老老实实记成
 	// 未评估。配了却调不通也一样 —— ValidateCausal 返回的错误只记日志，
 	// 不会把这一轮探索搞挂。
-	if c := ai.NewClient(); c.IsConfigured() {
+	if c := budgetedLLMClient(sink); c.IsConfigured() {
 		handler.narrator = aicausal.New(c)
 	}
 	api := router.Group("/api")

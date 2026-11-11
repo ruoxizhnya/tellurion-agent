@@ -19,12 +19,50 @@ import (
 	"github.com/ruoxizhnya/tellurion-kit/sandbox/staticcheck"
 	"github.com/spf13/viper"
 	"tellurion-agent/pkg/ai"
+	"tellurion-agent/pkg/ai/budget"
 	"tellurion-agent/pkg/ai/client"
+	"tellurion-agent/pkg/ai/intent"
+	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/ai/tools"
 	"tellurion-agent/pkg/ai/tools/builtin"
+	yamlgen "tellurion-agent/pkg/ai/yaml"
 	"tellurion-agent/pkg/aistore"
 	"tellurion-agent/pkg/copilot"
 )
+
+// newLLMClient 构造接了日累计预算闸的 LLM client。
+//
+// 闸的累计值由 ai.ai_costs 派生，进程重启后从库里重读 —— 这是「删掉持久化、
+// 靠重启绕过闸」必须失败的物理依据。store 为 nil 时退回不带闸的客户端，
+// 只在降级装配里出现（正常启动期 store 非 nil，否则进程已退出）。
+func newLLMClient(store *aistore.Store) *ai.Client {
+	if store == nil {
+		return ai.NewClient()
+	}
+	return ai.NewClientWithBudget(budget.NewGateFromEnv(store))
+}
+
+// budgetedLLMClient 从 sink 上探账本能力：*aistore.Store 既能当实验日志
+// 落点，也能当日累计成本账本。探不到就退回不带闸的客户端。
+func budgetedLLMClient(sink pipeline.ExperimentSink) *ai.Client {
+	if ledger, ok := sink.(budget.Ledger); ok {
+		return ai.NewClientWithBudget(budget.NewGateFromEnv(ledger))
+	}
+	return ai.NewClient()
+}
+
+// buildPipeline 构造 pipeline，并把其中的 LLM 调用（意图解析、代码修正）
+// 收口到同一个预算闸上。
+//
+// 只换 p.aiClient 不够：意图解析器持有自己的客户端，而那条路径才是每次流水线
+// 最先花的钱。所以账本可用时用 NewPipelineWithDeps 一次性换掉解析器与客户端。
+func buildPipeline(sink pipeline.ExperimentSink, opts ...pipeline.PipelineOption) *pipeline.Pipeline {
+	if _, ok := sink.(budget.Ledger); !ok {
+		return pipeline.NewPipeline(opts...)
+	}
+	c := budgetedLLMClient(sink)
+	return pipeline.NewPipelineWithDeps(intent.NewParserWithClient(c), yamlgen.NewGenerator(), c, opts...)
+}
 
 // ── 来自 core pkg/bootstrap/copilot.go（AI 拆仓阶段 2 随迁，逐字搬运）──
 
@@ -104,9 +142,9 @@ func (a *SandboxRunnerAdapter) IsTimeout(err error) bool {
 // 留痕落点：记不下一次生成，就不开始一次生成。
 // QT-32-B 起多注入一个资产登记端口：编译通过后由它拿回真坐标；它同样是
 // fail-closed 的（nil → 编译通过也不放过）。
-func BuildCopilot(v *viper.Viper, chain copilot.ChainSink, assets copilot.AssetRegistrar, logger zerolog.Logger) *copilot.CopilotService {
+func BuildCopilot(v *viper.Viper, chain copilot.ChainSink, assets copilot.AssetRegistrar, aiStore *aistore.Store, logger zerolog.Logger) *copilot.CopilotService {
 	copilotService := copilot.NewCopilotService().
-		WithLLMClient(ai.NewClient()).
+		WithLLMClient(newLLMClient(aiStore)).
 		WithCodeChecker(StaticCheckAdapter{}).
 		WithBuildExecutor(NewSandboxRunnerAdapter(logger)).
 		WithChainSink(chain).

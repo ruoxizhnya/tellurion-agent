@@ -16,7 +16,7 @@ import (
 // 试错就不进累计计数，统计维的分母会被算小。
 
 type completedExperiment struct {
-	id     int64
+	id      int64
 	metrics *aistore.ExperimentMetrics
 	errMsg  string
 }

@@ -104,7 +104,7 @@ func NewPipelineHandler(opts ...PipelineHandlerOption) *PipelineHandler {
 	if h.expSink != nil {
 		popts = append(popts, pipeline.WithExperimentSink(h.expSink))
 	}
-	h.pipeline = pipeline.NewPipeline(popts...)
+	h.pipeline = buildPipeline(h.expSink, popts...)
 	return h
 }
 

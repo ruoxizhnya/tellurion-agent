@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"tellurion-agent/pkg/ai/budget"
 )
 
 // LLMClient is the contract that downstream packages (e.g. pkg/strategy) depend
@@ -79,6 +81,9 @@ type Client struct {
 	costTable *CostTable  // per-model token cost
 	metrics   *Metrics    // per-call observability
 	tracer    Tracer      // pluggable tracer (default: NoopTracer)
+	// budgetGate 是日累计 USD 闸（nil = 不设闸，仅测试装配会走到）。
+	// 读账与记账都必须落库：进程内数字会被重启抹掉（AGENT-LLM-BUDGET-GATE）。
+	budgetGate *budget.Gate
 
 	// mu protects limiter/retry/costTable/metrics/tracer swaps.
 	// Field assignments during NewClientWithOptions are safe without
@@ -115,6 +120,19 @@ func resolveModel() string {
 // A 30s default HTTP timeout is applied to prevent indefinite hangs.
 func NewClient() *Client {
 	c, _ := NewClientWithOptions()
+	return c
+}
+
+// NewClientWithBudget 构造接了日累计预算闸的客户端。
+//
+// 闸的累计值来自 ai.ai_costs，进程重启后从库里重读。WithBudgetGate 是纯赋值
+// 选项、不会失败；真失败说明客户端构造本身坏了，启动期直接 panic 比静默
+// 放行（无闸）安全。
+func NewClientWithBudget(gate *budget.Gate) *Client {
+	c, err := NewClientWithOptions(WithBudgetGate(gate))
+	if err != nil {
+		panic(fmt.Sprintf("ai: construct budgeted client: %v", err))
+	}
 	return c
 }
 
@@ -214,6 +232,11 @@ func WithMetrics(m *Metrics) ClientOption {
 	return func(c *Client) error { c.metrics = m; return nil }
 }
 
+// WithBudgetGate 接上日累计 USD 闸。nil 合法（等价于不设闸，仅测试装配用）。
+func WithBudgetGate(g *budget.Gate) ClientOption {
+	return func(c *Client) error { c.budgetGate = g; return nil }
+}
+
 // WithTracer sets a custom tracer. Defaults to NoopTracer. To plug in OTel,
 // wrap otel.Tracer into the Tracer interface in your service init code and
 // pass it here — this keeps the AI package free of OTel dependencies.
@@ -272,102 +295,15 @@ type Choice struct {
 }
 
 // Chat sends a chat completion request and returns the assistant's reply text.
-// The call goes through the full resilience stack: rate-limit wait →
-// retry-with-backoff → per-call observability (tracer + metrics + cost).
+// The call goes through the full resilience stack: budget gate → rate-limit
+// wait → retry-with-backoff → per-call observability (tracer + metrics + cost).
+//
+// 它现在委托给 ChatWithUsage：此前 Chat 走的是「拿不到 usage」的简化路径，
+// 于是 copilot 等 Chat 调用方的花费既不入账也不受预算闸约束。委托后所有
+// 生产调用都记 token×单价，闸才有完整的行为面。
 func (c *Client) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
-	if !c.IsConfigured() {
-		return "", fmt.Errorf("AI_API_KEY or AI_API_URL not configured")
-	}
-
-	// Snapshot the resilience config (lock-free) so concurrent option
-	// changes (e.g. for hot-reload) don't tear the call state.
-	c.mu.Lock()
-	limiter := c.limiter
-	retry := c.retry
-	costTable := c.costTable
-	metrics := c.metrics
-	tracer := c.tracer
-	c.mu.Unlock()
-
-	// Defensive defaults: a hand-rolled Client (e.g. from tests) may not
-	// have these wired. Treat nil as a no-op rather than panicking.
-	if tracer == nil {
-		tracer = NoopTracer{}
-	}
-	if metrics == nil {
-		metrics = NewMetrics()
-	}
-	if costTable == nil {
-		costTable = NewCostTable()
-	}
-
-	// Start span (default: no-op).
-	ctx, span := tracer.StartSpan(ctx, SpanName, map[string]any{
-		AttrAIModel: c.model,
-	})
-	defer span.End()
-
-	// Rate-limit wait (blocks if bucket is empty, respects ctx).
-	rateLimited := false
-	if limiter != nil {
-		if err := limiter.Wait(ctx); err != nil {
-			span.RecordError(err, 0)
-			return "", fmt.Errorf("rate limit: %w", err)
-		}
-		rateLimited = true
-	}
-
-	start := time.Now()
-	attemptCount := 0
-	result, status, err := retry.Do(ctx, func(ctx context.Context, attempt int) (string, int, error) {
-		attemptCount = attempt
-		span.SetAttribute(AttrAIRetryCount, attempt-1)
-		return c.doChatOnce(ctx, messages)
-	})
-	duration := time.Since(start)
-
-	// Compute cost (best-effort; if the response didn't include usage,
-	// the cost is 0 — caller can still log the call).
-	var usage Usage
-	if err == nil {
-		// Re-fetch usage — doChatOnce returned a stripped result string.
-		// To keep the API simple, we re-parse the body in the caller path.
-		// (See doChatWithUsage below for the version that returns usage.)
-		// For now, we record zero usage when the simple path is used.
-		_ = usage
-	}
-
-	cost := 0.0
-	if costTable != nil && err == nil {
-		// Best-effort: if the underlying call returned usage, we'd
-		// record it here. The simple Chat() path doesn't, so cost is 0.
-		// Use ChatWithUsage() to get cost tracking.
-		_ = cost
-	}
-
-	// Span attributes.
-	span.SetAttribute(AttrAIStatusCode, status)
-	span.SetAttribute(AttrAIDurationMS, duration.Milliseconds())
-	span.SetAttribute(AttrAIRateLimited, rateLimited)
-	if err != nil {
-		span.RecordError(err, status)
-	}
-
-	// Metrics.
-	if metrics != nil {
-		metrics.Record(CallResult{
-			Model:       c.model,
-			Usage:       usage,
-			CostUSD:     cost,
-			Duration:    duration,
-			StatusCode:  status,
-			Err:         err,
-			Retried:     attemptCount > 1,
-			RateLimited: rateLimited,
-		})
-	}
-
-	return result, err
+	text, _, err := c.ChatWithUsage(ctx, messages)
+	return text, err
 }
 
 // ChatWithUsage is like Chat but returns the token usage and computes
@@ -383,12 +319,35 @@ func (c *Client) ChatWithUsage(ctx context.Context, messages []ChatMessage) (str
 	costTable := c.costTable
 	metrics := c.metrics
 	tracer := c.tracer
+	gate := c.budgetGate
 	c.mu.Unlock()
 
-	ctx, span := tracer.StartSpan(ctx, SpanName+".with_usage", map[string]any{
+	// Defensive defaults: a hand-rolled Client (e.g. from tests) may not have
+	// these wired. Chat() delegates here, so this path must be as tolerant as
+	// the old simple path was.
+	if tracer == nil {
+		tracer = NoopTracer{}
+	}
+	if metrics == nil {
+		metrics = NewMetrics()
+	}
+	if costTable == nil {
+		costTable = NewCostTable()
+	}
+
+	ctx, span := tracer.StartSpan(ctx, SpanName, map[string]any{
 		AttrAIModel: c.model,
 	})
 	defer span.End()
+
+	// 预算闸在限流等待之前：已经超预算就别再排队等一次注定被拒的调用。
+	// 读账失败同样拒绝（fail-closed）—— 账都读不出来，就没有依据证明还能花。
+	if gate != nil {
+		if err := gate.Check(ctx); err != nil {
+			span.RecordError(err, 0)
+			return "", Usage{}, err
+		}
+	}
 
 	rateLimited := false
 	if limiter != nil {
@@ -441,6 +400,20 @@ func (c *Client) ChatWithUsage(ctx context.Context, messages []ChatMessage) (str
 			Retried:     attemptCount > 1,
 			RateLimited: rateLimited,
 		})
+	}
+
+	// 花费入账。失败 = 这次调用失败：账没记上，下一道闸就会低估，
+	// 等于给「越花越多」开了一个口子（fail-closed）。
+	// 记账用脱离取消的 ctx + 短超时：调用方 ctx 被取消时仍然要把已经花掉
+	// 的钱记下来，但也不能让一次 DB 卡死拖住调用方。
+	if gate != nil && err == nil {
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		recErr := gate.Record(recordCtx, c.model, lastUsage.PromptTokens, lastUsage.CompletionTokens, cost)
+		cancel()
+		if recErr != nil {
+			span.RecordError(recErr, status)
+			return "", lastUsage, recErr
+		}
 	}
 
 	return result, lastUsage, err

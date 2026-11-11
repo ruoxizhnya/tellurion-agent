@@ -70,7 +70,13 @@ memory:
 # │   → 调用方可显式传入更小的值（如验收测试用 20）                   │
 # └─────────────────────────────────────────────────────────────────┘
 budget:
-  max_cost_per_session: 5.0    # USD — 单次会话总成本上限
+  # `max_cost_per_session` 现在由代码侧日累计 USD 闸执行（AGENT-LLM-BUDGET-GATE，
+  # `pkg/ai/budget`）：口径是 **UTC 日累计**而非单会话（agent 没有可靠会话边界），
+  # 累计值持久化在 `ai.ai_costs`，重启后从库里重读，不会归零。
+  # 额度默认取这里的 5.0；运行时可用环境变量 `AI_DAILY_BUDGET_USD` 覆盖。
+  # 到达上限后拒绝后续 LLM 调用，错误码 `llm_budget_exhausted`；
+  # 账读不出/记不上则 fail-closed（`llm_budget_ledger_error`），不静默放行。
+  max_cost_per_session: 5.0    # USD — 日累计上限（非单会话；见上方注释）
   max_iterations: 50           # 单次会话最大迭代次数（session-wide hard cap）
   max_llm_calls: 200           # 单次会话最大 LLM 调用次数
 

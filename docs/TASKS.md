@@ -105,7 +105,11 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑥ 边界**：本仓 `pkg/ai/causal`；叙述者解析测试归 `AGENT-CAUSAL-PARSE-TESTS`。
 - **owner**：待定
 
-### AGENT-LLM-BUDGET-GATE · ResearchBudget 零代码，日累计 USD 闸缺失（D4=a）[P1] ⬜
+### AGENT-LLM-BUDGET-GATE · ResearchBudget 零代码，日累计 USD 闸缺失（D4=a）[P1] ✅
+
+> **施工记录（2026-11-12）**：新增 `ai.ai_costs`（`pkg/aistore/schema.go`，`PRIMARY KEY(day, model)`，幂等 DDL + `agentOwnedTables` 豁免）；`pkg/aistore/llm_cost.go` 提供唯一写入口 `AddLLMCost`（upsert 累加 token/USD/calls）与 `DailyLLMCost`（当日 SUM）。新增 `pkg/ai/budget`：日累计闸 `Gate`（`Check` 读账、`Record` 记账、`Spent` 读面），错误码 `llm_budget_exhausted` / `llm_budget_ledger_error`，读账与记账失败都 fail-closed，额度默认 5 USD（对齐 hermes.yaml）可用 `AI_DAILY_BUDGET_USD` 覆盖，非法值回落默认而非「不设闸」。`pkg/ai/client.go` 加 `budgetGate` + `NewClientWithBudget`，`Chat` 委托 `ChatWithUsage` 使所有生产调用都带 usage 记账；闸在限流等待之前检查，被拒时一次 HTTP 都不发。装配根 `cmd/ai/builders.go` 新增 `newLLMClient(store)` 与 `buildPipeline(sink)`，把 copilot、pipeline 的意图解析/代码修正、explore 因果叙述者全部收口到同一个带闸客户端；`docs/db-schema.md`、`docs/hermes/config/hermes.yaml` 注释同步。
+>
+> **验收（真实输出）**：`go test ./pkg/ai ./pkg/ai/budget ./cmd/ai -run "Budget|Gate"` PASS；真库腿 `TEST_DATABASE_DSN=...tellurion_agent_qt go test ./cmd/ai -run TestLLMBudgetGate`（预置 1 USD 到上限 → 拒调用且 HTTP 命中 0；重建连接池 + Store + Gate 后仍拒；单次百万 token 调用把累计推过上限并落库，重启后新闸仍拒）PASS。**破坏验证**：把 `Gate.Check` 的读账改为常量 0、`Gate.Record` 跳过 `AddLLMCost`（即删掉持久化）→ `pkg/ai/budget` 5 个用例与 `cmd/ai` 两个真库用例全红（`到达日累计上限后必须拒调用` / `百万 token 的调用必须把花费推过上限并落库`），逐字节还原后全绿。
 
 - **① 目标**：把 `hermes.yaml` 声明的预算（`max_cost_per_session`）落成**代码侧日累计 USD 闸 + 持久化**，让 LLM 花费真能被拦住，而不是配置里写着、代码里没人读。
 - **② 上下文**：审查发现 W4-F1（ODR-071）+ 裁决 D4=a。`ResearchBudget` 零代码（`docs/hermes/config/hermes.yaml:57,72` `max_cost_per_session:5.0` + skill:257）；`pkg/ai/metrics/cost.go:136` 的 `ai_costs` 零写者；`metrics.go:35` `dailyCosts` 是进程内 map（重启归零）；`ratelimit.go:29` 10/min + `handlers_explore.go:212-214` MaxTries 20 ⇒ 理论 14,400 次/天，无 USD 上限。

@@ -46,6 +46,7 @@ var Tables = []string{
 	"ai.factor_hypothesis",
 	"ai.generation_chain",
 	"ai.adoption_ledger",
+	"ai.ai_costs",
 }
 
 // statements is the execution truth: idempotent DDL, executed in order by
@@ -259,6 +260,24 @@ var statements = []string{
 		resolved_at        TIMESTAMPTZ
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_adoption_ledger_holdout ON ai.adoption_ledger(is_holdout)`,
+
+	// ai_costs — AGENT-LLM-BUDGET-GATE：P1-14 口径里那张「日 × 模型」成本表
+	// 的真写者。此前只有进程内 map（重启归零），没有任何行落库，预算闸无从
+	// 判起。
+	//
+	// 口径：一行 = 一个 UTC 日 × 一个模型；每次 LLM 调用 upsert 累加
+	// token 与 USD（`calls` 同步 +1）。日累计 = SUM(cost_usd) WHERE day=$1。
+	// 单价由 pkg/ai.CostTable 决定（默认表写死，未命中走 fallback）。
+	`CREATE TABLE IF NOT EXISTS ai.ai_costs (
+		day               DATE         NOT NULL,
+		model             VARCHAR(100) NOT NULL,
+		prompt_tokens     BIGINT       NOT NULL DEFAULT 0,
+		completion_tokens BIGINT       NOT NULL DEFAULT 0,
+		cost_usd          DOUBLE PRECISION NOT NULL DEFAULT 0,
+		calls             BIGINT       NOT NULL DEFAULT 0,
+		updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (day, model)
+	)`,
 }
 
 // Statements returns a copy of the DDL in execution order. Mutating the result

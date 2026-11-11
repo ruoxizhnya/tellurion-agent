@@ -45,6 +45,7 @@ var retiredCoreTables = map[string]string{
 var agentOwnedTables = map[string]string{
 	"ai.generation_chain": "QT-32-A：AI 生成链的留痕。core 从未记录过生成过程（旧表只有实验日志），无 core 列可对拍。",
 	"ai.adoption_ledger":  "AGENT-INTERVENTION-ADOPTION-LEDGER：干预/采纳台账与 holdout 对账集。core 从未有过采纳决策表，无 core 列可对拍。",
+	"ai.ai_costs":         "AGENT-LLM-BUDGET-GATE：P1-14 日成本表的真写者。core 从未落过该表（原设计也只有进程内 map），无 core 列可对拍。",
 }
 
 var columnNameRE = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
