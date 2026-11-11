@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -272,10 +273,11 @@ func TestComputeFactorICTool_Name(t *testing.T) {
 	assert.Equal(t, "compute_factor_ic", tt.Name())
 }
 
-func TestComputeFactorICTool_Description(t *testing.T) {
+func TestComputeFactorICTool_Description_MarksUnavailable(t *testing.T) {
 	tt := NewComputeFactorICTool(client.NewFactorClient("http://x"))
 	desc := tt.Description()
-	assert.NotEmpty(t, desc)
+	assert.Contains(t, desc, "[unavailable]")
+	assert.Contains(t, desc, "ADR-041")
 	assert.Contains(t, desc, "IC")
 }
 
@@ -314,61 +316,26 @@ func TestComputeFactorICTool_OutputSchema(t *testing.T) {
 	assert.Equal(t, "string", found["recommendation"], "recommendation field should be string")
 }
 
-func TestComputeFactorICTool_Execute_HappyPath(t *testing.T) {
-	srv := newFactorTestServer()
-	defer srv.close()
+func TestComputeFactorICTool_Execute_Unavailable_NoHTTP(t *testing.T) {
+	srv, hits := countingServer(t)
+	tt := NewComputeFactorICTool(client.NewFactorClient(srv.URL))
 
-	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
-	args := map[string]interface{}{
+	result, err := tt.Execute(context.Background(), map[string]interface{}{
 		"expression": "ts_rank(close, 20)",
 		"symbols":    []string{"000001.SZ", "600000.SH"},
 		"start_date": "2022-01-01",
 		"end_date":   "2024-01-01",
-	}
+	})
 
-	result, err := tt.Execute(context.Background(), args)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	// L2 changed its return type from *client.FactorMetrics to the local
-	// *computeFactorICResult (which embeds GateDecision + IC/IR).
-	m, ok := result.(*computeFactorICResult)
-	require.True(t, ok, "result should be *computeFactorICResult, got %T", result)
-	assert.InDelta(t, 0.045, m.IC, 1e-9)
-	assert.InDelta(t, 0.62, m.IR, 1e-9)
-
-	// L2 GateDecision: IC=0.045 >= GateL2MinIC(0.02) → passed=true.
-	assert.Equal(t, "L2", m.Level, "level should be L2")
-	assert.True(t, m.Passed, "IC=0.045 >= 0.02 should pass L2 gate")
-	assert.Equal(t, GateReasonPassed, m.Reason, "reason should be 'passed' for IC above threshold")
-	assert.NotEmpty(t, m.Recommendation, "recommendation should be non-empty")
-
-	// Verify the server received the correct request body.
-	assert.Equal(t, "ts_rank(close, 20)", srv.lastBody["formula"])
-}
-
-func TestComputeFactorICTool_Execute_SymbolsAsInterfaceSlice(t *testing.T) {
-	// json.Unmarshal decodes a JSON array into []interface{}.
-	srv := newFactorTestServer()
-	defer srv.close()
-
-	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
-	args := map[string]interface{}{
-		"expression": "ts_rank(close, 20)",
-		"symbols":    []interface{}{"000001.SZ", "600000.SH"},
-		"start_date": "2022-01-01",
-		"end_date":   "2024-01-01",
-	}
-
-	_, err := tt.Execute(context.Background(), args)
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, client.ErrFactorCapabilityUnavailable), "必须是可判定的「能力未提供」哨兵，got %v", err)
+	assert.Contains(t, err.Error(), "compute_factor_ic")
+	assert.Equal(t, int32(0), atomic.LoadInt32(hits), "不可用路径不得发起 HTTP 请求")
 }
 
 func TestComputeFactorICTool_Execute_MissingExpression(t *testing.T) {
-	srv := newFactorTestServer()
-	defer srv.close()
-
-	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
+	tt := NewComputeFactorICTool(client.NewFactorClient("http://x"))
 	args := map[string]interface{}{
 		"symbols":    []string{"000001.SZ"},
 		"start_date": "2022-01-01",
@@ -381,10 +348,7 @@ func TestComputeFactorICTool_Execute_MissingExpression(t *testing.T) {
 }
 
 func TestComputeFactorICTool_Execute_MissingSymbols(t *testing.T) {
-	srv := newFactorTestServer()
-	defer srv.close()
-
-	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
+	tt := NewComputeFactorICTool(client.NewFactorClient("http://x"))
 	args := map[string]interface{}{
 		"expression": "close",
 		"start_date": "2022-01-01",
@@ -397,10 +361,7 @@ func TestComputeFactorICTool_Execute_MissingSymbols(t *testing.T) {
 }
 
 func TestComputeFactorICTool_Execute_MissingStartDate(t *testing.T) {
-	srv := newFactorTestServer()
-	defer srv.close()
-
-	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
+	tt := NewComputeFactorICTool(client.NewFactorClient("http://x"))
 	args := map[string]interface{}{
 		"expression": "close",
 		"symbols":    []string{"000001.SZ"},
@@ -413,10 +374,7 @@ func TestComputeFactorICTool_Execute_MissingStartDate(t *testing.T) {
 }
 
 func TestComputeFactorICTool_Execute_MissingEndDate(t *testing.T) {
-	srv := newFactorTestServer()
-	defer srv.close()
-
-	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
+	tt := NewComputeFactorICTool(client.NewFactorClient("http://x"))
 	args := map[string]interface{}{
 		"expression": "close",
 		"symbols":    []string{"000001.SZ"},
@@ -426,26 +384,6 @@ func TestComputeFactorICTool_Execute_MissingEndDate(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, tools.ErrInvalidArgs))
 	assert.Contains(t, err.Error(), "end_date")
-}
-
-func TestComputeFactorICTool_Execute_DownstreamError(t *testing.T) {
-	srv := newFactorTestServer()
-	srv.failWith = "evaluation failed"
-	defer srv.close()
-
-	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
-	args := map[string]interface{}{
-		"expression": "close",
-		"symbols":    []string{"000001.SZ"},
-		"start_date": "2022-01-01",
-		"end_date":   "2024-01-01",
-	}
-	_, err := tt.Execute(context.Background(), args)
-	require.Error(t, err)
-	// Args were valid — the failure is downstream, so it must NOT be
-	// conflated with ErrInvalidArgs.
-	assert.False(t, errors.Is(err, tools.ErrInvalidArgs))
-	assert.Contains(t, err.Error(), "compute_factor_ic")
 }
 
 func TestNewComputeFactorICTool_NilClientPanics(t *testing.T) {
@@ -480,9 +418,7 @@ func TestComputeFactorICTool_RegisterInRegistry(t *testing.T) {
 // breaks both tools simultaneously).
 func TestPipeline_ValidateThenComputeIC(t *testing.T) {
 	validateTool := newValidateTool(t)
-	srv := newFactorTestServer()
-	defer srv.close()
-	icTool := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
+	icTool := NewComputeFactorICTool(client.NewFactorClient("http://x"))
 
 	args := map[string]interface{}{
 		"expression": "ts_rank(close, 20)",
@@ -497,76 +433,15 @@ func TestPipeline_ValidateThenComputeIC(t *testing.T) {
 	vMap := vResult.(map[string]interface{})
 	require.True(t, vMap["valid"].(bool), "L1 gate: expression should validate")
 
-	// L2: compute IC (only because L1 passed)
+	// L2: 语法合法 ≠ 能力存在。ADR-041：求值面未提供，工具必须显式失败，
+	// 且 failure 不能被误判成 ErrInvalidArgs（L1 已通过）。
 	icResult, err := icTool.Execute(context.Background(), args)
-	require.NoError(t, err)
-	m := icResult.(*computeFactorICResult)
-	assert.InDelta(t, 0.045, m.IC, 1e-9)
-	// Cross-gate consistency: L1 passed, so L2 should also report its gate state.
-	assert.Equal(t, "L2", m.Level)
-	assert.True(t, m.Passed, "L2 should pass since IC >= threshold")
+	require.Error(t, err)
+	assert.Nil(t, icResult)
+	assert.True(t, errors.Is(err, client.ErrFactorCapabilityUnavailable))
+	assert.False(t, errors.Is(err, tools.ErrInvalidArgs))
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  L2 GateDecision — failure path
-// ═══════════════════════════════════════════════════════════════════════
-
-// TestComputeFactorICTool_Execute_LowIC_FailsGate verifies that an IC
-// below GateL2MinIC (0.02) sets passed=false with reason="low_ic".
-// This is the L2 fail path Hermes uses to decide "abandon this factor".
-func TestComputeFactorICTool_Execute_LowIC_FailsGate(t *testing.T) {
-	srv := newFactorTestServer()
-	defer srv.close()
-	lowIC := 0.005 // well below 0.02 threshold
-	srv.icOverride = &lowIC
-
-	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
-	args := map[string]interface{}{
-		"expression": "ts_rank(close, 20)",
-		"symbols":    []string{"000001.SZ"},
-		"start_date": "2022-01-01",
-		"end_date":   "2024-01-01",
-	}
-
-	result, err := tt.Execute(context.Background(), args)
-	require.NoError(t, err, "low IC is not a tool error — it's a gate failure")
-	require.NotNil(t, result)
-
-	m, ok := result.(*computeFactorICResult)
-	require.True(t, ok, "result should be *computeFactorICResult, got %T", result)
-	assert.InDelta(t, 0.005, m.IC, 1e-9)
-
-	// L2 GateDecision: IC=0.005 < 0.02 → passed=false, reason=low_ic.
-	assert.Equal(t, "L2", m.Level)
-	assert.False(t, m.Passed, "IC=0.005 < 0.02 should fail L2 gate")
-	assert.Equal(t, GateReasonLowIC, m.Reason, "reason should be 'low_ic' for IC below threshold")
-	assert.NotEmpty(t, m.Recommendation, "recommendation should guide the agent toward a retry or abandon")
-}
-
-// TestComputeFactorICTool_Execute_ZeroIC_FailsGate covers the special case
-// where IC == 0 (no predictive power). The reason code is the same
-// ("low_ic"), but the recommendation string differs to advise abandon.
-func TestComputeFactorICTool_Execute_ZeroIC_FailsGate(t *testing.T) {
-	srv := newFactorTestServer()
-	defer srv.close()
-	zeroIC := 0.0
-	srv.icOverride = &zeroIC
-
-	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
-	args := map[string]interface{}{
-		"expression": "close",
-		"symbols":    []string{"000001.SZ"},
-		"start_date": "2022-01-01",
-		"end_date":   "2024-01-01",
-	}
-
-	result, err := tt.Execute(context.Background(), args)
-	require.NoError(t, err)
-
-	m := result.(*computeFactorICResult)
-	assert.Equal(t, "L2", m.Level)
-	assert.False(t, m.Passed, "IC=0 should fail L2 gate")
-	assert.Equal(t, GateReasonLowIC, m.Reason)
-	// Recommendation for zero/negative IC should hint at abandoning.
-	assert.Contains(t, m.Recommendation, "放弃", "zero-IC recommendation should hint at abandoning the factor direction")
-}
+// L2 的 GateDecision 门限逻辑（低 IC / 零 IC）当前不可达：求值面不存在，
+// IC 永远算不出来。门限类型与判据保留在 production 代码里，等 core 真提供
+// 求值面后（ADR-041 §6 重开条件）再补回对应用例。

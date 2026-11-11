@@ -1,15 +1,30 @@
 package client
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 )
 
-// FactorClient is an HTTP client for factor computation API
+// ErrFactorCapabilityUnavailable 表示「因子求值能力在当前 core 上不存在」。
+//
+// 这是**事实性不可用**，不是瞬时故障：core 只注册了 POST /api/factor/registrations
+// 与反代 GET /api/factors/:factor_name（后者已因 data 撤路由成为死链），
+// 从来没有 /api/factor/compute 或 /api/factor/evaluate；docs/SPEC.md 里的
+// compute-returns/compute-ic 也从未实现。裁决见跨仓 ADR-041：
+// **不新造端点**，能力未提供就显式返回未提供。
+//
+// 调用方应当把本错误当作终态（不要重试），并向用户/LLM 说明改用
+// 「提交回测 + 读结果」的替代路径。
+var ErrFactorCapabilityUnavailable = errors.New(
+	"factor evaluation capability is not provided: core has no /api/factor/compute|evaluate endpoint (ADR-041); use backtest submission instead")
+
+// FactorClient 是因子能力的**占位客户端**：保留类型与请求/响应形状，
+// 但 compute/evaluate 已不再发出任何 HTTP 请求（ADR-041）。今天只有 Health
+// 会真正打网络。保留类型是为了在 core 真提供求值面时能重新接线，而不是
+// 让三个工具在运行期发一个必然 404 的请求。
 type FactorClient struct {
 	baseURL    string
 	httpClient *http.Client
@@ -41,84 +56,16 @@ type ComputeFactorResponse struct {
 	Error  string               `json:"error,omitempty"`
 }
 
-// ComputeFactor computes a factor expression for given symbols and date range
+// ComputeFactor 在当前栈上**不可用**：直接返回 ErrFactorCapabilityUnavailable，
+// 不发起 HTTP 请求。签名保留以便将来重新接线。
 func (c *FactorClient) ComputeFactor(ctx context.Context, req ComputeFactorRequest) (map[string][]float64, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/factor/compute", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("factor API returned status %d", resp.StatusCode)
-	}
-
-	var factorResp ComputeFactorResponse
-	if err := json.NewDecoder(resp.Body).Decode(&factorResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if factorResp.Error != "" {
-		return nil, fmt.Errorf("factor computation failed: %s", factorResp.Error)
-	}
-
-	return factorResp.Values, nil
+	return nil, fmt.Errorf("compute factor %q: %w", req.Formula, ErrFactorCapabilityUnavailable)
 }
 
-// EvaluateFactor evaluates a single factor expression and returns IC/IR metrics
+// EvaluateFactor 在当前栈上**不可用**：直接返回 ErrFactorCapabilityUnavailable，
+// 不发起 HTTP 请求。签名保留以便将来重新接线。
 func (c *FactorClient) EvaluateFactor(ctx context.Context, formula string, symbols []string, startDate, endDate string) (*FactorMetrics, error) {
-	req := ComputeFactorRequest{
-		Formula:   formula,
-		Symbols:   symbols,
-		StartDate: startDate,
-		EndDate:   endDate,
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/factor/evaluate", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("factor API returned status %d", resp.StatusCode)
-	}
-
-	var factorResp ComputeFactorResponse
-	if err := json.NewDecoder(resp.Body).Decode(&factorResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if factorResp.Error != "" {
-		return nil, fmt.Errorf("factor evaluation failed: %s", factorResp.Error)
-	}
-
-	return &FactorMetrics{
-		IC: factorResp.IC,
-		IR: factorResp.IR,
-	}, nil
+	return nil, fmt.Errorf("evaluate factor %q over %d symbols: %w", formula, len(symbols), ErrFactorCapabilityUnavailable)
 }
 
 // FactorMetrics represents factor quality metrics

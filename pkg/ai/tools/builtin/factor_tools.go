@@ -268,7 +268,7 @@ func NewComputeFactorICTool(c *client.FactorClient) *ComputeFactorICTool {
 func (t *ComputeFactorICTool) Name() string { return "compute_factor_ic" }
 
 func (t *ComputeFactorICTool) Description() string {
-	return "Compute a factor expression's Information Coefficient (IC) and Information Ratio (IR) over a symbol list and date range (L2 gate). IC > 0.03 is useful; IC > 0.05 is strong."
+	return "[unavailable] Factor IC/IR evaluation is NOT provided by this stack: core exposes no factor evaluation endpoint (ADR-041). Calling it returns a terminal 'capability unavailable' error; do not retry. Use backtest submission + result inspection instead. (Intended semantics: IC/IR over a symbol list and date range, L2 gate.)"
 }
 
 func (t *ComputeFactorICTool) Parameters() []tools.Parameter {

@@ -97,8 +97,10 @@ func main() {
 	factorPool := gene_pool.NewFactorPool(aiStore.Pool())
 	strategyPool := gene_pool.NewStrategyPool(aiStore.Pool())
 
-	// factor.compute / factor.evaluate / compute_factor_ic 经 HTTP 打
-	// analysis-service 的 /api/factor/*（只在那里注册）。
+	// factor.compute / factor.evaluate / compute_factor_ic 在当前栈上**不可用**：
+	// core 只注册 POST /api/factor/registrations 与反代 GET /api/factors/:name，
+	// 从来没有 /api/factor/compute|evaluate（ADR-041）。三个工具会显式返回
+	// 「该能力当前未提供」，不发起 HTTP 请求；analysisURL 仍保留以便将来重新接线。
 	toolsRegistry := BuildToolsRegistry(
 		v,
 		analysisURL,

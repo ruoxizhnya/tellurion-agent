@@ -1,25 +1,32 @@
 package client
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
-// clientEndpointGaps：core 的 openapi.yaml 里**没有**、但本仓客户端今天仍在调用的端点。
+// phantomFactorEndpoints：core 从未实现、因此**禁止**再出现在客户端源码里的端点。
 //
-// 只登记实测缺口，并且 TestClientEndpointGaps_AreStillGaps 会断言它们「今天仍然没有」——
-// core 补登记后本测试变红，逼着删掉这一行，allowlist 不会静默腐烂。
-var clientEndpointGaps = map[string]string{
-	"/api/factor/compute":  "公式 × 符号的因子求值在 core 无对应端点（core 只有 /api/factor/compute-returns 的「因子类型 × 交易日」）；QT-50 ③-② 补粗粒度端点后删除本行",
-	"/api/factor/evaluate": "IC/IR 求值的入参形状（formula + symbols）与 core /api/factor/compute-ic 不同；QT-50 ③-② 补粗粒度端点后删除本行",
+// ADR-041：core 只注册 POST /api/factor/registrations 与反代 GET /api/factors/:name；
+// /api/factor/compute 与 /api/factor/evaluate 是旧客户端凭空假设的，现已改为
+// 显式「能力未提供」（ErrFactorCapabilityUnavailable）。这两条路径若重新出现，
+// 说明有人又把它当成现役能力——测试必须红。
+var phantomFactorEndpoints = []string{
+	"/api/factor/compute",
+	"/api/factor/evaluate",
 }
 
 // nonCoreClientEndpoints：由 core 以外的服务提供、因此不要求出现在 core openapi 的端点。
-// 与 clientEndpointGaps 的区别：这里不是「core 漏登记」，而是归属别的服务。
+// 与 phantomFactorEndpoints 的区别：这里不是「客户端凭空假设」，而是归属别的服务。
 // TestNonCoreClientEndpoints_AreStillExternal 会断言它们仍被源码引用、且 core openapi
 // 仍然没有 —— 任一侧变化都会红，逼着重新判断归属。
 var nonCoreClientEndpoints = map[string]string{
@@ -46,9 +53,6 @@ func TestClientEndpoints_AreRegisteredInCoreOpenAPI(t *testing.T) {
 		if endpointRegistered(doc, endpoint) {
 			continue
 		}
-		if _, allowed := clientEndpointGaps[endpoint]; allowed {
-			continue
-		}
 		if _, external := nonCoreClientEndpoints[endpoint]; external {
 			continue
 		}
@@ -61,12 +65,45 @@ func TestClientEndpoints_AreRegisteredInCoreOpenAPI(t *testing.T) {
 	}
 }
 
-// TestClientEndpointGaps_AreStillGaps 是 allowlist 的防腐腿。
-func TestClientEndpointGaps_AreStillGaps(t *testing.T) {
-	doc, _ := loadCoreOpenAPI(t)
-	for endpoint, why := range clientEndpointGaps {
-		if endpointRegistered(doc, endpoint) {
-			t.Errorf("openapi 已登记 %q，把它从 clientEndpointGaps 删掉（登记理由：%s）", endpoint, why)
+// TestFactorClient_UnavailableWithoutHTTP 证明「不可用」是在客户端层判定的：
+// 即便 baseURL 指向一个能应答的服务器，也不得发出任何请求（ADR-041）。
+func TestFactorClient_UnavailableWithoutHTTP(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewFactorClient(srv.URL)
+
+	if _, err := c.ComputeFactor(context.Background(), ComputeFactorRequest{
+		Formula:   "ts_rank(close, 20)",
+		Symbols:   []string{"000001.SZ"},
+		StartDate: "2022-01-01",
+		EndDate:   "2024-01-01",
+	}); !errors.Is(err, ErrFactorCapabilityUnavailable) {
+		t.Fatalf("ComputeFactor err = %v，期望 ErrFactorCapabilityUnavailable", err)
+	}
+
+	if _, err := c.EvaluateFactor(context.Background(), "ts_rank(close, 20)", []string{"000001.SZ"}, "2022-01-01", "2024-01-01"); !errors.Is(err, ErrFactorCapabilityUnavailable) {
+		t.Fatalf("EvaluateFactor err = %v，期望 ErrFactorCapabilityUnavailable", err)
+	}
+
+	if n := atomic.LoadInt32(&hits); n != 0 {
+		t.Fatalf("不可用路径发起了 %d 次 HTTP 请求，期望 0", n)
+	}
+}
+
+// TestNoPhantomFactorEndpoints 是 ADR-041 的防腐腿：幻影端点不得回到源码。
+func TestNoPhantomFactorEndpoints(t *testing.T) {
+	scanned := map[string]bool{}
+	for _, endpoint := range scanClientEndpoints(t) {
+		scanned[endpoint] = true
+	}
+	for _, endpoint := range phantomFactorEndpoints {
+		if scanned[endpoint] {
+			t.Errorf("%q 重新出现在客户端源码里；core 没有该端点（ADR-041），应保持「能力未提供」，不得发请求", endpoint)
 		}
 	}
 }
@@ -89,20 +126,19 @@ func TestNonCoreClientEndpoints_AreStillExternal(t *testing.T) {
 	}
 }
 
-// TestEndpointScanner_SeesKnownPhantom 是破坏验证的在案版：扫描器必须看见
-// factor 客户端那两个真实幻影端点，否则上面那条腿就是空转。
-func TestEndpointScanner_SeesKnownPhantom(t *testing.T) {
+// TestEndpointScanner_SeesKnownLiveEndpoint 是破坏验证的在案版：扫描器必须看见
+// 真实存在的端点字面量，否则上面的防腐腿就是空转（扫不到 = 永远绿）。
+func TestEndpointScanner_SeesKnownLiveEndpoint(t *testing.T) {
 	endpoints := scanClientEndpoints(t)
-	want := map[string]bool{"/api/factor/compute": false, "/api/factor/evaluate": false}
+	found := false
 	for _, endpoint := range endpoints {
-		if _, ok := want[endpoint]; ok {
-			want[endpoint] = true
+		if strings.HasPrefix(endpoint, "/api/backtest") {
+			found = true
+			break
 		}
 	}
-	for endpoint, seen := range want {
-		if !seen {
-			t.Errorf("扫描器漏掉了已存在的端点字面量 %q", endpoint)
-		}
+	if !found {
+		t.Fatalf("扫描器没扫到任何 /api/backtest 端点（扫到 %v），扫描器大概率失效", endpoints)
 	}
 }
 

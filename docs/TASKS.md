@@ -12,7 +12,9 @@ verified-by: 2026-11-11 `AGENT-COPILOT-WORKING-DIR` 取证与裁决：同进程�
 
 ## 一、未做 / 挂起 / 外部依赖
 
-### AGENT-FACTOR-TOOLS-UNAVAILABLE · 三个因子工具打向 core 不存在的端点 [P0] ⬜
+### AGENT-FACTOR-TOOLS-UNAVAILABLE · 三个因子工具打向 core 不存在的端点 [P0] ✅
+
+> **施工记录（2026-11-11）**：`pkg/ai/client/factor_client.go` 新增 `ErrFactorCapabilityUnavailable`；`ComputeFactor`/`EvaluateFactor` 不再发 HTTP，直接返回该哨兵；三个工具 Description 加 `[unavailable]` 前缀并指向 ADR-041；`docker-compose.yml` 与 `cmd/ai/main.go` 的错误注释同批订正（core 仓提交）。测试：`TestFactorClient_UnavailableWithoutHTTP`、三个 `*_Execute_Unavailable_NoHTTP`（httptest 计数断言 0 请求）、`TestNoPhantomFactorEndpoints`（幻影端点回潮即红）。破坏验证：临时把 `ComputeFactor` 改回发 HTTP ⇒ 3 条用例红（client 2 + builtin 1），还原复绿。门禁：`gofmt -l` 空、`go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿。
 
 - **① 目标**：让 `factor.compute` / `factor.evaluate` / `compute_factor_ic` 在「core 无因子求值面」这个事实下**显式返回「该能力当前未提供」**，而不是发一个必失败的 HTTP 请求或返回空值；裁决见跨仓 ADR-041。
 - **② 上下文**：`pkg/ai/client/factor_client.go:51,93` 调 `POST /api/factor/compute` 与 `/api/factor/evaluate`；`compute_factor_ic` 走同一 `EvaluateFactor`（`pkg/ai/tools/builtin/factor_tools.go:336`）。2026-11-11 实测：core 只注册 `POST /api/factor/registrations`（`cmd/analysis/handlers_factor_registration.go:65`）与反代 `GET /api/factors/:factor_name`（`handlers_proxy.go:167`，已是死链）；`docs/openapi.yaml` 也只有这两条；`docs/SPEC.md:3197-3210` 列的 `compute-returns`/`compute-ic` **代码里从未实现**。链路上还有两处错误事实传播：`docker-compose.yml` 与 `cmd/ai/main.go:100-101` 的注释称「`/api/factor/*` 只在 core 注册」。

@@ -38,7 +38,7 @@ func NewFactorComputeTool(c *client.FactorClient) *FactorComputeTool {
 func (t *FactorComputeTool) Name() string { return "factor.compute" }
 
 func (t *FactorComputeTool) Description() string {
-	return "Compute a factor expression over a list of symbols and a date range. Returns a map from symbol to its factor value time series. Useful for screening, factor research, and building custom universes."
+	return "[unavailable] Factor evaluation is NOT provided by this stack: core exposes no factor compute endpoint (ADR-041). Calling it returns a terminal 'capability unavailable' error; do not retry. Use backtest submission + result inspection instead. (Intended semantics: compute a factor expression over symbols and a date range, returning per-symbol value series.)"
 }
 
 func (t *FactorComputeTool) Parameters() []tools.Parameter {
@@ -137,7 +137,7 @@ func NewFactorEvaluateTool(c *client.FactorClient) *FactorEvaluateTool {
 func (t *FactorEvaluateTool) Name() string { return "factor.evaluate" }
 
 func (t *FactorEvaluateTool) Description() string {
-	return "Evaluate a factor expression's predictive quality. Computes the factor over the symbol list and date range, then returns IC (Information Coefficient) and IR (Information Ratio). IC > 0.03 is generally considered useful; IC > 0.05 is strong."
+	return "[unavailable] Factor IC/IR evaluation is NOT provided by this stack: core exposes no factor evaluate endpoint (ADR-041). Calling it returns a terminal 'capability unavailable' error; do not retry. Use backtest submission + result inspection instead. (Intended semantics: compute IC and IR of a factor expression over a symbol list and date range.)"
 }
 
 func (t *FactorEvaluateTool) Parameters() []tools.Parameter {
