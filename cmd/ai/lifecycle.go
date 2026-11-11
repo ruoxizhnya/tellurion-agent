@@ -66,6 +66,10 @@ func loadConfig(defaultPath string) (*viper.Viper, error) {
 	// 空口令由 kitdb.BuildDSN 在启动期拒绝（fail-closed），不会拖到第一次
 	// 查询才报 "password authentication failed"（那读起来像密码写错）。
 	_ = v.BindEnv("database.password", "DATABASE_PASSWORD")
+	// 资产服务的 service token 同理只从 env 注入（YAML 里是空串）。空 token
+	// 不发 Authorization：公开期链路照旧；strategy 收紧写端点后，缺 token 会在
+	// 调用侧以 401 暴露（见 pkg/ai/client.StrategyAssetConfig.Token）。
+	_ = v.BindEnv("strategy_asset.token", "STRATEGY_ASSET_TOKEN")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, err

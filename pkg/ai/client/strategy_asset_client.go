@@ -49,7 +49,15 @@ const (
 // 触发编译并把产物 hash 取回。ABIVersion 只对产物载体有意义（dsl 必须为空，
 // 否则资产服务以 invalid_abi_version 拒绝）。
 type StrategyAssetConfig struct {
-	BaseURL    string
+	BaseURL string
+	// Token 是资产服务写端点要求的 service token（`role=service` 的 access
+	// token，由 core 的 `tools/issue_service_token.go` 签发）。
+	//
+	// **空 token 不是错误**：资产服务还在公开期时这条链路照旧（`call()` 不发
+	// Authorization）；等 strategy 侧把 5 条写端点并入鉴权闸后，空 token 会以
+	// 401 暴露出来，由调用方 fail-closed。这样「先发布带 token 的能力、后收紧
+	// 服务端」两步之间没有断链窗口。
+	Token      string
 	Carrier    string
 	ABIVersion string
 	Scope      string
@@ -81,6 +89,7 @@ type StrategyAssetClient struct {
 // 未知载体在这里就拒绝：等请求打到服务端再被拒，错误里只剩一个 400。
 func NewStrategyAssetClient(cfg StrategyAssetConfig) (*StrategyAssetClient, error) {
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	cfg.Token = strings.TrimSpace(cfg.Token)
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("strategy asset: base url is empty")
 	}
@@ -275,6 +284,10 @@ func (c *StrategyAssetClient) call(ctx context.Context, method, path string, in,
 	}
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	// 有 token 就带上；空 token 不发头（公开期行为不变，见 StrategyAssetConfig.Token）。
+	if c.cfg.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
 	}
 
 	resp, err := c.client.Do(req)

@@ -36,6 +36,7 @@ func NewStrategyAssetRegistrar(v *viper.Viper, logger zerolog.Logger) copilot.As
 
 	c, err := client.NewStrategyAssetClient(client.StrategyAssetConfig{
 		BaseURL:      baseURL,
+		Token:        v.GetString("strategy_asset.token"),
 		Carrier:      v.GetString("strategy_asset.carrier"),
 		ABIVersion:   v.GetString("strategy_asset.abi_version"),
 		Scope:        v.GetString("strategy_asset.scope"),
@@ -51,9 +52,17 @@ func NewStrategyAssetRegistrar(v *viper.Viper, logger zerolog.Logger) copilot.As
 		return nil
 	}
 
+	tokenConfigured := strings.TrimSpace(v.GetString("strategy_asset.token")) != ""
+	if !tokenConfigured {
+		// 不拒启动（公开期链路照旧），但也不静默：strategy 收紧后这条链路会 401。
+		logger.Warn().
+			Msg("strategy_asset.token is empty: asset-service writes will be rejected (401) once the strategy write endpoints are gated; set STRATEGY_ASSET_TOKEN")
+	}
+
 	logger.Info().
 		Str("url", baseURL).
 		Str("carrier", c.Carrier()).
+		Bool("token_configured", tokenConfigured).
 		Msg("strategy asset registrar initialized")
 	return &strategyAssetRegistrar{c: c}
 }

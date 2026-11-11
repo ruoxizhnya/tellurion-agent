@@ -29,6 +29,7 @@ type recordedCall struct {
 	method string
 	path   string
 	body   string
+	auth   string
 }
 
 type fakeAssetService struct {
@@ -43,7 +44,12 @@ type fakeAssetService struct {
 func (f *fakeAssetService) handle(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	f.mu.Lock()
-	f.calls = append(f.calls, recordedCall{method: r.Method, path: r.URL.Path, body: string(raw)})
+	f.calls = append(f.calls, recordedCall{
+		method: r.Method,
+		path:   r.URL.Path,
+		body:   string(raw),
+		auth:   r.Header.Get("Authorization"),
+	})
 	f.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -135,6 +141,55 @@ func TestStrategyAssetClient_DSLRegistersSourceWithoutBuild(t *testing.T) {
 	var put map[string]string
 	require.NoError(t, json.Unmarshal([]byte(calls[1].body), &put))
 	assert.Equal(t, source, put["source"], "传的必须是原始字节，不能自行改写")
+}
+
+// TestStrategyAssetClient_SendsServiceTokenOnEveryCall：配了 token 就必须在
+// **每一次**调用上带 `Authorization: Bearer`（含轮询 GET）。5 条写端点在
+// strategy 侧收紧后按 `role=service` 判定，少带一次就是一个 401。
+func TestStrategyAssetClient_SendsServiceTokenOnEveryCall(t *testing.T) {
+	srv, fake := newFakeAssetService(t, []buildJobView{
+		{JobID: "job-1", State: "running"},
+		{JobID: "job-1", State: "succeeded", ArtifactHash: "abcdef"},
+	})
+	c, err := NewStrategyAssetClient(StrategyAssetConfig{
+		BaseURL:      srv.URL,
+		Carrier:      AssetCarrierWASM,
+		ABIVersion:   "wasm32/onbar-v1",
+		Token:        "  svc-token-abc  ",
+		PollInterval: time.Millisecond,
+	})
+	require.NoError(t, err)
+
+	_, err = c.Register(context.Background(), "package x\n")
+	require.NoError(t, err)
+
+	calls := fake.recorded()
+	require.Len(t, calls, 5, "wasm 腿五步：建定义 → 传源码 → build → 两次轮询")
+	for _, call := range calls {
+		assert.Equal(t, "Bearer svc-token-abc", call.auth,
+			"%s %s 必须带 service token（首尾空白应被去掉）", call.method, call.path)
+	}
+}
+
+// TestStrategyAssetClient_EmptyTokenSendsNoAuthorizationHeader：空（或纯空白）
+// token = 公开期行为**逐字节不变**——不发 Authorization、不报错、照常登记。
+// 这是「先发布带 token 的能力、后收紧服务端」两步之间不断链的前提。
+func TestStrategyAssetClient_EmptyTokenSendsNoAuthorizationHeader(t *testing.T) {
+	srv, fake := newFakeAssetService(t, nil)
+	c, err := NewStrategyAssetClient(StrategyAssetConfig{
+		BaseURL: srv.URL, Carrier: AssetCarrierDSL, Token: "   ",
+	})
+	require.NoError(t, err)
+
+	_, err = c.Register(context.Background(), "package x\n")
+	require.NoError(t, err, "缺 token 不得拒调用：公开期链路必须照早先行为工作")
+
+	calls := fake.recorded()
+	require.Len(t, calls, 2)
+	for _, call := range calls {
+		assert.Empty(t, call.auth,
+			"空 token 不发 Authorization（%s %s）", call.method, call.path)
+	}
 }
 
 // TestStrategyAssetClient_WasmBuildsAndPollsToArtifact：产物载体多两步

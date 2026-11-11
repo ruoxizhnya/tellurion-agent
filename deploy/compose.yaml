@@ -54,6 +54,9 @@ services:
       AI_SERVICE_FACTOR_API_URL: ${AI_SERVICE_FACTOR_API_URL:-http://host.docker.internal:8085}
       # QT-32-B：资产服务也在本仓之外（tellurion-strategy，默认 :8090）。
       STRATEGY_ASSET_URL: ${STRATEGY_ASSET_URL:-http://host.docker.internal:8090}
+      # 资产服务写端点的 service token（core 的 tools/issue_service_token.go 签发）。
+      # 空 = 不发 Authorization：公开期链路照旧；strategy 收紧写端点后必须注入。
+      STRATEGY_ASSET_TOKEN: ${STRATEGY_ASSET_TOKEN:-}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1/chat/completions}
       AI_MODEL: ${AI_MODEL:-}

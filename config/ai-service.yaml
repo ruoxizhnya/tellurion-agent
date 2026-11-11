@@ -55,6 +55,7 @@ database:
 #   data_service.url         DATA_SERVICE_URL          http://127.0.0.1:8081
 #   ai_service.factor_api_url AI_SERVICE_FACTOR_API_URL http://127.0.0.1:8085
 #   strategy_asset.url       STRATEGY_ASSET_URL        http://127.0.0.1:8090
+#   strategy_asset.token     STRATEGY_ASSET_TOKEN      （空 = 不发 Authorization）
 data_service:
   url: "http://127.0.0.1:8081"
 
@@ -87,6 +88,12 @@ strategy_asset:
   # 宿主直跑默认本机 :8090；容器里由 compose 的 STRATEGY_ASSET_URL 覆盖成
   # 宿主网关（host.docker.internal:8090，该服务不在本栈内）。
   url: "http://127.0.0.1:8090"
+  # 资产服务写端点的 service token（`role=service` 的 access token，由 core 的
+  # tools/issue_service_token.go 签发）。**本文件恒为空**：入库文件不放真值，
+  # 部署经 `STRATEGY_ASSET_TOKEN` 注入（显式 BindEnv，见 cmd/ai/lifecycle.go）。
+  # 空 = 不发 Authorization：资产服务公开期链路照旧；等 strategy 把 5 条写端点
+  # 并入鉴权闸后，空 token 会在登记时以 401 暴露（fail-closed，不静默降级）。
+  token: ""
   carrier: "dsl"
   abi_version: ""
   scope: "market"
