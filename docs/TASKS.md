@@ -137,7 +137,11 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑥ 边界**：本仓 explore 启动收尸；持久 job 队列归 `tellurion-orchestration`。
 - **owner**：待定
 
-### AGENT-CAUSAL-PARSE-TESTS · 因果叙述者解析逻辑无直测，验证器侧用假叙述者 [P3] ⬜
+### AGENT-CAUSAL-PARSE-TESTS · 因果叙述者解析逻辑无直测，验证器侧用假叙述者 [P3] ✅
+
+> **施工记录（2026-11-12）**：新增 `pkg/ai/causal/narrator_test.go`，对 `parseTheory` 做**纯函数直测**（固定夹具，不触发任何 LLM 调用），四类输入各自有断言：① 正常 —— 裸 JSON、`min`/`max`/`top_k` 逐字段原样读出；② 空 —— 空串、纯空白、`{}`、`null` 全部显式报错且返回 nil 理论；③ malformed —— 非 JSON、截断 JSON 报「JSON 解析失败」；④ 多段 —— 前后夹散文并包在 json 代码块里、仅代码块、JSON 后跟总结、机制为空但预测齐全，均能正确提取。另加 `TestParseTheory_ErrorCarriesOriginalSnippet` 钉住错误信息必须带原文片段，便于线上判断模型到底吐了什么。生产语义未改动：解析失败仍显式报错，不静默回落成空理论。
+>
+> **验收（真实输出）**：`go test ./pkg/ai/causal -v` PASS（12 个子用例 + 1 个片段用例）。**破坏验证**：同时做两处改坏 —— 删掉花括号提取（`if false` 包住 `Index`/`LastIndex` 段）、`json.Unmarshal` 失败改为返回空理论且无错误（静默回落）→ 7 例红：`空：空字符串`/`空：只有空白`/`malformed：不是_JSON`/`malformed：截断的_JSON`（`应当显式报错，实际返回理论: &{Mechanism: Predictions:[]}`）、`多段：前后夹散文_+_json_代码块`/`多段：JSON_后跟一段总结`（`机制应为 "..."，实际 ""`）、`TestParseTheory_ErrorCarriesOriginalSnippet`（`应当报错`）；逐字节还原后全绿（无残留标记）。
 
 - **① 目标**：给因果叙述者的解析/提取逻辑补**直接单元测试**，而不是只在 validation 侧用假叙述者间接覆盖。
 - **② 上下文**：审查发现 W4-F3（ODR-071）。`pkg/ai/causal/narrator.go:121-143` 的提取逻辑无直测；`ValidateCausal` 的测试在 validation 侧用假叙述者，真解析路径（ malformed LLM 输出 / 空叙述 / 多段）未被钉住。
