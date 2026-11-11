@@ -95,7 +95,11 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑥ 边界**：本仓台账与校准读面；验证器概率输出归 `pkg/ai/validation`。
 - **owner**：待定
 
-### AGENT-HYPOTHESIS-FILTER · 因果维直通弱信号，假设过滤形同虚设 [P2] ⬜
+### AGENT-HYPOTHESIS-FILTER · 因果维直通弱信号，假设过滤形同虚设 [P2] ✅
+
+> **施工记录（2026-11-12）**：现状核查 —— 审计所指 `pkg/ai/causal/causal.go:34-48` 已重构为 `pkg/ai/validation/causal.go`，「直通弱信号 / `blind.Result=nil` 仍判成立」在 P2-9f 已修：`ValidateCausal` 把 `blind.Result` 物理置 nil 只给叙述者，验证用原始 `Result`；`verifyTheory` 只统计**可验证**预测，`Testable=0` 给固定 0.25 + blocking，证伪预测逐条 blocking；叙述者 nil = 未评估、空理论 = 显式报错。本单补的是**绝对判据用例**（原先只覆盖「1 中 1 不中」，空结果与弱信号没有直测）：`TestValidateCausal_NilResultIsInsufficientEvidence`（`Result=nil` → `testable=0`、概率**恰好 0.25**、必有 blocking、每条预测 `Verifiable=false` 且带原因）、`TestValidateCausal_WeakSignalIsNotAccepted`（4 条可验 1 中 3 不中 → 概率 `(1+1)/(4+2)≈0.333 < 0.5`、必有 blocking）。
+>
+> **验收（真实输出）**：`go test ./pkg/ai/validation -run "TestValidateCausal|TestAttachCausal"` PASS（8 例）。**破坏验证**：在 `verifyTheory` 顶部直接返回 `Probability=1, Passed=len(Predictions)`（即改回直通）→ 6 个用例红：`空结果下不该有任何可证伪预测，实际 testable=2 passed=2 failed=0`、`应是 4 条可验、1 中 3 不中，实际 testable=4 passed=4 failed=0`、`一条可证伪的都没有，概率应很低，实际 1.000`、`概率应为 0.80，实际 1.000`、`应 1 中 1 不中，实际 passed=2 failed=0`、`只有第三条可证伪，实际 testable=3`；逐字节还原后全包绿（无残留标记）。
 
 - **① 目标**：让因果维对弱信号/空结果有**可判定的过滤**，而不是直通，避免「看起来审过、实际没拦」。
 - **② 上下文**：审查发现 W1-F9（ODR-068）。`pkg/ai/causal/causal.go:34-48` 直通弱信号；`:127-129` 在 `blind.Result=nil` 时仍判成立。验证器链的因果维是唯一需要 LLM 的一维（ADR-023），直通会让红队失效。

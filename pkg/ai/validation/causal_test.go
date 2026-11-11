@@ -258,6 +258,84 @@ func TestTopKReturnShare(t *testing.T) {
 	}
 }
 
+// 空结果：没有回测结果时，任何预测都验不了 —— 这一维必须是「证据不足」
+// 且 blocking，绝不能因为「没有反证」就判成立。
+//
+// 这是 AGENT-HYPOTHESIS-FILTER 的绝对判据之一：`blind.Result=nil` 只发生在
+// 递给叙述者的那份请求上；验证用的是 req.Result。req.Result 本身为 nil 时，
+// 不能被当成「全过关」。
+func TestValidateCausal_NilResultIsInsufficientEvidence(t *testing.T) {
+	n := &stubNarrator{theory: &CausalTheory{
+		Mechanism: "动量延续",
+		Predictions: []Prediction{
+			{Kind: PredictionWinRate, Statement: "胜率过半", Min: fptr(0.5)},
+			{Kind: PredictionHoldingDays, Statement: "持有 5~30 天", Min: fptr(5), Max: fptr(30)},
+		},
+	}}
+
+	got, err := ValidateCausal(context.Background(), CausalRequest{Result: nil}, n)
+	if err != nil {
+		t.Fatalf("ValidateCausal: %v", err)
+	}
+	if got.Testable != 0 || got.Passed != 0 || got.Failed != 0 {
+		t.Fatalf("空结果下不该有任何可证伪预测，实际 testable=%d passed=%d failed=%d",
+			got.Testable, got.Passed, got.Failed)
+	}
+	if got.Probability != 0.25 {
+		t.Fatalf("空结果的概率应是「证据不足」的固定低分 0.25，实际 %.3f", got.Probability)
+	}
+	if !causalHasBlocking(got.Challenges) {
+		t.Fatal("空结果必须 blocking：没有反证不等于成立")
+	}
+	for _, pr := range got.Predictions {
+		if pr.Verifiable {
+			t.Fatalf("空结果下不该有可验证的预测: %+v", pr)
+		}
+		if pr.Note == "" {
+			t.Fatal("无法检验必须说清为什么，不能默默跳过")
+		}
+	}
+}
+
+// 弱信号：可验的预测里大多数被证伪 —— 必须 blocking，且概率低于中立值，
+// 不能被当成「虽然弱但还过得去」放行。
+func TestValidateCausal_WeakSignalIsNotAccepted(t *testing.T) {
+	n := &stubNarrator{theory: &CausalTheory{
+		Mechanism: "弱势动量",
+		Predictions: []Prediction{
+			{Kind: PredictionWinRate, Statement: "胜率过半", Min: fptr(0.5)},            // 中（0.6）
+			{Kind: PredictionHoldingDays, Statement: "日内进出", Max: fptr(2)},          // 不中（12）
+			{Kind: PredictionTradeCount, Statement: "至少 100 笔", Min: fptr(100)},      // 不中（40）
+			{Kind: PredictionMaxDrawdown, Statement: "回撤不超过 10%", Max: fptr(0.10)}, // 不中（18%）
+		},
+	}}
+
+	got, err := ValidateCausal(context.Background(), CausalRequest{Result: sampleResult()}, n)
+	if err != nil {
+		t.Fatalf("ValidateCausal: %v", err)
+	}
+	if got.Testable != 4 || got.Passed != 1 || got.Failed != 3 {
+		t.Fatalf("应是 4 条可验、1 中 3 不中，实际 testable=%d passed=%d failed=%d",
+			got.Testable, got.Passed, got.Failed)
+	}
+	// Beta(1,1) 后验：(1+1)/(4+2) ≈ 0.333，必须低于中立 0.5。
+	if got.Probability >= 0.5 {
+		t.Fatalf("弱信号概率必须低于中立，实际 %.3f", got.Probability)
+	}
+	if !causalHasBlocking(got.Challenges) {
+		t.Fatal("多数预测被证伪却没有 blocking 质疑 —— 弱信号被直通了")
+	}
+}
+
+func causalHasBlocking(cs []Challenge) bool {
+	for _, c := range cs {
+		if c.Severity == SeverityBlocking {
+			return true
+		}
+	}
+	return false
+}
+
 // AttachCausal：因果维是事后补的（每次尝试都跑 LLM 太贵），
 // 补进来之后综合概率和最弱维必须重算，否则它等于没进这条链。
 func TestAttachCausal_RebuildsVerdict(t *testing.T) {
