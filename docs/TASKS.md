@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-10
-verified-by: 2026-11-11 `AGENT-COPILOT-WORKING-DIR` 取证与裁决：同进程「每作业临时目录」不满足四条底线（无命令白名单、`BuildExecutor` 无 env 导致 GOCACHE/HOME 落在沙箱根外、runner 无网络/FS 隔离），且运行镜像 `alpine:3.19` 无 Go 工具链；选定容器化构建沙箱，按指令只出方案与单（状态 ⛔，含 A/C 退出条件与重开条件）。此前 2026-11-10 补真库腿——`TestSaveFactorCandidates_Integration` 在独立 PG 实例（`127.0.0.1:5433`，库 `tellurion`）上真跑通过（此前记「无库 SKIP」已失效），`pkg/aistore` 全包绿。此前 QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pkg/ai/client` 新客户端（建定义 → 传源码 → 产物载体 build+轮询）、copilot 登记端口 fail-closed、`ai.generation_chain` 并列四列坐标（幂等 ALTER 兼容存量库）；4 条破坏验证改坏即红、还原复绿；真库 round-trip 通过；gofmt/build/vet 0，全仓仅两条 QT-17 ③ 前置既有红（本文件 :187）。此前 SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；本仓反向护栏翻面 + 停写腿兼容旧表不存在）。此前 2026-10-25 QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
+last-verified: 2026-11-11
+verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 7 条六字段单（`AGENT-HERMES-DOCS-ADR041` / `AGENT-EXPERIMENT-COUNT-SURFACE` / `AGENT-INTERVENTION-ADOPTION-LEDGER` / `AGENT-HYPOTHESIS-FILTER` / `AGENT-LLM-BUDGET-GATE` / `AGENT-EXPLORE-STATE-REAP` / `AGENT-CAUSAL-PARSE-TESTS`），证据坐标引 ODR-068/071（`tellurion-docs:docs/archive/odr/`）；`AGENT-COPILOT-WORKING-DIR` 经 W4 复核维持 ⛔（去重，不另立单）；本轮只立单不修复。此前 2026-11-11 `AGENT-COPILOT-WORKING-DIR` 取证与裁决：同进程「每作业临时目录」不满足四条底线（无命令白名单、`BuildExecutor` 无 env 导致 GOCACHE/HOME 落在沙箱根外、runner 无网络/FS 隔离），且运行镜像 `alpine:3.19` 无 Go 工具链；选定容器化构建沙箱，按指令只出方案与单（状态 ⛔，含 A/C 退出条件与重开条件）。此前 2026-11-10 补真库腿——`TestSaveFactorCandidates_Integration` 在独立 PG 实例（`127.0.0.1:5433`，库 `tellurion`）上真跑通过（此前记「无库 SKIP」已失效），`pkg/aistore` 全包绿。此前 QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pkg/ai/client` 新客户端（建定义 → 传源码 → 产物载体 build+轮询）、copilot 登记端口 fail-closed、`ai.generation_chain` 并列四列坐标（幂等 ALTER 兼容存量库）；4 条破坏验证改坏即红、还原复绿；真库 round-trip 通过；gofmt/build/vet 0，全仓仅两条 QT-17 ③ 前置既有红（本文件 :187）。此前 SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；本仓反向护栏翻面 + 停写腿兼容旧表不存在）。此前 2026-10-25 QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -42,6 +42,7 @@ verified-by: 2026-11-11 `AGENT-COPILOT-WORKING-DIR` 取证与裁决：同进程�
 - **否决 C（禁执行、只产出代码）**：最安全，但拆掉 ADR-007 的编译门，Copilot 价值缩水；仅作为 B 不可落地时的退路。
 - **退出条件**：① 若目标环境明确不允许容器运行时，退回 A，但必须先满足「`BuildExecutor` 支持 env + 作业目录内 GOCACHE/HOME/TMP + 命令白名单 + 启动期清扫」四条，任一条不满足继续停在 fail-closed；② 若 B 在目标环境不可落地，改 C，并把 `/api/copilot/generate` 终态从 `sandbox_rejected` 改为明确的 `code_ready_no_build`、删除 build 相关配置键，不留「看起来能编、实际没编」的中间态。
 - **重开条件**：目标部署环境提供容器运行时（Docker 套接字或等价隔离原语），且主任决定继续投入 Copilot 的编译门；或环境明确不允许容器运行时、转而接受 C 的退路。
+- **审查复核（2026-11-11，不另立单）**：全面审查 W4（A-2 沙箱）独立复核四条底线缺口属实，与本条前提一致；见 ODR-071（`tellurion-docs:docs/archive/odr/odr-071-audit-wave4-agent-ai-risk.md`）。去重：不新建任务，以本条为唯一落点，维持 ⛔。
 
 ### AGENT-RUNBOOK-GAP · 本仓没有 runbook，起停与生成链失败只有 README 零散说明 [P1] ⬜
 
@@ -54,7 +55,77 @@ verified-by: 2026-11-11 `AGENT-COPILOT-WORKING-DIR` 取证与裁决：同进程�
 - **owner**：待定
 - **重开条件**：出现第二次「AI 路由失败但只能翻 api-schema 找原因」的排障经历，或接手人变更。
 
-**其余无未做 / 挂起 / 外部依赖项**（截至 2026-11-11 台账重整）。已收口单的正文、验收与施工记录全部在归档文件里；新增工作一律另立单，不得以「补充说明」形式挂在本节。
+### AGENT-HERMES-DOCS-ADR041 · Hermes 文档/技能仍把已不可用的因子工具写成现役 [P1] ⬜
+
+- **① 目标**：把 Hermes 配置/提示词/技能里对三个因子工具（`factor.compute`/`factor.evaluate`/`compute_factor_ic`）的「现役」表述订正为「未提供（ADR-041）」，与 `AGENT-FACTOR-TOOLS-UNAVAILABLE` 已落的代码事实对齐。
+- **② 上下文**：审查发现 W1-F2（ODR-068）。`docs/hermes/tools-quant-backtest.yaml:62-107,122-137`、`docs/hermes/prompts/quant-research.md:21,26-27,109,192`、`docs/hermes/skills/autonomous_factor_mining.md:89,284` 仍把因子求值工具写成可用；`8ace9b9` 已改三工具代码（返回 `ErrFactorCapabilityUnavailable`），文档未跟上。裁决见跨仓 ADR-041。
+- **③ 要求**：① 三处文档逐条标「未提供 / ADR-041」并给替代路径（提交回测读结果）；② 技能里「调用因子求值」的步骤改为「不可用，改走回测」；③ 不改工具代码（已落）。
+- **④ 约束与非目标**：不恢复因子求值端点；不改 DSL 语义；不新造远程求值面（ADR-028 §6）。
+- **⑤ 验收**：grep 三处文档无「因子求值工具现役」表述；`check_doc_links`（若适用）绿；与代码哨兵一致。
+- **⑥ 边界**：本仓 `docs/hermes/`；core 侧端点事实归 `tellurion:CORE-SPEC-FACTOR-ENDPOINTS-STALE`。
+- **owner**：待定
+
+### AGENT-EXPERIMENT-COUNT-SURFACE · 实验计数是内存 seq+1，回测/走查工具零实验行 [P1] ⬜
+
+- **① 目标**：让「跑了多少次实验」有一个**持久、可回读**的计数面，而不是进程内 `seq+1`；让回测/走查工具真写实验行。
+- **② 上下文**：审查发现 W1-F8①②（ODR-068）。`pkg/ai/loop/loop.go:235` 的 `NumTrials` = 内存 seq+1（重启归零）；`pkg/ai/tools/builtin/backtest.go:126-154` 与 `walkforward_tool.go:199` 零实验行写入；`docs/db-schema.md:21` 的实验表只写不读。计数不可信 ⇒ 校准/对账无基础。
+- **③ 要求**：① 实验计数落 `ai.*` 持久表（可回读、重启不丢）；② 回测/走查工具各写一条实验行（含 run 坐标）；③ 读面暴露累计次数；④ 与 `AGENT-INTERVENTION-ADOPTION-LEDGER` 撞 `ai.*` 表时按单号串行。
+- **④ 约束与非目标**：不造假实验行；不改回测引擎语义；计数口径写死（什么算一次实验）。
+- **⑤ 验收**：真跑 N 次回测后计数 = N（重启后仍 N）；破坏验证 = 改回内存 seq ⇒ 重启丢计数用例红。真库腿走 `_test`。
+- **⑥ 边界**：本仓实验计数与工具写行；校准消费归 `AGENT-INTERVENTION-ADOPTION-LEDGER`。
+- **owner**：待定
+
+### AGENT-INTERVENTION-ADOPTION-LEDGER · 无干预/采纳台账，校准与对账无数据基础 [P1] ⬜
+
+- **① 目标**：给「人工干预 / 提案采纳 / holdout 对账」一个台账，让 ADR-023 的「校准优于准确率」有可计算的数据基础。
+- **② 上下文**：审查发现 W1-F8③（ODR-068）。`ai.*` 无 actor/intervention 列、无采纳表、无 holdout、无对账 job；PRODUCT/ADR-023 要求考核校准误差（声称 60% 应实际命中 50–70%），但今天没有任何持久数据能算它。
+- **③ 要求**：① 建干预/采纳台账（actor + 提案 + 采纳与否 + 结果坐标）；② holdout 对账 job 的口径写死（哪些进 holdout、怎么算命中）；③ 校准误差读面；④ 与 `AGENT-EXPERIMENT-COUNT-SURFACE` 撞表按单号串行。
+- **④ 约束与非目标**：不伪造采纳数据；不改验证器五维语义；不引入第二个编排者（ADR-023）。
+- **⑤ 验收**：真台账写入 + 校准误差可计算（一组已知提案 → 已知命中率）；破坏验证 = 删 holdout 隔离 ⇒ 对账用例红。
+- **⑥ 边界**：本仓台账与校准读面；验证器概率输出归 `pkg/ai/validation`。
+- **owner**：待定
+
+### AGENT-HYPOTHESIS-FILTER · 因果维直通弱信号，假设过滤形同虚设 [P2] ⬜
+
+- **① 目标**：让因果维对弱信号/空结果有**可判定的过滤**，而不是直通，避免「看起来审过、实际没拦」。
+- **② 上下文**：审查发现 W1-F9（ODR-068）。`pkg/ai/causal/causal.go:34-48` 直通弱信号；`:127-129` 在 `blind.Result=nil` 时仍判成立。验证器链的因果维是唯一需要 LLM 的一维（ADR-023），直通会让红队失效。
+- **③ 要求**：① 弱信号/空结果显式判「不成立 / 证据不足」，不直通；② `blind.Result=nil` 不得判成立；③ 补过滤判据用例（绝对断言）。
+- **④ 约束与非目标**：不改五维确定性校验器；不引入多 agent 投票（ADR-023 拒绝）；过滤阈值写死可判定。
+- **⑤ 验收**：弱信号/空结果用例判不成立；破坏验证 = 改回直通 ⇒ 用例红。
+- **⑥ 边界**：本仓 `pkg/ai/causal`；叙述者解析测试归 `AGENT-CAUSAL-PARSE-TESTS`。
+- **owner**：待定
+
+### AGENT-LLM-BUDGET-GATE · ResearchBudget 零代码，日累计 USD 闸缺失（D4=a）[P1] ⬜
+
+- **① 目标**：把 `hermes.yaml` 声明的预算（`max_cost_per_session`）落成**代码侧日累计 USD 闸 + 持久化**，让 LLM 花费真能被拦住，而不是配置里写着、代码里没人读。
+- **② 上下文**：审查发现 W4-F1（ODR-071）+ 裁决 D4=a。`ResearchBudget` 零代码（`docs/hermes/config/hermes.yaml:57,72` `max_cost_per_session:5.0` + skill:257）；`pkg/ai/metrics/cost.go:136` 的 `ai_costs` 零写者；`metrics.go:35` `dailyCosts` 是进程内 map（重启归零）；`ratelimit.go:29` 10/min + `handlers_explore.go:212-214` MaxTries 20 ⇒ 理论 14,400 次/天，无 USD 上限。
+- **③ 要求**：① 日累计 USD 闸（代码侧，持久化到 `ai.*`，重启不丢）；② `ai_costs` 真写者（每次 LLM 调用记 token×单价）；③ 超预算 fail-closed（拒后续调用，点名预算键）；④ 与 `AGENT-EXPERIMENT-COUNT-SURFACE` 撞 `ai.*` 按单号串行。
+- **④ 约束与非目标**：不硬编码 API key；不改 LLM 提供商；单价口径写死（可配置但默认值明确）。
+- **⑤ 验收**：真累计到上限 ⇒ 拒调用（E1，可用假 LLM 计数）；破坏验证 = 删持久化 ⇒ 重启绕闸用例红。
+- **⑥ 边界**：本仓预算闸与成本写者；hermes.yaml 声明归 `AGENT-HERMES-DOCS-ADR041` 同批核对。
+- **owner**：待定
+
+### AGENT-EXPLORE-STATE-REAP · explore 运行态纯内存，崩溃即孤儿（D10=b）[P1] ⬜
+
+- **① 目标**：给 explore 运行态一个**启动收尸**机制，让进程崩溃后遗留的 running 态能被回收，而不是永远卡在内存 map 里。
+- **② 上下文**：审查发现 W4-F2（ODR-071）+ 裁决 D10=b（run 态易失 + 启动收尸）。`pkg/ai/handlers/handlers_explore.go:262-272` 运行态是内存 map；全仓 grep `stale`/`reap`/`recover`/`orphan` 零命中；`pipeline.go:759-764` 尽力而为日志。D10=b：接受 run 态易失，但启动时须收尸（标记遗留 running 为 failed/orphan）。
+- **③ 要求**：① 启动期扫描遗留 running 态并标记 orphan/failed（收尸）；② 收尸口径写死（什么算遗留、怎么标）；③ 不引入跨请求持久 run 态（D10=b 明确易失）。
+- **④ 约束与非目标**：不把 explore 态做成持久队列（那是 orchestration）；不改 pipeline 语义；收尸不静默丢日志。
+- **⑤ 验收**：模拟崩溃遗留 → 重启后收尸标记可见；破坏验证 = 删收尸 ⇒ 遗留态永卡用例红。
+- **⑥ 边界**：本仓 explore 启动收尸；持久 job 队列归 `tellurion-orchestration`。
+- **owner**：待定
+
+### AGENT-CAUSAL-PARSE-TESTS · 因果叙述者解析逻辑无直测，验证器侧用假叙述者 [P3] ⬜
+
+- **① 目标**：给因果叙述者的解析/提取逻辑补**直接单元测试**，而不是只在 validation 侧用假叙述者间接覆盖。
+- **② 上下文**：审查发现 W4-F3（ODR-071）。`pkg/ai/causal/narrator.go:121-143` 的提取逻辑无直测；`ValidateCausal` 的测试在 validation 侧用假叙述者，真解析路径（ malformed LLM 输出 / 空叙述 / 多段）未被钉住。
+- **③ 要求**：① 对 `narrator.go:121-143` 补表驱动测试（正常/空/malformed/多段）；② 解析失败显式报错，不静默回落；③ 与 `AGENT-HYPOTHESIS-FILTER` 撞 causal 包按单号串行。
+- **④ 约束与非目标**：不改叙述者生产语义；不依赖真 LLM（用固定输出夹具）。
+- **⑤ 验收**：解析测试覆盖四类输入；破坏验证 = 改坏提取逻辑 ⇒ 用例红。
+- **⑥ 边界**：本仓 `pkg/ai/causal/narrator.go` 测试；过滤判据归 `AGENT-HYPOTHESIS-FILTER`。
+- **owner**：待定
+
+**其余无未做 / 挂起 / 外部依赖项**（截至 2026-11-11 台账重整 + 全面审查 W7 立单）。已收口单的正文、验收与施工记录全部在归档文件里；新增工作一律另立单，不得以「补充说明」形式挂在本节。
 
 ## 二、跨仓指针（不在本仓，勿双写）
 
