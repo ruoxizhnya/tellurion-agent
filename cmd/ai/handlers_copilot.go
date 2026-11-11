@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ruoxizhnya/tellurion-kit/httpserver"
@@ -53,6 +54,15 @@ func registerCopilotRoutes(router *gin.Engine, copilotService *copilot.CopilotSe
 			var req copilot.GenerateParams
 			if err := c.ShouldBindJSON(&req); err != nil {
 				httpserver.Wrap(c, http.StatusBadRequest, err, "invalid request: ")
+				return
+			}
+			// 契约（docs/api-schema.md §1.1）：description 必填，空即
+			// 400 invalid request。绑定本身不会拒绝空串（字段无 binding
+			// 标签），第 4 层端点冒烟实测 {} 与 {"description":""} 都拿到
+			// 202 + 一个随后必然失败的 job —— 这是「接受了一条无效请求」，
+			// 不是异步语义。
+			if strings.TrimSpace(req.Description) == "" {
+				httpserver.Fail(c, http.StatusBadRequest, "invalid request: description is required")
 				return
 			}
 			result := copilotService.Generate(c.Request.Context(), req)

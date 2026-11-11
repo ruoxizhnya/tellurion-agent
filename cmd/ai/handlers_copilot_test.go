@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,4 +65,47 @@ func TestCopilotOtherRoutesStillRegistered(t *testing.T) {
 		"stats 路由应仍注册")
 	assert.False(t, registered["POST /api/copilot/save"],
 		"save 路由必须不存在")
+}
+
+// configuredLLM 是「已配 AI」的最小桩：只回答 IsConfigured，不产出代码。
+// 本组用例只验请求校验，generate 的产出链路由 pkg/copilot 自己的用例覆盖。
+type configuredLLM struct{}
+
+func (configuredLLM) IsConfigured() bool { return true }
+
+func (configuredLLM) GenerateStrategyCode(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (configuredLLM) FixStrategyCode(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+// TestCopilotGenerate_EmptyDescriptionIsRejected 钉住 docs/api-schema.md §1.1
+// 的必填口径：description 为空 ⇒ 400 invalid request，而不是 202 + 一条
+// 随后必然失败的 job。
+//
+// 暴露路径：第 4 层端点冒烟对真 ai-service 打 {} 与 {"description":""}，
+// 两次都是 202；UI e2e 的 api-negative/copilot-e2e 两条用例也因此必红。
+// 控件那条（非空 → 202）用来证明本闸不是「一律 400」的假护栏。
+func TestCopilotGenerate_EmptyDescriptionIsRejected(t *testing.T) {
+	router := gin.New()
+	registerCopilotRoutes(router, copilot.NewCopilotServiceWithLLM(configuredLLM{}))
+
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/copilot/generate", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	for _, body := range []string{`{}`, `{"description":""}`, `{"description":"   "}`} {
+		w := post(body)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "body=%s", body)
+		assert.Contains(t, w.Body.String(), "description is required", "body=%s", body)
+	}
+
+	w := post(`{"description":"双均线策略"}`)
+	assert.Equal(t, http.StatusAccepted, w.Code, "非空 description 必须仍被接受")
 }
