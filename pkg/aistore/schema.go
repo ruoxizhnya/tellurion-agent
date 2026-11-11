@@ -45,6 +45,7 @@ var Tables = []string{
 	"ai.strategy_genes",
 	"ai.factor_hypothesis",
 	"ai.generation_chain",
+	"ai.adoption_ledger",
 }
 
 // statements is the execution truth: idempotent DDL, executed in order by
@@ -229,6 +230,35 @@ var statements = []string{
 	`ALTER TABLE ai.generation_chain ADD COLUMN IF NOT EXISTS asset_carrier VARCHAR(16)`,
 	`ALTER TABLE ai.generation_chain ADD COLUMN IF NOT EXISTS version_hash CHAR(64)`,
 	`ALTER TABLE ai.generation_chain ADD COLUMN IF NOT EXISTS artifact_hash CHAR(64)`,
+
+	// adoption_ledger — AGENT-INTERVENTION-ADOPTION-LEDGER（本仓自持，core 无
+	// 对应表）。
+	//
+	// 「人工干预 → 采纳 → holdout 对账」的持久台账。此前 ADR-023 要求考核
+	// 校准误差（声称 60% 应实际命中 50–70%），但没有任何一行数据能算它。
+	//
+	// 口径（写死，读面不得自行解释）：
+	//   - 一行 = 一个提案的一次人工裁决；proposal_id 唯一，重复裁决拒收
+	//     （不覆盖，决策不可回写）。
+	//   - `claimed_confidence` 是提案方自报的命中概率，0..1；校准的基准。
+	//   - `is_holdout = TRUE` 的行是留出的对账集：只单独报命中率，**永不**
+	//     混进校准集（否则就是拿同一批数据既拟合又验收）。
+	//   - `outcome_hit` 为空 = 结果还没回填，不计入任何分母，单列 pending；
+	//     非空时 `resolved_at` 同步落时间。
+	`CREATE TABLE IF NOT EXISTS ai.adoption_ledger (
+		id                 BIGSERIAL PRIMARY KEY,
+		proposal_id        VARCHAR(128) NOT NULL UNIQUE,
+		actor              VARCHAR(100) NOT NULL,
+		intervention       TEXT         NOT NULL DEFAULT '',
+		adopted            BOOLEAN      NOT NULL,
+		claimed_confidence DOUBLE PRECISION NOT NULL CHECK (claimed_confidence >= 0 AND claimed_confidence <= 1),
+		is_holdout         BOOLEAN      NOT NULL DEFAULT FALSE,
+		outcome_hit        BOOLEAN,
+		result_ref         VARCHAR(128) NOT NULL DEFAULT '',
+		created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+		resolved_at        TIMESTAMPTZ
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_adoption_ledger_holdout ON ai.adoption_ledger(is_holdout)`,
 }
 
 // Statements returns a copy of the DDL in execution order. Mutating the result

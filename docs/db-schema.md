@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-10
-verified-by: QT-32-B —— `ai.generation_chain` 并列加资产坐标四列（`strategy_id` / `asset_carrier` / `version_hash` / `artifact_hash`，幂等 ALTER 兼容存量库）；此前 QT-32-A 新增本仓自持表（AI 生成链留痕）+ drift 护栏的 agentOwnedTables 显式豁免；此前 QT-17 ⑤ 基因池读写切 ai.*
+last-verified: 2026-11-12
+verified-by: AGENT-INTERVENTION-ADOPTION-LEDGER —— 新增本仓自持表 `ai.adoption_ledger`（干预/采纳台账 + holdout 对账集）并登记 drift 护栏豁免；此前 QT-32-B `ai.generation_chain` 加资产坐标四列
 ---
 
 # DB Schema — tellurion-agent
@@ -26,6 +26,7 @@ verified-by: QT-32-B —— `ai.generation_chain` 并列加资产坐标四列（
 | `ai.research_conclusion` | 研究结论 | **唯一 owner**：core `research.conclusion` DDL 已于 2026-11-10 退役；本仓只读不写，写方不存在 |
 | `ai.research_question` | 研究问题 | **唯一 owner**：core `research.question` DDL 已于 2026-11-10 退役；本仓只读不写，写方不存在 |
 | `ai.generation_chain` | **AI 生成链**：一次生成的意图、源码、指纹、编译结论、资产坐标、链断在哪一环 | **QT-32-A 新增（2026-10-25）、QT-32-B 加坐标列（2026-11-10），本仓自持、core 无对应表**。一行 = 一次编译尝试，主键 `(job_id, attempt)`；列：`prompt`（人给的自然语言意图，NOT NULL）/ `universe`·`start_date`·`end_date`（人要求的回测区间，闸门拦下也照样留）/ `source`（这一 attempt 的源码）/ `source_sha256`（**同一行 source** 的 sha256）/ `strategy_id`·`asset_carrier`·`version_hash`·`artifact_hash`（**资产服务签发的原值**，QT-32-B；dsl 载体的 `artifact_hash` 为空）/ `build_state`（`none｜failed｜passed`，DDL CHECK 闭合词表）/ `build_error` / `blocked_reason`（`promote_gate` 或空）/ `created_at`·`updated_at` |
+| `ai.adoption_ledger` | **人工干预 / 采纳台账 + holdout 对账集** | **AGENT-INTERVENTION-ADOPTION-LEDGER 新增（2026-11-12），本仓自持、core 无对应表**。一行 = 一个提案（`proposal_id` 唯一）的一次人工裁决；列：`actor`（干预/裁决者）/ `intervention`（改了什么，可空）/ `adopted`（采纳与否，NOT NULL）/ `claimed_confidence`（提案方自报命中概率，CHECK 0..1）/ `is_holdout`（留出对账集，**永不进校准分母**）/ `outcome_hit`（结果命中与否，NULL = 未回填，单列 pending）/ `result_ref`（结果坐标）/ `created_at`·`resolved_at`。读面 `/api/pipeline/calibration` 口径见 `pkg/ai/adoption`：校准误差 = \|实际命中率 − 平均声称概率\|，holdout 只单独报 |
 
 > **`ai.generation_chain` 的三条边界**（决策全文见 [`docs/adr/0002`](adr/0002-AI-生成链留痕归本仓-闸门结论不归本仓.md)）：
 > 1. `source_sha256` **不是** `version_hash` 也不是 `artifact_hash`。前者按 `tellurion-contracts:engine/provenance.go:65` 需要资产服务签发的 `strategy_id`，后者按 `:39` 只覆盖编译产物字节。**QT-32-B 起坐标列存的是资产服务返回的原值**（`pkg/ai/client` 取回、本仓不计算），但 `source_sha256` 仍只是同字节的指纹，别拿它当执行真相。

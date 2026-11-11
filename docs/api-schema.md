@@ -28,6 +28,8 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 | POST | `/api/pipeline/run` | 跑 pipeline（同步返回整条结果） |
 | GET | `/api/pipeline/jobs` · `/jobs/{id}` | pipeline 任务列表 / 详情 |
 | GET | `/api/pipeline/experiments/count` | 累计实验计数（由 `ai.experiments` 行派生） |
+| POST | `/api/pipeline/adoption` | 记录一次人工干预/采纳裁决（`ai.adoption_ledger`） |
+| GET | `/api/pipeline/calibration` | 校准误差 + holdout 命中率 |
 | GET | `/api/tools` · `/api/tools/{name}` | 工具注册表 |
 | POST | `/api/tools/{name}` | 执行工具 |
 | GET | `/health` · `/metrics` | 运维面（存活 / 指标） |
@@ -126,6 +128,37 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 **`GET /api/pipeline/jobs/{id}`** — 响应 `200` `PipelineJobResponse`；`404` `job not found`。
 
 **`GET /api/pipeline/experiments/count`** — 响应 `200` `{"count": <int64>}`：`ai.experiments` 的累计行数（explore 尝试 + `backtest.run` / `walk_forward_validate` 工具直调写下的行）。计数由行派生，进程重启不丢。未接计数来源时 `503`（不返回 `0` 冒充「没跑过」）；读库失败 `500`。
+
+**`POST /api/pipeline/adoption`** — 请求体：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `proposal_id` | string | 是 | 提案唯一标识；重复写入 → `409`（决策不可回写） |
+| `actor` | string | 是 | 干预/裁决者 |
+| `intervention` | string | 否 | 人改了什么（空 = 无干预直接裁决） |
+| `adopted` | bool | 是 | 采纳与否；缺失 → `400`（不得默认成否决） |
+| `claimed_confidence` | float | 是 | 提案方自报命中概率，必须在 `[0,1]`，否则 `400` |
+| `is_holdout` | bool | 否 | `true` = 进留出对账集，永不进校准分母 |
+| `outcome_hit` | bool | 否 | 结果命中与否；缺省 = 未回填（pending） |
+| `result_ref` | string | 否 | 结果坐标（如 `exp:123`） |
+
+响应 `201` `{"id": <int64>, "proposal_id": "..."}`；`409` 重复提案；`503` 台账未接。`outcome_hit` 非空时自动落 `resolved_at`。
+
+**`GET /api/pipeline/calibration`** — 响应 `200`：
+
+```json
+{
+  "sample_size": 3,
+  "hit_rate": 0.6667,
+  "claimed_rate": 0.6,
+  "calibration_error": 0.0667,
+  "brier_score": 0.2267,
+  "pending": 1,
+  "holdout": {"sample_size": 1, "hit_rate": 1.0}
+}
+```
+
+口径（实现在 [`pkg/ai/adoption`](../pkg/ai/adoption)）：校准集 = 已回填结果且 `is_holdout=false` 的行；`calibration_error = |hit_rate - claimed_rate|`；`brier_score = mean((claimed_confidence - outcome)^2)`；`is_holdout=true` 的行只进 `holdout`，不参与校准；`outcome_hit` 为空的行只进 `pending`。未接台账时 `503`。
 
 ### 1.4 Tools（`cmd/ai/handlers_tools.go` · `pkg/ai/tools`）
 

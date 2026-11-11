@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tellurion-agent/pkg/ai/adoption"
 	"tellurion-agent/pkg/ai/pipeline"
 	"tellurion-agent/pkg/aistore"
 )
@@ -144,6 +147,110 @@ func TestGetExperimentCount_NotWired503(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/pipeline/experiments/count", nil))
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+// ── intervention / adoption ledger ───────────────────────────────────
+
+type fakeAdoptionLedger struct {
+	entries   []aistore.AdoptionDecision
+	inserted  []aistore.AdoptionDecision
+	insertErr error
+}
+
+func (f *fakeAdoptionLedger) InsertAdoptionDecision(_ context.Context, d aistore.AdoptionDecision) (int64, error) {
+	if f.insertErr != nil {
+		return 0, f.insertErr
+	}
+	f.inserted = append(f.inserted, d)
+	return int64(len(f.inserted)), nil
+}
+
+func (f *fakeAdoptionLedger) ListAdoptionLedger(context.Context) ([]aistore.AdoptionDecision, error) {
+	return f.entries, nil
+}
+
+func postAdoption(t *testing.T, r *gin.Engine, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/pipeline/adoption", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestRecordAdoptionDecision_Created(t *testing.T) {
+	ledger := &fakeAdoptionLedger{}
+	r := pipelineCountRouter(NewPipelineHandler(WithAdoptionLedger(ledger)))
+
+	w := postAdoption(t, r, `{"proposal_id":"p1","actor":"alice","intervention":"lookback 20->60","adopted":true,"claimed_confidence":0.6,"outcome_hit":true,"result_ref":"exp:12"}`)
+
+	require.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
+	require.Len(t, ledger.inserted, 1)
+	d := ledger.inserted[0]
+	assert.Equal(t, "p1", d.ProposalID)
+	assert.Equal(t, "alice", d.Actor)
+	assert.Equal(t, "lookback 20->60", d.Intervention)
+	assert.True(t, d.Adopted)
+	assert.InDelta(t, 0.6, d.ClaimedConfidence, 1e-9)
+	require.NotNil(t, d.OutcomeHit)
+	assert.True(t, *d.OutcomeHit)
+}
+
+func TestRecordAdoptionDecision_RejectsMissingDecision(t *testing.T) {
+	ledger := &fakeAdoptionLedger{}
+	r := pipelineCountRouter(NewPipelineHandler(WithAdoptionLedger(ledger)))
+
+	// 没写 adopted：不能被当成「默认否决」写进台账。
+	w := postAdoption(t, r, `{"proposal_id":"p1","actor":"alice","claimed_confidence":0.6}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	assert.Empty(t, ledger.inserted)
+
+	// 置信度越界同样拒收 —— 台账的基准不能是 1.2 这种数。
+	w = postAdoption(t, r, `{"proposal_id":"p2","actor":"alice","adopted":true,"claimed_confidence":1.2}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	assert.Empty(t, ledger.inserted)
+}
+
+func TestRecordAdoptionDecision_Duplicate409(t *testing.T) {
+	ledger := &fakeAdoptionLedger{insertErr: aistore.ErrDuplicateAdoption}
+	r := pipelineCountRouter(NewPipelineHandler(WithAdoptionLedger(ledger)))
+
+	w := postAdoption(t, r, `{"proposal_id":"p1","actor":"alice","adopted":true,"claimed_confidence":0.6}`)
+	assert.Equal(t, http.StatusConflict, w.Code, "body=%s", w.Body.String())
+}
+
+func TestGetCalibration_ReportsHoldoutSeparately(t *testing.T) {
+	no, yes := false, true
+	ledger := &fakeAdoptionLedger{entries: []aistore.AdoptionDecision{
+		{ProposalID: "p1", ClaimedConfidence: 0.6, OutcomeHit: &yes},
+		{ProposalID: "p2", ClaimedConfidence: 0.6, OutcomeHit: &no},
+		{ProposalID: "h1", ClaimedConfidence: 0.9, IsHoldout: true, OutcomeHit: &yes},
+	}}
+	r := pipelineCountRouter(NewPipelineHandler(WithAdoptionLedger(ledger)))
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/pipeline/calibration", nil))
+
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	var report adoption.Report
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &report))
+	assert.Equal(t, 2, report.SampleSize)
+	assert.InDelta(t, 0.5, report.HitRate, 1e-9)
+	assert.InDelta(t, 0.6, report.ClaimedRate, 1e-9)
+	assert.InDelta(t, 0.1, report.CalibrationError, 1e-9)
+	assert.InDelta(t, 0.26, report.BrierScore, 1e-9)
+	assert.Equal(t, 0, report.Pending)
+	assert.Equal(t, 1, report.Holdout.SampleSize)
+	assert.InDelta(t, 1.0, report.Holdout.HitRate, 1e-9)
+}
+
+func TestGetCalibration_NotWired503(t *testing.T) {
+	r := pipelineCountRouter(NewPipelineHandler())
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/pipeline/calibration", nil))
 
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }

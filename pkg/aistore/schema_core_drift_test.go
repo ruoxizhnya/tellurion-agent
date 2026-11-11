@@ -44,6 +44,7 @@ var retiredCoreTables = map[string]string{
 // （一张表不能既是搬迁又是自持）。键是本仓表名，值是豁免理由。
 var agentOwnedTables = map[string]string{
 	"ai.generation_chain": "QT-32-A：AI 生成链的留痕。core 从未记录过生成过程（旧表只有实验日志），无 core 列可对拍。",
+	"ai.adoption_ledger":  "AGENT-INTERVENTION-ADOPTION-LEDGER：干预/采纳台账与 holdout 对账集。core 从未有过采纳决策表，无 core 列可对拍。",
 }
 
 var columnNameRE = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)

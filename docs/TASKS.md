@@ -81,7 +81,11 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑥ 边界**：本仓实验计数与工具写行；校准消费归 `AGENT-INTERVENTION-ADOPTION-LEDGER`。
 - **owner**：待定
 
-### AGENT-INTERVENTION-ADOPTION-LEDGER · 无干预/采纳台账，校准与对账无数据基础 [P1] ⬜
+### AGENT-INTERVENTION-ADOPTION-LEDGER · 无干预/采纳台账，校准与对账无数据基础 [P1] ✅
+
+> **施工记录（2026-11-12）**：新增 `ai.adoption_ledger`（`pkg/aistore/schema.go`，幂等 DDL + `is_holdout` 索引，drift 护栏 `agentOwnedTables` 登记豁免）；`pkg/aistore/adoption.go` 提供 `InsertAdoptionDecision`（`proposal_id` 唯一，重复返回 `ErrDuplicateAdoption`）与 `ListAdoptionLedger`；新增 `pkg/ai/adoption` 把口径写死：校准集 = 已回填且 `is_holdout=false`，holdout 只单独报、`outcome_hit` 为空单列 pending，校准误差 = |实际命中率−平均声称概率|；`cmd/ai/handlers_pipeline.go` 新增写入面 `POST /api/pipeline/adoption`（缺 `adopted`/置信度越界 → 400，重复 → 409，未接 → 503）与读面 `GET /api/pipeline/calibration`；`docs/db-schema.md`、`docs/api-schema.md` 同步。
+>
+> **验收（真实输出）**：`go test ./pkg/ai/adoption ./cmd/ai -run "TestCompute|TestRecordAdoption|TestGetCalibration"` PASS；真库 + 真 HTTP 腿 `TEST_DATABASE_DSN=...tellurion_agent_qt go test ./pkg/aistore -run TestStore_AdoptionLedger`（含重复迁移幂等 + 重复提案拒收 + 未回填无 `resolved_at`）与 `go test ./cmd/ai -run TestAdoptionLedger_EndToEnd`（POST 3 条校准 + 1 条 holdout → 命中率 2/3、校准误差 0.0667、holdout 单独 1/1）均 PASS。**破坏验证**：删掉 `Compute` 的 holdout 分支 → `TestCompute_CalibrationAndHoldoutIsolation` 红（sample 4、hit_rate 0.75、holdout 0），逐字节还原后绿。
 
 - **① 目标**：给「人工干预 / 提案采纳 / holdout 对账」一个台账，让 ADR-023 的「校准优于准确率」有可计算的数据基础。
 - **② 上下文**：审查发现 W1-F8③（ODR-068）。`ai.*` 无 actor/intervention 列、无采纳表、无 holdout、无对账 job；PRODUCT/ADR-023 要求考核校准误差（声称 60% 应实际命中 50–70%），但今天没有任何持久数据能算它。

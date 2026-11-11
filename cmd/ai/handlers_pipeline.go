@@ -2,17 +2,27 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ruoxizhnya/tellurion-kit/httpserver"
+	"tellurion-agent/pkg/ai/adoption"
 	"tellurion-agent/pkg/ai/pipeline"
+	"tellurion-agent/pkg/aistore"
 )
 
 // ExperimentCounter 是累计实验计数的读面来源。*aistore.Store 满足它，
 // 计数由 ai.experiments 的行派生 —— 不另立计数表，也不放进程内存。
 type ExperimentCounter interface {
 	CountExperiments(ctx context.Context) (int64, error)
+}
+
+// AdoptionLedger 是干预/采纳台账的读写面。*aistore.Store 满足它。
+type AdoptionLedger interface {
+	InsertAdoptionDecision(ctx context.Context, d aistore.AdoptionDecision) (int64, error)
+	ListAdoptionLedger(ctx context.Context) ([]aistore.AdoptionDecision, error)
 }
 
 // PipelineHandler handles pipeline-related HTTP requests
@@ -34,6 +44,8 @@ type PipelineHandler struct {
 	// counter 是累计实验计数的读面来源。nil = 读面返回 503，而不是一个
 	// 看起来正常的 0。
 	counter ExperimentCounter
+	// ledger 是干预/采纳台账。nil = 写入与校准读面都返回 503。
+	ledger AdoptionLedger
 }
 
 // PipelineHandlerOption configures a PipelineHandler at construction
@@ -65,6 +77,13 @@ func WithExperimentSink(s pipeline.ExperimentSink) PipelineHandlerOption {
 func WithExperimentCounter(c ExperimentCounter) PipelineHandlerOption {
 	return func(h *PipelineHandler) {
 		h.counter = c
+	}
+}
+
+// WithAdoptionLedger 注入干预/采纳台账。
+func WithAdoptionLedger(l AdoptionLedger) PipelineHandlerOption {
+	return func(h *PipelineHandler) {
+		h.ledger = l
 	}
 }
 
@@ -102,6 +121,10 @@ func registerPipelineRoutes(router *gin.Engine, runner pipeline.BacktestRunner, 
 	// 读面就接，接不上端点显式 503，不拿 0 冒充「还没跑过」。
 	if counter, ok := sink.(ExperimentCounter); ok {
 		opts = append(opts, WithExperimentCounter(counter))
+	}
+	// 台账与计数同源（*aistore.Store）：接不上就 503，不假装「没有干预」。
+	if ledger, ok := sink.(AdoptionLedger); ok {
+		opts = append(opts, WithAdoptionLedger(ledger))
 	}
 	handler := NewPipelineHandler(opts...)
 	api := router.Group("/api")
@@ -141,6 +164,8 @@ func (h *PipelineHandler) RegisterPipelineRoutes(router *gin.RouterGroup) {
 		pipeline.GET("/jobs", h.GetPipelineJobs)
 		pipeline.GET("/jobs/:id", h.GetPipelineJob)
 		pipeline.GET("/experiments/count", h.GetExperimentCount)
+		pipeline.POST("/adoption", h.RecordAdoptionDecision)
+		pipeline.GET("/calibration", h.GetCalibration)
 	}
 }
 
@@ -164,6 +189,97 @@ func (h *PipelineHandler) GetExperimentCount(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"count": n})
+}
+
+// adoptionDecisionRequest 是一次人工裁决的写入请求。
+//
+// adopted 与 claimed_confidence 用指针：缺字段（nil）与「显式 false / 0」
+// 必须能区分。零值兜底会把「没填」当成「否决、置信 0」，那是伪造台账。
+type adoptionDecisionRequest struct {
+	ProposalID        string   `json:"proposal_id" binding:"required"`
+	Actor             string   `json:"actor" binding:"required"`
+	Intervention      string   `json:"intervention"`
+	Adopted           *bool    `json:"adopted" binding:"required"`
+	ClaimedConfidence *float64 `json:"claimed_confidence" binding:"required"`
+	IsHoldout         bool     `json:"is_holdout"`
+	OutcomeHit        *bool    `json:"outcome_hit"`
+	ResultRef         string   `json:"result_ref"`
+}
+
+// RecordAdoptionDecision 记录一次「干预 → 采纳」裁决。
+// @Summary      Record one adoption decision
+// @Description  Appends one row to ai.adoption_ledger; proposal_id is unique and decisions are immutable
+// @Tags         AI Pipeline
+// @Accept       json
+// @Produce      json
+// @Success      201  {object}  map[string]any
+// @Failure      400  {object}  map[string]string
+// @Failure      409  {object}  map[string]string "duplicate proposal_id"
+// @Failure      503  {object}  map[string]string "ledger not configured"
+// @Router       /pipeline/adoption [post]
+func (h *PipelineHandler) RecordAdoptionDecision(c *gin.Context) {
+	if h.ledger == nil {
+		httpserver.Fail(c, http.StatusServiceUnavailable, "adoption ledger not configured")
+		return
+	}
+	var req adoptionDecisionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpserver.Wrap(c, http.StatusBadRequest, err, "invalid request: ")
+		return
+	}
+	req.ProposalID = strings.TrimSpace(req.ProposalID)
+	req.Actor = strings.TrimSpace(req.Actor)
+	if req.ProposalID == "" || req.Actor == "" {
+		httpserver.Fail(c, http.StatusBadRequest, "invalid request: proposal_id and actor are required")
+		return
+	}
+	if *req.ClaimedConfidence < 0 || *req.ClaimedConfidence > 1 {
+		httpserver.Fail(c, http.StatusBadRequest, "invalid request: claimed_confidence must be within [0,1]")
+		return
+	}
+
+	id, err := h.ledger.InsertAdoptionDecision(c.Request.Context(), aistore.AdoptionDecision{
+		ProposalID:        req.ProposalID,
+		Actor:             req.Actor,
+		Intervention:      strings.TrimSpace(req.Intervention),
+		Adopted:           *req.Adopted,
+		ClaimedConfidence: *req.ClaimedConfidence,
+		IsHoldout:         req.IsHoldout,
+		OutcomeHit:        req.OutcomeHit,
+		ResultRef:         strings.TrimSpace(req.ResultRef),
+	})
+	if err != nil {
+		if errors.Is(err, aistore.ErrDuplicateAdoption) {
+			httpserver.Fail(c, http.StatusConflict, "adoption decision already recorded for this proposal_id")
+			return
+		}
+		httpserver.Error(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"id": id, "proposal_id": req.ProposalID})
+}
+
+// GetCalibration 返回校准误差与 holdout 命中率。
+//
+// holdout 隔离在 pkg/ai/adoption.Compute 里，不在这个 handler 里 —— 读面
+// 只负责把台账交出去，口径只有一个实现点。
+// @Summary      Get calibration error and holdout hit rate
+// @Tags         AI Pipeline
+// @Produce      json
+// @Success      200  {object}  adoption.Report
+// @Failure      503  {object}  map[string]string "ledger not configured"
+// @Router       /pipeline/calibration [get]
+func (h *PipelineHandler) GetCalibration(c *gin.Context) {
+	if h.ledger == nil {
+		httpserver.Fail(c, http.StatusServiceUnavailable, "adoption ledger not configured")
+		return
+	}
+	entries, err := h.ledger.ListAdoptionLedger(c.Request.Context())
+	if err != nil {
+		httpserver.Error(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, adoption.Compute(entries))
 }
 
 // RunPipeline runs the full AI strategy generation pipeline
