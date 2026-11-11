@@ -21,6 +21,7 @@
 | QT-65 | QT-65（agent 腿）· QT-11 跨仓回归：pipeline / yaml 生产路径改工厂注册 | 2026-10-24 | `67bee39`、`2629ac7`、`b1a8fcd` | [原文](#QT-65) |
 | QT-32-A | QT-32-A（agent 腿）· AI 生成链留痕 + promote 闸门的生产者侧 fail-closed | 2026-10-25 | `55dbf05` | [原文](#QT-32-A) |
 | QT-32-B | AI 生成物接资产服务，拿真 `version_hash` / `artifact_hash` | 2026-11-10 | —（原文未记） | [原文](#QT-32-B) |
+| AUTH-3STATE | 鉴权未启用时默认放行（三态落闸，含工具 RBAC） | 2026-11-12 | `9c048b4` | [施工记录](#AUTH-3STATE)；[`api-schema.md` §1.0](api-schema.md)、[`AGENTS.md` §2.1](../AGENTS.md) |
 
 ---
 
@@ -567,3 +568,62 @@
 > **如实登记（两点，均未缩小目标）**：
 > 1. **生成物语言 vs 载体口径（代裁，待主任追认）**：提示词仍产出 Go 源码，按 ⑩ 以 `carrier="dsl"` 登记——登记字节 = 生成物原文。dsl 的期望形态是可解释配置文本，这一差额属**生成侧改造**（提示词/产出形态），本单不顺手改。
 > 2. **dsl 在当前资产服务里无法 promote**：`Promote` 要求 `validated` 产物，而 dsl `NeedsArtifact()=false` ⇒ 没有 artifact 可 validate。也就是说本单交出的是**身份坐标**，离「可执行」还差资产服务侧对 dsl 的放行口径（或改走 wasm）。这是策略服务的设计决定，不在本仓擅改；已在本单 ⑥ 与 ADR-0002 补充段点名。
+
+---
+
+<a id="AUTH-3STATE"></a>
+## AUTH-3STATE · 鉴权未启用时默认放行（三态落闸，含工具 RBAC）✅ 完成（2026-11-12）
+
+> **台账说明**：本仓 `docs/TASKS.md` 没有本单条目；按主任指示**不新开任务单**，只在归档补这条施工记录。
+> cross-ref 锚点：[`docs/api-schema.md` §1.0](../api-schema.md)（三态接口口径）、[`AGENTS.md` §2.1](../AGENTS.md)（硬约束）、`config/ai-service.yaml` 的 `auth` 注释、`cmd/ai/lifecycle.go::decideAuthStartup`。
+
+- **① 缺陷原文**（修复前，`9c048b4^`；语义 = 「没有身份不报错」+「没有鉴权就放行」）：
+
+  ```go
+  // cmd/ai/main.go：容器 host=0.0.0.0 时 isLoopbackHost 为假 ⇒ 连回环门都不装
+  if authSvc.Enabled() {
+      router.Use(authSvc.Middleware())
+      // ...
+  } else if isLoopbackHost(v.GetString("server.host")) {
+      router.Use(loopbackOnly())
+  }
+  ```
+
+  ```go
+  // cmd/ai/handlers_tools.go：工具 RBAC 整体失效
+  if h.authSvc == nil || !h.authSvc.Enabled() {
+      // Auth not wired or not enabled — open-access mode, same
+      // semantics as Service.Middleware().
+      return true
+  }
+  ```
+
+  这类写法等价于「取身份失败不返回 error，而是返回空身份 `("", nil)`；随后 `authorizeTool` 直接 `return true`」——没有身份的请求被当成合法请求继续执行。
+
+- **② 实际放行面**：`deploy/compose.yaml:49-51` 默认 `AUTH_INSECURE=true` 且 `JWT_SECRET` 为空；容器绑 `0.0.0.0` ⇒ 中间件完全缺位。可被匿名调用的写面：`POST /api/copilot/generate`、`POST /api/pipeline/run`、`POST /api/pipeline/adoption`、`POST /api/explore/runs`（及其 `:runID/stop`）、`POST /api/tools/:name`；工具侧连 `save_factor` / `save_strategy` 这类带副作用的执行也不再校验角色。
+
+- **③ 三态裁决**（`cmd/ai/lifecycle.go::decideAuthStartup`，启动期一次定形）：
+  1. 有 `JWT_SECRET` → `authModeEnforced`，全闸；
+  2. 无 secret + `AUTH_INSECURE=true` + 回环绑定 + 无显式声明 → `authModeUnavailable`：进程能起，**读面（GET/HEAD/OPTIONS）公开，其余方法一律 503 `{"code":"auth_unavailable"}`**，工具执行同样 503（`authorizeTool` 不再 `return true`）；
+  3. 无 secret + `AUTH_INSECURE=true` + `AUTH_INSECURE_EXPOSURE=loopback-published` → `authModeOpen`：显式放开，启动 WARN 点名「写面与工具执行无鉴权」；回环绑定时保留逐请求来源门。
+  - 「非回环绑定 + 无 secret + 无声明」**拒绝启动**（修掉旧实现「`0.0.0.0` 反而什么门都不装」的反向逻辑）。
+  - 第 3 态比字面三态**更严**：保留 ADR-025 的双开关，只给 `AUTH_INSECURE_EXPOSURE` 而不设 `AUTH_INSECURE=true` 不算放开。该加严已获主任认可（2026-11-12：「双开关那档比要求更严，保留」）。
+
+- **④ 三态实测矩阵**（httptest 走真实 `buildRouter` 链）：
+
+  | 态 | 输入 | `POST /api/copilot/generate` | `POST /api/tools/:name` | `GET /api/pipeline/jobs` |
+  |---|---|---|---|---|
+  | 1 全闸 | `JWT_SECRET` 非空 | 401（无 token）/ 200（admin token） | 按副作用分级 RBAC | 需 token |
+  | 2 降级 | 无 secret + `AUTH_INSECURE=true` + `127.0.0.1` + 无声明 | **503 `auth_unavailable`** | **503 `auth_unavailable`** | **200** |
+  | 3 放开 | 无 secret + `AUTH_INSECURE=true` + `AUTH_INSECURE_EXPOSURE=loopback-published` | 200（回环来源）/ 403（非回环来源，绑回环时） | 200 | 200 |
+  | 拒启 | 无 secret + `AUTH_INSECURE=true` + `0.0.0.0` + 无声明 | 启动即 `Fatal`，不监听 | — | — |
+
+- **⑤ 破坏验证**（改坏 → 红 → 逐字节还原 → 绿，`git status` 干净后复跑）：
+  1. `TestBuildRouter_State2_Unavailable`：把写面中间件从 `AbortWithStatusJSON(503)` 改成 `c.Next()` 放行 → 红，报 `expected: 503 actual: 200`，body `{"ok":true}`。
+  2. `TestDecideAuthStartup_ThreeStates`：把非回环分支从 `Refuse: true` 改成 `Mode: authModeOpen` → 红，两条 `expected: true actual: false` + `reason=` 为空。
+  3. `TestTools_ZeroMode_FailsClosed`：`authorizeTool` 无鉴权分支改回 `return true` → 红，报 `expected: 503 actual: 200`，body `{"result":{"stub":"backtest.run"}}`。
+  4. `TestTools_AuthUnavailable_ExecuteReturns503`：同一条改坏 → 红，报 `expected: 503 actual: 200`，body `{"result":{"stub":"save_factor"}}`。
+  - 还原后四条全 PASS（`ok tellurion-agent/cmd/ai 0.095s`），并跑全量 `gofmt -l` 空、`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全 EXIT=0。
+
+- **⑥ 收口**：commit `9c048b4`（`9c048b41f10fd61720833db7c9c3552b519b5925`，`fix(ai): 鉴权三态落闸，无 secret 时写面与工具执行 503 auth_unavailable`），13 files changed；**未 push**。`docs/TASKS.md` 保持不动；`SERVICE.md` 未触碰。
+
