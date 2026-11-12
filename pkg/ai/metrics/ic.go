@@ -56,7 +56,6 @@ func (c *ICCalculator) ComputeIC(factorValues, forwardReturns []float64) *ICResu
 // ComputeICTimeseries calculates IC for each time period.
 func (c *ICCalculator) ComputeICTimeseries(factorValuesByDate, forwardReturnsByDate map[string][]float64) *ICResult {
 	var icSeries []float64
-	var validDates []string
 
 	for date := range factorValuesByDate {
 		if _, ok := forwardReturnsByDate[date]; !ok {
@@ -86,7 +85,6 @@ func (c *ICCalculator) ComputeICTimeseries(factorValuesByDate, forwardReturnsByD
 		ic := statistics.Pearson(cleanF, cleanR)
 		if !math.IsNaN(ic) {
 			icSeries = append(icSeries, ic)
-			validDates = append(validDates, date)
 		}
 	}
 
