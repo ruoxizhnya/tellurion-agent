@@ -24,6 +24,7 @@
 | AUTH-3STATE | 鉴权未启用时默认放行（三态落闸，含工具 RBAC） | 2026-11-12 | `9c048b4` | [施工记录](#AUTH-3STATE)；[`api-schema.md` §1.0](api-schema.md)、[`AGENTS.md` §2.1](../AGENTS.md) |
 | X-DEP-BUMP-CONSUMERS | 消费方依赖抬升（kit v0.5.0 / pgx v5.11.0 / go 1.26.11）+ govulncheck 门 | 2026-11-12 | 见本条 | [施工记录](#X-DEP-BUMP-CONSUMERS) |
 | X-AGENTS-DEPENDENCY-TABLE | `AGENTS.md` §4 依赖表按实际 `go.mod` 订正 | 2026-11-12 | 见本条 | [施工记录](#X-AGENTS-DEPENDENCY-TABLE) |
+| X-CI-RACE-STATICCHECK | CI 补 `-race` 与 `staticcheck`（含 20+ 条存量告警清理） | 2026-11-12 | 见本条 | [施工记录](#X-CI-RACE-STATICCHECK) |
 
 ---
 
@@ -648,3 +649,16 @@
 > - **订正后**：contracts → `v0.10.0`（注明 2026-11-12 按实际 `go.mod` 订正）、kit → `v0.5.0`（随 `X-DEP-BUMP-CONSUMERS`）、pgx → `v5.11.0`（MVS 抬升，消除 GO-2026-5004，并记 `go` directive 1.26.11）。
 > - **验收**：逐行与 `go.mod` 对读一致；`go build/vet/test` 全绿（同 `X-DEP-BUMP-CONSUMERS` 提交）。
 > - **边界**：只改 `AGENTS.md` §4 表格，不动 §1–§3 与代码。
+
+<a id="X-CI-RACE-STATICCHECK"></a>
+### X-CI-RACE-STATICCHECK · CI 补 `-race` 与 `staticcheck`（本仓部分，跨仓伞 `tellurion:X-CI-RACE-STATICCHECK`）
+
+> **施工记录（2026-11-12）**：
+> - **改了什么**：`.github/workflows/ci.yml` 在 `Test` 之后新增 `Test（-race，数据竞争即红）` 与 `Staticcheck` 两步；`govulncheck` 门已在 `X-DEP-BUMP-CONSUMERS` 腿落地。
+> - **补门前先分诊**（存量 23 条，未加配置基线排除）：
+>   - **疑似真 bug 2 条，各自单独 commit**：`pkg/ai/metrics/ic.go:89` SA4010 —— 查证 `ICResult` 无日期字段、调用方不消费，属死计算，`d752477` 删除，非指标静默丢失；`pkg/ai/yaml/generator_test.go:460` SA4006 —— `Validate(minimal)` 的 err 赋而不用，属假绿，`10e282c` 补 `require.NoError` 并断言三段齐全（实测 minimal 本就合法，是补断言不是改实现）。
+>   - **死代码与写法 21 条，`d4cbf27` 一并清理**：U1000 删 `chatResult` / `doChatOnce` / `Narrator.model` / `Limiter.mu` / `TPEOptimizer.mu` / `resultWithCurve` / `parseTimeArg` 及两个测试替身未使用字段；S1039 ×4；S1017；ST1005 ×2（`pipeline_test` 断言同步）；SA1029 改用 `testCtxKey`。
+>   - **`runtime.GOROOT` SA1019 用行内豁免**：它是 `go` 不在 PATH 时仍能定位安装根的兜底，改 `go env GOROOT` 会丢该兜底；按裁决不用 `staticcheck.conf` 批量排除，行内 `//lint:ignore SA1019 <理由>` 可被 blame 追到。
+> - **验收（真实输出）**：`gofmt -l .` 空；`go build/vet ./...` EXIT=0；`staticcheck ./...` EXIT=0；`go test ./... -count=1` 全绿（25 包 ok，无测试删除）。
+> - **`-race` 本地覆盖（Docker 容器，非仅 CI）**：`docker run --rm -v <repo>:/w -w /w golang:1.26 sh -c "go test -race ./... -count=1"` → 全部包 ok、EXIT=0。本机 Windows 无 cgo 的限制已用容器绕开，`-race` 不再列为盲区。
+> - **边界**：只动本仓 CI/代码/文档；data / strategy / contracts 的同类告警与门由各自伞腿承担。
