@@ -112,7 +112,7 @@ func locateCorpus(t *testing.T) string {
 	if bin, err := exec.LookPath("go"); err == nil {
 		tryGo(bin)
 	}
-	//lint:ignore SA1019 runtime.GOROOT 是不依赖外部 go 进程即可拿到安装根的兜底；exec.LookPath 失败时仍能从 GOROOT/bin 找 go，改成 `go env GOROOT` 会丢掉这条兜底
+	//lint:ignore SA1019 这里用 GOROOT 只为在 PATH 找不到 go 时定位 <GOROOT>/bin/go，再执行 go list -m 找到 conformance 语料目录（构建/测试路径，非日志）；改成 go env GOROOT 在 go 不在 PATH 时同样不可用，会丢掉这条兜底
 	if root := runtime.GOROOT(); root != "" {
 		for _, name := range []string{"go", "go.exe"} {
 			bin := filepath.Join(root, "bin", name)

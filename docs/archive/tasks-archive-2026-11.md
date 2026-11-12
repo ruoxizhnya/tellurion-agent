@@ -658,7 +658,8 @@
 > - **补门前先分诊**（存量 23 条，未加配置基线排除）：
 >   - **疑似真 bug 2 条，各自单独 commit**：`pkg/ai/metrics/ic.go:89` SA4010 —— 查证 `ICResult` 无日期字段、调用方不消费，属死计算，`d752477` 删除，非指标静默丢失；`pkg/ai/yaml/generator_test.go:460` SA4006 —— `Validate(minimal)` 的 err 赋而不用，属假绿，`10e282c` 补 `require.NoError` 并断言三段齐全（实测 minimal 本就合法，是补断言不是改实现）。
 >   - **死代码与写法 21 条，`d4cbf27` 一并清理**：U1000 删 `chatResult` / `doChatOnce` / `Narrator.model` / `Limiter.mu` / `TPEOptimizer.mu` / `resultWithCurve` / `parseTimeArg` 及两个测试替身未使用字段；S1039 ×4；S1017；ST1005 ×2（`pipeline_test` 断言同步）；SA1029 改用 `testCtxKey`。
->   - **`runtime.GOROOT` SA1019 用行内豁免**：它是 `go` 不在 PATH 时仍能定位安装根的兜底，改 `go env GOROOT` 会丢该兜底；按裁决不用 `staticcheck.conf` 批量排除，行内 `//lint:ignore SA1019 <理由>` 可被 blame 追到。
+>   - **两个被删 `mu` 的并发审计（2026-11-12 补，见本条「并发审计」提交）**：`Limiter` 可能随 Client 被多个 HTTP handler 共享，`Wait/Allow` 并发调用，但唯一可变状态是内部 `*rate.Limiter`（自身并发安全），`Now` 构造后只读——原 `mu` 从未 Lock，删除不引入 race、无需补锁；`TPEOptimizer` 持有非并发安全的 `*rand.Rand`，但每个 `TPEProposer` 独占实例，`Suggest/Optimize` 只在单 goroutine 搜索循环调用（`loop.go` 顺序 for、`mcts_proposer.go` 单次）——同样无需锁。两条结论已写进类型文档注释；若将来并行 rollout 共享实例，必须在 TPE 侧补锁（注释已注明）。
+>   - **`runtime.GOROOT` SA1019 用行内豁免**：用途是 PATH 里找不到 `go` 时定位 `<GOROOT>/bin/go`，再跑 `go list -m` 找 conformance 语料目录（**构建/测试路径，不是打日志**）；改 `go env GOROOT` 在 go 不在 PATH 时同样不可用，会丢掉这条兜底。按裁决不用 `staticcheck.conf` 批量排除，行内 `//lint:ignore SA1019 <理由>` 可被 blame 追到。
 > - **验收（真实输出）**：`gofmt -l .` 空；`go build/vet ./...` EXIT=0；`staticcheck ./...` EXIT=0；`go test ./... -count=1` 全绿（25 包 ok，无测试删除）。
 > - **`-race` 本地覆盖（Docker 容器，非仅 CI）**：`docker run --rm -v <repo>:/w -w /w golang:1.26 sh -c "go test -race ./... -count=1"` → 全部包 ok、EXIT=0。本机 Windows 无 cgo 的限制已用容器绕开，`-race` 不再列为盲区。
 > - **边界**：只动本仓 CI/代码/文档；data / strategy / contracts 的同类告警与门由各自伞腿承担。

@@ -17,6 +17,11 @@ import (
 //
 // The implementation wraps `golang.org/x/time/rate.Limiter` (already a
 // transitive dep through cron/v3) — no new dependency introduced.
+//
+// 并发性：Client 可能被多个 HTTP handler goroutine 共享（如 copilot 服务装配的
+// 同一个 client），Wait/Allow 因此会并发调用；但唯一可变状态是内部 *rate.Limiter
+// （其自身对并发安全），Now 构造后只读。原 mu 从未被 Lock 过，删除不引入竞争，
+// 也不需要补锁。
 type Limiter struct {
 	l *rate.Limiter
 	// Now is overridable for tests; defaults to time.Now.

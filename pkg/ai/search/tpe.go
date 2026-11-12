@@ -7,6 +7,11 @@ import (
 )
 
 // TPEOptimizer implements Tree-structured Parzen Estimator for Bayesian optimization.
+// TPEOptimizer 持有 *rand.Rand，后者不是并发安全的。
+//
+// 并发性：每个 TPEProposer 独占一个实例，Suggest/Optimize 只在单 goroutine
+// 的搜索循环里调用（loop.go 的顺序 for 循环、mcts_proposer.go 的单次调用），
+// 因此不需要 Mu。若将来让并行 rollout 共享同一实例，必须在这里补锁。
 type TPEOptimizer struct {
 	rng            *rand.Rand
 	gamma          float64 // Quantile for splitting observations
