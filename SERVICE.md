@@ -24,12 +24,12 @@ truth:
   api: docs/api-schema.md
   db: docs/db-schema.md
   dataflow: docs/dataflow.md
-  runbook: null
+  runbook: docs/runbook.md
   tasks: docs/TASKS.md
 
 status: evergreen
-last-verified: 2026-11-11
-verified-by: 2026-11-11 实读 README / AGENTS / ARCHITECTURE / api-schema / db-schema / dataflow / config/ai-service.yaml / deploy/compose.yaml / go.mod；端口与端点数量未写入
+last-verified: 2026-11-12
+verified-by: 2026-11-12 补 `docs/runbook.md`（起停、`/health` vs `/readyz`、DB 不可达、`ai.*` 迁移缺失、`AI not configured`、`chain sink not configured`、`sandbox_rejected` 分支），命令/端口/env 逐项对照代码、`Dockerfile`、`deploy/compose.yaml`；此前 2026-11-11 实读 README / AGENTS / ARCHITECTURE / api-schema / db-schema / dataflow / config/ai-service.yaml / deploy/compose.yaml / go.mod；端口与端点数量未写入
 ---
 
 # 服务卡：tellurion-agent
@@ -103,7 +103,7 @@ verified-by: 2026-11-11 实读 README / AGENTS / ARCHITECTURE / api-schema / db-
   2. `GET /readyz` 是否 200；503 时看 DB 连通与 `ai.*` 迁移是否执行。
   3. 生成 / 工具失败看 job 终态与 `build_error`：是否点名 `ai.generation_chain` / `chain sink not configured` / `AI not configured`。
 - **升级路径**：`owner` → 跨仓争议 → core `docs/TASKS.md`
-- **runbook**：本仓暂无 runbook（缺口已登记，见 `docs/TASKS.md` 的 `AGENT-RUNBOOK-GAP`）；起停先看 `README.md`「启动 ai-service」。
+- **runbook**：[`docs/runbook.md`](docs/runbook.md)（起停、探针语义、四类失败的现象 → 先看什么 → 常见原因 → 日志 / job 终态）。
 
 ## 7. 5 分钟后去哪
 
@@ -112,6 +112,6 @@ verified-by: 2026-11-11 实读 README / AGENTS / ARCHITECTURE / api-schema / db-
 | 知道四族接口的参数、响应与错误码 | `docs/api-schema.md` |
 | 知道 `ai.*` 有哪些表、谁能写 | `docs/db-schema.md` |
 | 知道数据怎么走、哪里 fail-closed | `docs/dataflow.md` |
-| 起停 / 配置键 | `README.md`、`config/ai-service.yaml` |
+| 起停 / 排障 / 配置键 | `docs/runbook.md`、`README.md`、`config/ai-service.yaml` |
 | 当前在做什么 / 已知缺口 | `docs/TASKS.md` |
 | 架构与决策 | `docs/ARCHITECTURE.md`、`docs/adr/` |

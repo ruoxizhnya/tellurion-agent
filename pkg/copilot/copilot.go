@@ -512,7 +512,8 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 	// "no go.mod" error. Configuration must be explicit.
 	if s.workingDir == "" {
 		s.stop(ctx, result, entry, "sandbox_rejected",
-			"copilot.working_dir is not configured; set it in analysis-service.yaml under the `copilot:` key")
+			"copilot.working_dir is not configured; set it in the ai-service config "+
+				"(default config/ai-service.yaml) under the `copilot:` key or via COPILOT_WORKING_DIR")
 		return
 	}
 

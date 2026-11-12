@@ -26,6 +26,7 @@
 | X-AGENTS-DEPENDENCY-TABLE | `AGENTS.md` §4 依赖表按实际 `go.mod` 订正 | 2026-11-12 | 见本条 | [施工记录](#X-AGENTS-DEPENDENCY-TABLE) |
 | X-CI-RACE-STATICCHECK | CI 补 `-race` 与 `staticcheck`（含 20+ 条存量告警清理） | 2026-11-12 | 见本条 | [施工记录](#X-CI-RACE-STATICCHECK) |
 | X-LOW-CLEANUP（agent 腿） | 核 `/api/health` 豁免注册并订正（两处豁免表都不再收它） | 2026-11-12 | 见本条 | [施工记录](#X-LOW-CLEANUP-agent) |
+| AGENT-RUNBOOK-GAP | 本仓没有 runbook，起停与生成链失败只有 README 零散说明 | 2026-11-12 | `docs(agent): AGENT-RUNBOOK-GAP 补齐 runbook` | [施工记录](#AGENT-RUNBOOK-GAP) |
 
 ---
 
@@ -678,3 +679,51 @@
 > - **行为影响**：对 `/api/health` 的请求由「免鉴权 + 免限流后 404」变为「免鉴权 → 过限流 → 404」，状态码不变（仍 404），不改变任何已注册端点的鉴权限流姿势。
 > - **验收（真实执行）**：`gofmt -l .` 空；`go build ./...` / `go vet ./...` EXIT=0；`go test ./... -count=1` 全 `ok`。
 > - **边界**：只改 `cmd/ai/main.go` / `cmd/ai/lifecycle.go` 两张表与注释；不动 auth 中间件、限流参数、路由注册。
+
+---
+
+<a id="AGENT-RUNBOOK-GAP"></a>
+### AGENT-RUNBOOK-GAP · 本仓没有 runbook，起停与生成链失败只有 README 零散说明 ✅（2026-11-12）
+
+> 以下六字段为收口前的台账原文，逐字保留：
+
+- **① 目标**：给 agent 一份最小 runbook，让「起不来 / readyz 503 / 生成链失败 / LLM 未配置」有固定入口。
+- **② 上下文**：`SERVICE.md` 落地时实测——本仓 `docs/` 无 `runbook.md`；起停写在 `README.md`「启动 ai-service」，生成链失败语义散在 `docs/api-schema.md` §5 与 `docs/dataflow.md`。六个服务仓都有 `docs/runbook.md`，core / agent / ui 三个仓没有。
+- **③ 要求**：① 覆盖起停、`/health` 与 `/readyz` 的语义差异、DB 不可达、`ai.*` 迁移未执行、`AI not configured`、`chain sink not configured`、`sandbox_rejected` 四类失败原文；② 每节写「现象 → 先看什么 → 常见原因 → 对应日志 / job 终态」，不重复 `docs/api-schema.md` 的参数表；③ 完成后把 `SERVICE.md` 的 `truth.runbook` 改为该文件路径。
+- **④ 约束与非目标**：不写 SLO / 告警规则 / 值班表；不改生成链的 fail-closed 语义；不把 `config/ai-service.yaml` 的键值清单抄进 runbook。
+- **⑤ 验收**：按 runbook 从冷机起一次单仓栈成功；四类破坏场景（停 PG / 不给 `AI_API_KEY` / 不装留痕落点 / 故意让静态检查拒）都命中文中登记的失败原文与处置步骤。
+- **⑥ 边界**：本仓起停与生成链排查归本仓；core 的能力端点与错误语义归 `tellurion` 的 runbook / openapi。
+- **owner**：待定
+- **重开条件**：出现第二次「AI 路由失败但只能翻 api-schema 找原因」的排障经历，或接手人变更。
+
+> **施工记录（2026-11-12，`docs(agent): AGENT-RUNBOOK-GAP 补齐 runbook`）**：
+> - **新增** `docs/runbook.md`：§1 起停（compose 冷启动 / 宿主机直跑 / 停服）、§2 `/health` vs `/readyz` 语义表、
+>   §3 失败排查（DB 不可达、`ai.*` 迁移缺失、`AI not configured`、`chain sink not configured`、
+>   `sandbox_rejected` / `build_failed` 分支）、§4 一次生成请求的排查顺序、§5 命令速查。
+> - **事实核对（逐项对代码 / Dockerfile / compose）**：端口 `127.0.0.1:8086`、PG 宿主 `15432`→容器 `5432`、
+>   库名 `tellurion`；env 名按 viper `AutomaticEnv` + `.`→`_` 规则（`DATABASE_*` / `SERVER_*` / `AUTH_*` /
+>   `COPILOT_WORKING_DIR` / `AI_API_KEY` / `AI_API_URL` / `AI_MODEL`）；`CONFIG_PATH` 默认 `config/ai-service.yaml`；
+>   `AI_API_URL` 是完整 chat-completions 端点（客户端直接 POST，不再拼路径）。
+> - **发现并订正一处代码错误**：`pkg/copilot/copilot.go` 的 `working_dir` 失败文案原写
+>   `set it in analysis-service.yaml`（该文件不存在），改为 `ai-service config (default config/ai-service.yaml) ... or via COPILOT_WORKING_DIR`；
+>   测试断言只看 `copilot.working_dir`，不受影响。
+> - **报告但不改的既有不一致**（超出本单边界，登记待办）：`SERVICE.md` §1 称因子工具会打 core
+>   `/api/factor/compute|evaluate`，与 `cmd/ai/main.go` 注释（ADR-041：core 从未有这两个端点，工具直接 unavailable）不一致；
+>   `deploy/wait-for-deps.sh` 仍提示 `tools/local-infra.sh`（本仓不存在该脚本）。两者均不影响 runbook 命令可执行性。
+> - **验收（真实执行）**：
+>   1. 冷启动单仓栈：`docker compose -p tellurion-agent-runbook-verify -f deploy/compose.yaml up --build -d --wait`
+>      两服务 healthy；`/health` 200、`/readyz` 200；
+>   2. 停 PG：`docker compose ... stop postgres` ⇒ `/health` 200、`/readyz` 503 且 `checks.database` 含
+>      `aistore: ping failed`；`start postgres` 后 `/readyz` 回 200；
+>   3. 不给 `AI_API_KEY`：`POST /api/copilot/generate` ⇒ 503，body 含
+>      `AI not configured (set AI_API_KEY and AI_API_URL)`，不建 job；
+>   4. `ai.*` 迁移缺失：`DROP TABLE ai.experiments CASCADE` ⇒ `/readyz` 503，`checks.database` 含
+>      `required relation ai.experiments is missing (startup migration did not run or was rolled back)`；
+>      `restart ai-service` 后 `Migrate` 重建、`/readyz` 回 200；
+>   5. 留痕落点缺失：`go test ./pkg/copilot -run TestQT32A_NilChainSink_FailsClosedBeforeCallingLLM -v`
+>      命中 `chain sink not configured; call WithChainSink() at the composition root`；
+>   6. 静态检查拒绝：`go test ./pkg/copilot -run TestCopilotService_Run_StaticcheckRejectsDangerousCode -v` 命中
+>      `staticcheck rejected generated code (N finding(s)):`（runbook §3.5 已写明这是 job 级证据）。
+> - **门禁（改动后真跑）**：`gofmt -l .` 空；`go build ./...`、`go vet ./...` 均 EXIT=0；
+>   `go test ./... -count=1` 全部 `ok`（28 个含测试包，EXIT=0）。
+> - **边界**：只改本仓文档 + 上述一处失败文案；不动生成链语义、镜像、compose。
