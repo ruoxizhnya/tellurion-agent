@@ -5,7 +5,7 @@
 # config/ai-service.yaml 与 deploy/wait-for-deps.sh 都是本仓自有副本。
 
 # Build stage
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26.11-alpine AS builder
 
 WORKDIR /build/agent
 
