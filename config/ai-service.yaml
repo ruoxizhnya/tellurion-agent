@@ -68,9 +68,11 @@ database:
 data_service:
   url: "http://127.0.0.1:8081"
 
-# ai-service 自己的地址视图：
-#   factor_api_url —— factor.compute / factor.evaluate / compute_factor_ic
-#   三个工具经 HTTP 打 analysis 的 /api/factor/*（只在那里注册）。
+# ai-service 的 analysis 基址视图（键名为历史沿用，不再只指因子）：
+#   现用于 QT-67 日历 / 上市窗口等只读动作。
+#   三个因子工具（factor.compute / factor.evaluate / compute_factor_ic）
+#   不再经 HTTP（ADR-041）：直接返回「该能力当前未提供」，替代路径是
+#   backtest.run 读回测结果。
 ai_service:
   factor_api_url: "http://127.0.0.1:8085"
 

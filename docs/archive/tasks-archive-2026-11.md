@@ -738,3 +738,11 @@
 >   `factor_api_url` 打 analysis 的 `/api/factor/*`（该键现用于 QT-67 日历/上市窗口只读）；
 >   `pkg/copilot/copilot.go:285` 与 `copilot_test.go:351` 注释仍提 `analysis-service.yaml`；
 >   `SERVICE.md` §5 仍写「`factor_returns` / `ic_analysis` 归属尚未裁决」（ADR-038 已裁归 core）。
+> - **残留收口（2026-11-12，`docs(agent): 因子配置/归属与 copilot 注释订正`）**：
+>   ① `config/ai-service.yaml` 注释改为「键名历史沿用，现用于 QT-67 日历/上市窗口只读；三个因子工具
+>   不再经 HTTP（ADR-041），替代路径 `backtest.run`」，配置键保留；
+>   ② `copilot.go:284-285` 与 `copilot_test.go:351` 注释的 `analysis-service.yaml` 改为
+>   `config/ai-service.yaml`（并把 `cmd/analysis/main.go` 订正为实际调用点 `cmd/ai/builders.go`）；
+>   ③ `SERVICE.md` §5 改为「归属已裁（ADR-038，2026-11-11）：`factor_returns`/`ic_analysis` 归 core，
+>   零写者、不迁 data/analytics；`factor_hypothesis` 归 `ai.*`」。
+>   门禁：`go build ./...` EXIT=0；`go test ./pkg/copilot/ -count=1` ok（0.273s）。

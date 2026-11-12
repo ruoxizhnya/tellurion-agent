@@ -93,7 +93,7 @@ verified-by: 2026-11-12 补 `docs/runbook.md`（起停、`/health` vs `/readyz`�
 | 跨仓 DTO / 契约 | 形状归 `tellurion-contracts`；本仓消费 `domain.FactorHypothesis` / `FactorType` 等 | `tellurion-contracts:docs/API.md` |
 | 对外 HTTP | 四族：copilot / pipeline / explore / tools；本仓是它们的唯一完整定义 | `docs/api-schema.md` |
 
-> **未裁事项**：`factor_returns` / `ic_analysis` 的归属尚未裁决（DDD 审查 C3/D1），本卡不替它定 owner；`factor_hypothesis` 已归 `ai.*`。
+> **归属已裁（ADR-038，2026-11-11）**：`factor_returns` / `ic_analysis` 归 `tellurion`（core）——与因子值同源，零写者、不迁 data/analytics；`factor_hypothesis` 归 `ai.*`（本仓）。
 
 ## 6. 坏了怎么办
 

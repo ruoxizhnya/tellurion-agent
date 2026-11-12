@@ -281,8 +281,9 @@ func NewCopilotServiceWithLLM(client LLMClient) *CopilotService {
 }
 
 // WithWorkingDir returns the receiver with WorkingDir set to dir.
-// This is the post-construction setter used by cmd/analysis/main.go
-// once it has read the value from analysis-service.yaml. The method
+// This is the post-construction setter used by cmd/ai/builders.go
+// once it has read the value from config/ai-service.yaml
+// (`copilot.working_dir`, env COPILOT_WORKING_DIR). The method
 // returns the service so it can be chained immediately after
 // construction:
 //

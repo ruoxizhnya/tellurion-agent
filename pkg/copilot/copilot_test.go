@@ -348,7 +348,7 @@ func TestCopilotService_Run_StaticcheckRejectsExecCommand(t *testing.T) {
 
 // TestCopilotService_Run_WorkingDirEmpty_RejectsWithConfigError
 // covers the fail-closed configuration path: WorkingDir is empty
-// (operator forgot to set it in analysis-service.yaml). The job
+// (operator forgot to set it in config/ai-service.yaml). The job
 // must terminate with sandbox_rejected and a BuildErr that points
 // the operator at the config key, not at a generic "go: no go.mod"
 // error.
