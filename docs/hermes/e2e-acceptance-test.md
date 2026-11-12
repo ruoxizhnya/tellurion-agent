@@ -45,7 +45,7 @@
 | Ollama (hermes-3:8b) | :11434 | `curl http://localhost:11434/api/tags` lists `hermes-3:8b` |
 | Hermes Agent | — | `~/.hermes/` directory exists with config/skills/prompts |
 | analysis-service | :8085 | 反代入口：`curl http://localhost:8085/api/tools` returns `count: 21`（真身在 ai-service :8086，见下） |
-| data-service | :8081 | `curl http://localhost:8081/health` returns 200 |
+| data-service | :8081 | `curl http://localhost:8081/healthz` returns 200（旧名 `/health` 仍可用但已弃用，X-PROBE-NAMING） |
 | PostgreSQL | :5432 | `psql -d tellurion` can connect; `ai.factor_genes` / `ai.strategy_genes` tables exist |
 | Redis | :6379 | **本链路不需要**：agent 代码零 Redis 读取点（`go-redis` 仅经 `tellurion-kit/db` 间接引入）；只有 core analysis 的缓存启用时才用 |
 
