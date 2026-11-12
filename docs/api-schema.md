@@ -46,11 +46,12 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 |---|---|---|
 | 1. 全闸 | `JWT_SECRET` 非空 | 中间件校验 token；写面按 `role` 做 RBAC |
 | 2. 降级（`auth_unavailable`） | 无 secret + `AUTH_INSECURE=true` + 回环绑定 + 无显式声明 | 进程能起；**读面公开**；**全部写方法与工具执行一律 503** `{"code":"auth_unavailable"}` |
-| 3. 放开 | 无 secret + `AUTH_INSECURE=true` + `AUTH_INSECURE_EXPOSURE=loopback-published` | 整体放行；启动 WARN 点名「写面与工具执行无鉴权」；回环绑定时再叠逐请求来源门 |
+| 3. 放开 | 无 secret + `AUTH_INSECURE=true` + `AUTH_INSECURE_EXPOSURE=loopback-published` | 整体放行；启动 WARN 同时点名「写面无鉴权」与**实际绑定地址**，非回环（含空 host）追加「已对外暴露」；回环绑定时再叠逐请求来源门 |
 
 - 「非回环绑定 + 无 secret + 无声明」**直接拒绝启动**（容器绑 `0.0.0.0` 时不再出现「什么门都不装」）。
 - 第 2 态的判定按 **HTTP 方法**：`GET`/`HEAD`/`OPTIONS` 公开，其余方法 503；新增写端点无需来本文登记。
 - 第 3 态是**双开关**（ADR-025）：只给 `AUTH_INSECURE_EXPOSURE` 而不设 `AUTH_INSECURE=true` 不算放开。
+- 第 3 态 WARN 的绑定地址由 `server.host:server.port` 直接插值；`AUTH_INSECURE_EXPOSURE=loopback-published` 标注为**声明**（发布层约定），不代表运行期保证。回环绑定不得再说 loopback-only，非回环绑定必须明说已对外暴露。
 - 工具执行还有一层按副作用等级的路由内 RBAC（见 §1.4）；无鉴权（第 2 态）时不会 `return true` 放行，而是同样 503。
 
 ### 1.1 Explore（`cmd/ai/handlers_explore.go`）

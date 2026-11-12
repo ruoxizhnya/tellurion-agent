@@ -105,6 +105,48 @@ func TestDecideAuthStartup_ThreeStates(t *testing.T) {
 	}
 }
 
+// TestOpenAccessWarning_BindAddresses 钉住第 3 态启动 WARN 的文案口径：
+// 必须同时说出「写面无鉴权」与实际绑定地址；非回环（含空 host = 全部接口）
+// 追加「已对外暴露」，回环只写地址；声明值标明是「声明」，且回环时不得再
+// 出现 loopback-only 之类与实际绑定矛盾的表述。
+func TestOpenAccessWarning_BindAddresses(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		host       string
+		wantAddr   string
+		wantExpose bool
+	}{
+		{name: "loopback", host: "127.0.0.1", wantAddr: `"127.0.0.1:8086"`, wantExpose: false},
+		{name: "wildcard", host: "0.0.0.0", wantAddr: `"0.0.0.0:8086"`, wantExpose: true},
+		{name: "empty-host", host: "", wantAddr: `":8086"`, wantExpose: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			msg := openAccessWarning(tc.host, 8086)
+
+			assert.Contains(t, msg, "写面无鉴权", "WARN 必须点名写面无鉴权")
+			assert.Contains(t, msg, tc.wantAddr, "WARN 必须插值实际绑定地址")
+			assert.Contains(t, msg, "declaration", "声明值必须标明是声明")
+			assert.Contains(t, msg, "AUTH_INSECURE_EXPOSURE=loopback-published")
+			assert.NotContains(t, msg, "loopback-only", "不得再用与实际绑定矛盾的 loopback-only 表述")
+
+			if tc.wantExpose {
+				assert.Contains(t, msg, "已对外暴露")
+				assert.Contains(t, msg, "non-loopback")
+				assert.NotContains(t, msg, "is loopback")
+			} else {
+				assert.NotContains(t, msg, "已对外暴露")
+				assert.Contains(t, msg, "is loopback")
+				assert.NotContains(t, msg, "non-loopback")
+			}
+		})
+	}
+}
+
 func authModeViper(host string) *viper.Viper {
 	v := viper.New()
 	v.Set("server.host", host)

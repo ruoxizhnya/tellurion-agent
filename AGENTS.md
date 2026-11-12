@@ -29,7 +29,7 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 
 1. 有 `JWT_SECRET` → 全闸；
 2. 无 secret + 回环绑定 + 无显式声明 → 进程能起，**读面公开、写面与工具执行 503 `auth_unavailable`**；
-3. 无 secret + `AUTH_INSECURE=true` + `AUTH_INSECURE_EXPOSURE=loopback-published` → 显式放开（启动 WARN）。
+3. 无 secret + `AUTH_INSECURE=true` + `AUTH_INSECURE_EXPOSURE=loopback-published` → 显式放开（启动 WARN 必须同时说出「写面无鉴权」与实际绑定地址 `host:port`；非回环绑定追加「已对外暴露」，回环绑定不得再说 loopback-only；声明值须标明是声明而非运行期保证）。
 
 「非回环绑定 + 无 secret + 无声明」必须拒绝启动；`authorizeTool` 在无鉴权时不得 `return true`。
 口径细节见 `docs/api-schema.md` §1.0。改这三态 = 改接口安全语义，须同步本文与 api-schema。

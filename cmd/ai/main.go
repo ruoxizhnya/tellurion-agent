@@ -18,8 +18,11 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -221,12 +224,28 @@ func initTokenService(v *viper.Viper, logger zerolog.Logger) (*kitauth.TokenServ
 			Msg("auth: JWT secret missing — reads stay public; write endpoints and tool " +
 				"execution return 503 auth_unavailable. Set JWT_SECRET to enable them")
 	case authModeOpen:
-		logger.Warn().
-			Msg("auth: INSECURE open-access mode — write surface and tool execution are " +
-				"UNAUTHENTICATED (AUTH_INSECURE_EXPOSURE=loopback-published). " +
-				"loopback/local only, do not use outside local dev")
+		logger.Warn().Msg(openAccessWarning(v.GetString("server.host"), v.GetInt("server.port")))
 	}
 	return svc, d.Mode
+}
+
+// openAccessWarning 生成第 3 态（显式放开）的启动 WARN 文本。
+//
+// 必须同时说出「写面无鉴权」与**实际绑定地址**（`server.host:server.port`，
+// 直接插值，不猜）；非回环绑定（含空 host = 监听全部接口）追加「已对外暴露」，
+// 回环绑定只写地址。exposure 声明只标明是**声明**，不代表运行期保证 ——
+// 容器绑 0.0.0.0 时再说「loopback only」是错的，会误导审计。
+func openAccessWarning(host string, port int) string {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	head := "auth: INSECURE open-access mode — 写面无鉴权"
+	bind := fmt.Sprintf("bind address %q is loopback", addr)
+	if !isLoopbackHost(host) {
+		head = "auth: INSECURE open-access mode — 写面无鉴权 且已对外暴露"
+		bind = fmt.Sprintf("bind address %q is non-loopback and 已对外暴露", addr)
+	}
+	return head + "：write endpoints and tool execution accept unauthenticated requests; " +
+		bind + "; AUTH_INSECURE_EXPOSURE=loopback-published is a declaration of the " +
+		"publish layer, not a runtime guarantee"
 }
 
 // buildRouter 组装 HTTP 中间件链：recovery、CORS、限流、请求日志、鉴权。

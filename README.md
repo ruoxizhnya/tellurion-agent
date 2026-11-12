@@ -62,6 +62,17 @@ AUTH_INSECURE=true AUTH_INSECURE_EXPOSURE=loopback-published SERVER_HOST=127.0.0
 #                                 读面公开；
 #   - 再加 AUTH_INSECURE_EXPOSURE=loopback-published → 显式放开（本地/回环发布）。
 # 非回环绑定 + 无 secret + 无声明会直接拒绝启动。
+#
+# 第 3 态的启动 WARN 会插值实际绑定地址；非回环（含空 host）会点名「已对外暴露」：
+#   回环：auth: INSECURE open-access mode — 写面无鉴权：write endpoints and tool execution
+#         accept unauthenticated requests; bind address "127.0.0.1:8086" is loopback;
+#         AUTH_INSECURE_EXPOSURE=loopback-published is a declaration of the publish layer,
+#         not a runtime guarantee
+#   容器：auth: INSECURE open-access mode — 写面无鉴权 且已对外暴露：write endpoints and tool
+#         execution accept unauthenticated requests; bind address "0.0.0.0:8086" is
+#         non-loopback and 已对外暴露; AUTH_INSECURE_EXPOSURE=loopback-published is a
+#         declaration of the publish layer, not a runtime guarantee
+#   空 host（:8086，监听全部接口）与容器同口径，措辞用 ":8086"。
 
 # 若本机 PG 用 scram-sha-256（宿主默认即是），上面的 DATABASE_PASSWORD 必须
 # 是真实口令；不想用无鉴权模式就改注入 JWT_SECRET=<至少 32 字节随机值>。
