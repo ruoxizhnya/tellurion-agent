@@ -196,6 +196,20 @@ func TestRecordAdoptionDecision_Created(t *testing.T) {
 	assert.InDelta(t, 0.6, d.ClaimedConfidence, 1e-9)
 	require.NotNil(t, d.OutcomeHit)
 	assert.True(t, *d.OutcomeHit)
+
+	// 响应必须回显完整的决策字段：UI 的采纳台账靠这份 echo 立即渲染
+	// 「谁、改了什么、当时声称多少」，不必再拉一次读面。
+	var echo map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &echo))
+	assert.Equal(t, "p1", echo["proposal_id"])
+	assert.Equal(t, "alice", echo["actor"])
+	assert.Equal(t, "lookback 20->60", echo["intervention"], "intervention 自由文本必须原样回显")
+	assert.Equal(t, float64(0.6), echo["claimed_confidence"], "claimed_confidence 概率快照必须回显")
+	assert.Equal(t, true, echo["adopted"])
+	assert.Equal(t, true, echo["outcome_hit"])
+	assert.Equal(t, "exp:12", echo["result_ref"])
+	_, hasHoldout := echo["is_holdout"]
+	assert.True(t, hasHoldout, "is_holdout 必须显式出现（false 也要在），前端不该靠缺省猜")
 }
 
 func TestRecordAdoptionDecision_RejectsMissingDecision(t *testing.T) {
@@ -224,7 +238,7 @@ func TestRecordAdoptionDecision_Duplicate409(t *testing.T) {
 func TestGetCalibration_ReportsHoldoutSeparately(t *testing.T) {
 	no, yes := false, true
 	ledger := &fakeAdoptionLedger{entries: []aistore.AdoptionDecision{
-		{ProposalID: "p1", ClaimedConfidence: 0.6, OutcomeHit: &yes},
+		{ProposalID: "p1", Intervention: "lookback 20->60", ClaimedConfidence: 0.6, OutcomeHit: &yes},
 		{ProposalID: "p2", ClaimedConfidence: 0.6, OutcomeHit: &no},
 		{ProposalID: "h1", ClaimedConfidence: 0.9, IsHoldout: true, OutcomeHit: &yes},
 	}}
@@ -244,6 +258,13 @@ func TestGetCalibration_ReportsHoldoutSeparately(t *testing.T) {
 	assert.Equal(t, 0, report.Pending)
 	assert.Equal(t, 1, report.Holdout.SampleSize)
 	assert.InDelta(t, 1.0, report.Holdout.HitRate, 1e-9)
+
+	// entries 是台账原样快照：汇总值不保留自由文本，快照必须保留 ——
+	// UI 要能把每个数字对回「哪次干预、当时声称多少」。
+	require.Len(t, report.Entries, 3, "快照含 holdout 行，与校准分母不同")
+	assert.Equal(t, "lookback 20->60", report.Entries[0].Intervention, "intervention 自由文本必须原样返回")
+	assert.InDelta(t, 0.6, report.Entries[0].ClaimedConfidence, 1e-9, "claimed_confidence 概率快照必须原样返回")
+	assert.True(t, report.Entries[2].IsHoldout, "holdout 行也要出现在快照里")
 }
 
 func TestGetCalibration_NotWired503(t *testing.T) {

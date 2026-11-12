@@ -192,7 +192,7 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 | `outcome_hit` | bool | 否 | 结果命中与否；缺省 = 未回填（pending） |
 | `result_ref` | string | 否 | 结果坐标（如 `exp:123`） |
 
-响应 `201` `{"id": <int64>, "proposal_id": "..."}`；`409` 重复提案；`503` 台账未接。`outcome_hit` 非空时自动落 `resolved_at`。
+响应 `201` 回显整条决策：`{"id": <int64>, "proposal_id": "...", "actor": "...", "intervention": "...", "adopted": <bool>, "claimed_confidence": <float>, "is_holdout": <bool>, "outcome_hit": <bool|null>, "result_ref": "..."}`；`409` 重复提案；`503` 台账未接。`outcome_hit` 非空时自动落 `resolved_at`。`is_holdout` 恒显式出现（`false` 也在），前端不靠缺省猜。
 
 **`GET /api/pipeline/calibration`** — 响应 `200`：
 
@@ -204,9 +204,17 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
   "calibration_error": 0.0667,
   "brier_score": 0.2267,
   "pending": 1,
-  "holdout": {"sample_size": 1, "hit_rate": 1.0}
+  "holdout": {"sample_size": 1, "hit_rate": 1.0},
+  "entries": [
+    {"proposal_id": "p1", "actor": "alice", "intervention": "lookback 20->60",
+     "adopted": true, "claimed_confidence": 0.6, "is_holdout": false,
+     "outcome_hit": true, "result_ref": "exp:12",
+     "created_at": "...", "resolved_at": "..."}
+  ]
 }
 ```
+
+`entries` 是台账**原样快照**（含 pending 与 holdout 行，与校准分母口径不同）：汇总值不保留自由文本，快照必须保留，UI 才能把每个数字对回「哪次干预、当时声称多少」。`adoption_decision` 字段见上一条 POST 请求体。
 
 口径（实现在 [`pkg/ai/adoption`](../pkg/ai/adoption)）：校准集 = 已回填结果且 `is_holdout=false` 的行；`calibration_error = |hit_rate - claimed_rate|`；`brier_score = mean((claimed_confidence - outcome)^2)`；`is_holdout=true` 的行只进 `holdout`，不参与校准；`outcome_hit` 为空的行只进 `pending`。未接台账时 `503`。
 

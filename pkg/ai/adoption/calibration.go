@@ -21,6 +21,9 @@ type Report struct {
 	BrierScore       float64       `json:"brier_score"`
 	Pending          int           `json:"pending"`
 	Holdout          HoldoutReport `json:"holdout"`
+	// Entries 是台账原样快照（含 pending / holdout 行），供 UI 把每个数字
+	// 对回「哪次干预、当时声称多少」—— 汇总值不保留自由文本，快照必须保留。
+	Entries []aistore.AdoptionDecision `json:"entries"`
 }
 
 // HoldoutReport 是留出对账集的独立结果。它不参与校准误差，只用来回答
@@ -32,7 +35,10 @@ type HoldoutReport struct {
 
 // Compute 按包注释里的口径折算。空输入返回全零，不返回 NaN。
 func Compute(entries []aistore.AdoptionDecision) Report {
-	var report Report
+	report := Report{Entries: entries}
+	if report.Entries == nil {
+		report.Entries = []aistore.AdoptionDecision{}
+	}
 
 	var calibration, holdout int
 	var hits, holdoutHits int

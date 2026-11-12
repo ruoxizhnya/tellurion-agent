@@ -256,7 +256,17 @@ func (h *PipelineHandler) RecordAdoptionDecision(c *gin.Context) {
 		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"id": id, "proposal_id": req.ProposalID})
+	c.JSON(http.StatusCreated, gin.H{
+		"id":                 id,
+		"proposal_id":        req.ProposalID,
+		"actor":              req.Actor,
+		"intervention":       strings.TrimSpace(req.Intervention),
+		"adopted":            *req.Adopted,
+		"claimed_confidence": *req.ClaimedConfidence,
+		"is_holdout":         req.IsHoldout,
+		"outcome_hit":        req.OutcomeHit,
+		"result_ref":         strings.TrimSpace(req.ResultRef),
+	})
 }
 
 // GetCalibration 返回校准误差与 holdout 命中率。

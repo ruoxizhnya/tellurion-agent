@@ -66,4 +66,16 @@ func TestAdoptionLedger_EndToEnd(t *testing.T) {
 	assert.Equal(t, 0, report.Pending)
 	assert.Equal(t, 1, report.Holdout.SampleSize)
 	assert.InDelta(t, 1.0, report.Holdout.HitRate, 1e-9)
+
+	// 读面必须带回台账原样快照：干预自由文本 + 声称概率，供 UI 对账。
+	require.Len(t, report.Entries, 4, "快照含 holdout 与 pending 行")
+	byProposal := map[string]aistore.AdoptionDecision{}
+	for _, e := range report.Entries {
+		byProposal[e.ProposalID] = e
+	}
+	rejected, ok := byProposal[prefix+"3"]
+	require.True(t, ok)
+	assert.Equal(t, "reject weak signal", rejected.Intervention, "intervention 自由文本不得被汇总口径吞掉")
+	assert.InDelta(t, 0.6, rejected.ClaimedConfidence, 1e-9, "claimed_confidence 概率快照必须原样返回")
+	assert.False(t, rejected.Adopted)
 }
