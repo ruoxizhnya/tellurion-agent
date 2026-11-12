@@ -27,6 +27,14 @@
 | X-CI-RACE-STATICCHECK | CI 补 `-race` 与 `staticcheck`（含 20+ 条存量告警清理） | 2026-11-12 | 见本条 | [施工记录](#X-CI-RACE-STATICCHECK) |
 | X-LOW-CLEANUP（agent 腿） | 核 `/api/health` 豁免注册并订正（两处豁免表都不再收它） | 2026-11-12 | 见本条 | [施工记录](#X-LOW-CLEANUP-agent) |
 | AGENT-RUNBOOK-GAP | 本仓没有 runbook，起停与生成链失败只有 README 零散说明 | 2026-11-12 | `docs(agent): AGENT-RUNBOOK-GAP 补齐 runbook` | [施工记录](#AGENT-RUNBOOK-GAP) |
+| AGENT-FACTOR-TOOLS-UNAVAILABLE | 三个因子工具打向 core 不存在的端点 | 2026-11-11 | 见本条 | [施工记录](#AGENT-FACTOR-TOOLS-UNAVAILABLE) |
+| AGENT-HERMES-DOCS-ADR041 | Hermes 文档/技能仍把已不可用的因子工具写成现役 | 2026-11-12 | 见本条 | [施工记录](#AGENT-HERMES-DOCS-ADR041) |
+| AGENT-EXPERIMENT-COUNT-SURFACE | 实验计数是内存 seq+1，回测/走查工具零实验行 | 2026-11-12 | 见本条 | [施工记录](#AGENT-EXPERIMENT-COUNT-SURFACE) |
+| AGENT-INTERVENTION-ADOPTION-LEDGER | 无干预/采纳台账，校准与对账无数据基础 | 2026-11-12 | 见本条 | [施工记录](#AGENT-INTERVENTION-ADOPTION-LEDGER) |
+| AGENT-HYPOTHESIS-FILTER | 因果维直通弱信号，假设过滤形同虚设 | 2026-11-12 | 见本条 | [施工记录](#AGENT-HYPOTHESIS-FILTER) |
+| AGENT-LLM-BUDGET-GATE | ResearchBudget 零代码，日累计 USD 闸缺失（D4=a） | 2026-11-12 | 见本条 | [施工记录](#AGENT-LLM-BUDGET-GATE) |
+| AGENT-EXPLORE-STATE-REAP | explore 运行态纯内存，崩溃即孤儿（D10=b） | 2026-11-12 | 见本条 | [施工记录](#AGENT-EXPLORE-STATE-REAP) |
+| AGENT-CAUSAL-PARSE-TESTS | 因果叙述者解析逻辑无直测，验证器侧用假叙述者 | 2026-11-12 | 见本条 | [施工记录](#AGENT-CAUSAL-PARSE-TESTS) |
 
 ---
 
@@ -746,3 +754,137 @@
 >   ③ `SERVICE.md` §5 改为「归属已裁（ADR-038，2026-11-11）：`factor_returns`/`ic_analysis` 归 core，
 >   零写者、不迁 data/analytics；`factor_hypothesis` 归 `ai.*`」。
 >   门禁：`go build ./...` EXIT=0；`go test ./pkg/copilot/ -count=1` ok（0.273s）。
+
+---
+
+<a id="AGENT-FACTOR-TOOLS-UNAVAILABLE"></a>
+### AGENT-FACTOR-TOOLS-UNAVAILABLE · 三个因子工具打向 core 不存在的端点 [P0] ✅
+
+> 以下六字段为收口前的台账原文，逐字保留：
+
+> **施工记录（2026-11-11）**：`pkg/ai/client/factor_client.go` 新增 `ErrFactorCapabilityUnavailable`；`ComputeFactor`/`EvaluateFactor` 不再发 HTTP，直接返回该哨兵；三个工具 Description 加 `[unavailable]` 前缀并指向 ADR-041；`docker-compose.yml` 与 `cmd/ai/main.go` 的错误注释同批订正（core 仓提交）。测试：`TestFactorClient_UnavailableWithoutHTTP`、三个 `*_Execute_Unavailable_NoHTTP`（httptest 计数断言 0 请求）、`TestNoPhantomFactorEndpoints`（幻影端点回潮即红）。破坏验证：临时把 `ComputeFactor` 改回发 HTTP ⇒ 3 条用例红（client 2 + builtin 1），还原复绿。门禁：`gofmt -l` 空、`go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿。
+
+- **① 目标**：让 `factor.compute` / `factor.evaluate` / `compute_factor_ic` 在「core 无因子求值面」这个事实下**显式返回「该能力当前未提供」**，而不是发一个必失败的 HTTP 请求或返回空值；裁决见跨仓 ADR-041。
+- **② 上下文**：`pkg/ai/client/factor_client.go:51,93` 调 `POST /api/factor/compute` 与 `/api/factor/evaluate`；`compute_factor_ic` 走同一 `EvaluateFactor`（`pkg/ai/tools/builtin/factor_tools.go:336`）。2026-11-11 实测：core 只注册 `POST /api/factor/registrations`（`cmd/analysis/handlers_factor_registration.go:65`）与反代 `GET /api/factors/:factor_name`（`handlers_proxy.go:167`，已是死链）；`docs/openapi.yaml` 也只有这两条；`docs/SPEC.md:3197-3210` 列的 `compute-returns`/`compute-ic` **代码里从未实现**。链路上还有两处错误事实传播：`docker-compose.yml` 与 `cmd/ai/main.go:100-101` 的注释称「`/api/factor/*` 只在 core 注册」。
+- **③ 要求**：① `FactorClient` 的三个方法改为返回**稳定的「能力未提供」错误**（哨兵 + 明确文案「core 当前无因子求值/IC 求值端点；ADR-041」），不发起 HTTP；② 三个工具的 Description 与注册状态标为 `unavailable`（说明原因与替代路径：提交回测读结果），避免 LLM 反复调用必失败工具；③ `pkg/ai/client/endpoint_contract_test.go` 的 allowlist 改成**断言显式不可用**：core 将来真提供端点则红、工具偷偷改回发请求也红；④ 同批订正 `docker-compose.yml` 与 `cmd/ai/main.go` 的注释；⑤ `tellurion:docs/SPEC.md` 因子端点节标注「历史契约 / 当前未实现」（该处属 core 仓文档，跨仓单见 `tellurion:CORE-SPEC-FACTOR-ENDPOINTS-STALE`）。
+- **④ 约束与非目标**：**禁止**在 core 补 `/api/factor/compute|evaluate` 空壳端点；**禁止**为了让测试变绿改 allowlist 或放宽断言；不改 DSL 语义、不新造远程求值面（ADR-028 §6）。
+- **⑤ 验收**：`gofmt -l` 空、`go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿；三条工具调用各有一条用例断言返回「未提供」且**零 HTTP 请求**（用 `httptest` 计数为 0 证明）；破坏验证：把哨兵错误改回「发请求」⇒ 用例红；还原复绿。
+- **⑥ 边界**：本仓 `pkg/ai/client` 与 `pkg/ai/tools/builtin`；core 侧只改文档标注（另单），不新增运行时能力。
+- **重开条件**：core 真正实现「公式 × 符号」求值面、或 ADR-028 §6 的 strategy 侧求值落地并提供稳定 HTTP 面（ADR-041 §6）——届时重新接线并在 ADR-041 追加裁决。
+
+<a id="AGENT-HERMES-DOCS-ADR041"></a>
+### AGENT-HERMES-DOCS-ADR041 · Hermes 文档/技能仍把已不可用的因子工具写成现役 [P1] ✅
+
+> 以下六字段为收口前的台账原文，逐字保留：
+
+> **施工记录（2026-11-12）**：`docs/hermes/tools-quant-backtest.yaml`（三工具 Description 加 `[unavailable]` + ADR-041、`validate_factor`/`save_factor` 的 L2 表述同步订正）、`docs/hermes/prompts/quant-research.md`（Capabilities、硬约束第 1/2 条、工作流步骤 4、示例步骤 4/8）、`docs/hermes/skills/autonomous_factor_mining.md`（Step 4 改为「未提供，跳过」、验收标准第 4 条）、`docs/hermes/e2e-acceptance-test.md`（成功条件第 5 条、轨迹断言集合、排障节）统一改为「未提供（ADR-041），改走 backtest.run 读结果」，与 `pkg/ai/client/factor_client.go` 的哨兵一致。验收：`grep -rn "factor.compute\|factor.evaluate\|compute_factor_ic" docs/hermes` 无「现役/可用」表述，全部带 unavailable/ADR-041 标注；纯文档改动，Go 门禁不受影响（`go build ./...` 通过）。
+
+- **① 目标**：把 Hermes 配置/提示词/技能里对三个因子工具（`factor.compute`/`factor.evaluate`/`compute_factor_ic`）的「现役」表述订正为「未提供（ADR-041）」，与 `AGENT-FACTOR-TOOLS-UNAVAILABLE` 已落的代码事实对齐。
+- **② 上下文**：审查发现 W1-F2（ODR-068）。`docs/hermes/tools-quant-backtest.yaml:62-107,122-137`、`docs/hermes/prompts/quant-research.md:21,26-27,109,192`、`docs/hermes/skills/autonomous_factor_mining.md:89,284` 仍把因子求值工具写成可用；`8ace9b9` 已改三工具代码（返回 `ErrFactorCapabilityUnavailable`），文档未跟上。裁决见跨仓 ADR-041。
+- **③ 要求**：① 三处文档逐条标「未提供 / ADR-041」并给替代路径（提交回测读结果）；② 技能里「调用因子求值」的步骤改为「不可用，改走回测」；③ 不改工具代码（已落）。
+- **④ 约束与非目标**：不恢复因子求值端点；不改 DSL 语义；不新造远程求值面（ADR-028 §6）。
+- **⑤ 验收**：grep 三处文档无「因子求值工具现役」表述；`check_doc_links`（若适用）绿；与代码哨兵一致。
+- **⑥ 边界**：本仓 `docs/hermes/`；core 侧端点事实归 `tellurion:CORE-SPEC-FACTOR-ENDPOINTS-STALE`。
+- **owner**：待定
+
+<a id="AGENT-EXPERIMENT-COUNT-SURFACE"></a>
+### AGENT-EXPERIMENT-COUNT-SURFACE · 实验计数是内存 seq+1，回测/走查工具零实验行 [P1] ✅
+
+> 以下六字段为收口前的台账原文，逐字保留：
+
+> **施工记录（2026-11-12）**：计数不另立表，直接由 `ai.experiments` 行派生（生产单写者仍在 agent）。`pkg/aistore/experiment.go` 新增 `TrialStats` / `ExperimentTrialStats(runID)` / `CountExperiments()`；`pkg/ai/loop` 新增 `TrialCounter` 端口与 `WithTrialCounter`，`Run` 开场先读已落库计数（读失败整轮拒绝开跑），`NumTrials = 基数 + seq + 1`，`Attempt`/`AttemptView` 暴露 `num_trials`；`pkg/ai/tools/builtin` 新增 `ExperimentRecorder` 端口，`backtest.run` 与 `walk_forward_validate` 每次调用（成功/失败）都写一行并收尾；`cmd/ai` 把 `*aistore.Store` 经 `builders.go` 接入工具、经 `handlers_explore.go` 接入 loop，并新增读面 `GET /api/pipeline/experiments/count`（未接 → 503，不返回 0）。`docs/api-schema.md` 同步。
+>
+> **验收（真实输出）**：`go test ./pkg/ai/loop ./pkg/ai/tools/builtin ./cmd/ai` 全绿；真库腿 `TEST_DATABASE_DSN=...tellurion_agent_qt go test ./cmd/ai -run TestExperimentCount_PersistsAcrossRestart -count=1` → PASS（工具真跑 3 次 +3；新连接池模拟重启后计数不变；读面返回同值）。**破坏验证**：(a) `loop.go` 改回 `NumTrials = seq + 1` → `TestRun_NumTrialsIncludesPersistedBase` 红（expected 8 actual 1），逐字节还原后绿；(b) 集成腿去掉 `.WithExperimentRecorder` → 计数 +0 而非 +3，红；还原后绿。
+
+- **① 目标**：让「跑了多少次实验」有一个**持久、可回读**的计数面，而不是进程内 `seq+1`；让回测/走查工具真写实验行。
+- **② 上下文**：审查发现 W1-F8①②（ODR-068）。`pkg/ai/loop/loop.go:235` 的 `NumTrials` = 内存 seq+1（重启归零）；`pkg/ai/tools/builtin/backtest.go:126-154` 与 `walkforward_tool.go:199` 零实验行写入；`docs/db-schema.md:21` 的实验表只写不读。计数不可信 ⇒ 校准/对账无基础。
+- **③ 要求**：① 实验计数落 `ai.*` 持久表（可回读、重启不丢）；② 回测/走查工具各写一条实验行（含 run 坐标）；③ 读面暴露累计次数；④ 与 `AGENT-INTERVENTION-ADOPTION-LEDGER` 撞 `ai.*` 表时按单号串行。
+- **④ 约束与非目标**：不造假实验行；不改回测引擎语义；计数口径写死（什么算一次实验）。
+- **⑤ 验收**：真跑 N 次回测后计数 = N（重启后仍 N）；破坏验证 = 改回内存 seq ⇒ 重启丢计数用例红。真库腿走 `_test`。
+- **⑥ 边界**：本仓实验计数与工具写行；校准消费归 `AGENT-INTERVENTION-ADOPTION-LEDGER`。
+- **owner**：待定
+
+<a id="AGENT-INTERVENTION-ADOPTION-LEDGER"></a>
+### AGENT-INTERVENTION-ADOPTION-LEDGER · 无干预/采纳台账，校准与对账无数据基础 [P1] ✅
+
+> 以下六字段为收口前的台账原文，逐字保留：
+
+> **施工记录（2026-11-12）**：新增 `ai.adoption_ledger`（`pkg/aistore/schema.go`，幂等 DDL + `is_holdout` 索引，drift 护栏 `agentOwnedTables` 登记豁免）；`pkg/aistore/adoption.go` 提供 `InsertAdoptionDecision`（`proposal_id` 唯一，重复返回 `ErrDuplicateAdoption`）与 `ListAdoptionLedger`；新增 `pkg/ai/adoption` 把口径写死：校准集 = 已回填且 `is_holdout=false`，holdout 只单独报、`outcome_hit` 为空单列 pending，校准误差 = |实际命中率−平均声称概率|；`cmd/ai/handlers_pipeline.go` 新增写入面 `POST /api/pipeline/adoption`（缺 `adopted`/置信度越界 → 400，重复 → 409，未接 → 503）与读面 `GET /api/pipeline/calibration`；`docs/db-schema.md`、`docs/api-schema.md` 同步。
+>
+> **验收（真实输出）**：`go test ./pkg/ai/adoption ./cmd/ai -run "TestCompute|TestRecordAdoption|TestGetCalibration"` PASS；真库 + 真 HTTP 腿 `TEST_DATABASE_DSN=...tellurion_agent_qt go test ./pkg/aistore -run TestStore_AdoptionLedger`（含重复迁移幂等 + 重复提案拒收 + 未回填无 `resolved_at`）与 `go test ./cmd/ai -run TestAdoptionLedger_EndToEnd`（POST 3 条校准 + 1 条 holdout → 命中率 2/3、校准误差 0.0667、holdout 单独 1/1）均 PASS。**破坏验证**：删掉 `Compute` 的 holdout 分支 → `TestCompute_CalibrationAndHoldoutIsolation` 红（sample 4、hit_rate 0.75、holdout 0），逐字节还原后绿。
+
+- **① 目标**：给「人工干预 / 提案采纳 / holdout 对账」一个台账，让 ADR-023 的「校准优于准确率」有可计算的数据基础。
+- **② 上下文**：审查发现 W1-F8③（ODR-068）。`ai.*` 无 actor/intervention 列、无采纳表、无 holdout、无对账 job；PRODUCT/ADR-023 要求考核校准误差（声称 60% 应实际命中 50–70%），但今天没有任何持久数据能算它。
+- **③ 要求**：① 建干预/采纳台账（actor + 提案 + 采纳与否 + 结果坐标）；② holdout 对账 job 的口径写死（哪些进 holdout、怎么算命中）；③ 校准误差读面；④ 与 `AGENT-EXPERIMENT-COUNT-SURFACE` 撞表按单号串行。
+- **④ 约束与非目标**：不伪造采纳数据；不改验证器五维语义；不引入第二个编排者（ADR-023）。
+- **⑤ 验收**：真台账写入 + 校准误差可计算（一组已知提案 → 已知命中率）；破坏验证 = 删 holdout 隔离 ⇒ 对账用例红。
+- **⑥ 边界**：本仓台账与校准读面；验证器概率输出归 `pkg/ai/validation`。
+- **owner**：待定
+
+<a id="AGENT-HYPOTHESIS-FILTER"></a>
+### AGENT-HYPOTHESIS-FILTER · 因果维直通弱信号，假设过滤形同虚设 [P2] ✅
+
+> 以下六字段为收口前的台账原文，逐字保留：
+
+> **施工记录（2026-11-12）**：现状核查 —— 审计所指 `pkg/ai/causal/causal.go:34-48` 已重构为 `pkg/ai/validation/causal.go`，「直通弱信号 / `blind.Result=nil` 仍判成立」在 P2-9f 已修：`ValidateCausal` 把 `blind.Result` 物理置 nil 只给叙述者，验证用原始 `Result`；`verifyTheory` 只统计**可验证**预测，`Testable=0` 给固定 0.25 + blocking，证伪预测逐条 blocking；叙述者 nil = 未评估、空理论 = 显式报错。本单补的是**绝对判据用例**（原先只覆盖「1 中 1 不中」，空结果与弱信号没有直测）：`TestValidateCausal_NilResultIsInsufficientEvidence`（`Result=nil` → `testable=0`、概率**恰好 0.25**、必有 blocking、每条预测 `Verifiable=false` 且带原因）、`TestValidateCausal_WeakSignalIsNotAccepted`（4 条可验 1 中 3 不中 → 概率 `(1+1)/(4+2)≈0.333 < 0.5`、必有 blocking）。
+>
+> **验收（真实输出）**：`go test ./pkg/ai/validation -run "TestValidateCausal|TestAttachCausal"` PASS（8 例）。**破坏验证**：在 `verifyTheory` 顶部直接返回 `Probability=1, Passed=len(Predictions)`（即改回直通）→ 6 个用例红：`空结果下不该有任何可证伪预测，实际 testable=2 passed=2 failed=0`、`应是 4 条可验、1 中 3 不中，实际 testable=4 passed=4 failed=0`、`一条可证伪的都没有，概率应很低，实际 1.000`、`概率应为 0.80，实际 1.000`、`应 1 中 1 不中，实际 passed=2 failed=0`、`只有第三条可证伪，实际 testable=3`；逐字节还原后全包绿（无残留标记）。
+
+- **① 目标**：让因果维对弱信号/空结果有**可判定的过滤**，而不是直通，避免「看起来审过、实际没拦」。
+- **② 上下文**：审查发现 W1-F9（ODR-068）。`pkg/ai/causal/causal.go:34-48` 直通弱信号；`:127-129` 在 `blind.Result=nil` 时仍判成立。验证器链的因果维是唯一需要 LLM 的一维（ADR-023），直通会让红队失效。
+- **③ 要求**：① 弱信号/空结果显式判「不成立 / 证据不足」，不直通；② `blind.Result=nil` 不得判成立；③ 补过滤判据用例（绝对断言）。
+- **④ 约束与非目标**：不改五维确定性校验器；不引入多 agent 投票（ADR-023 拒绝）；过滤阈值写死可判定。
+- **⑤ 验收**：弱信号/空结果用例判不成立；破坏验证 = 改回直通 ⇒ 用例红。
+- **⑥ 边界**：本仓 `pkg/ai/causal`；叙述者解析测试归 `AGENT-CAUSAL-PARSE-TESTS`。
+- **owner**：待定
+
+<a id="AGENT-LLM-BUDGET-GATE"></a>
+### AGENT-LLM-BUDGET-GATE · ResearchBudget 零代码，日累计 USD 闸缺失（D4=a）[P1] ✅
+
+> 以下六字段为收口前的台账原文，逐字保留：
+
+> **施工记录（2026-11-12）**：新增 `ai.ai_costs`（`pkg/aistore/schema.go`，`PRIMARY KEY(day, model)`，幂等 DDL + `agentOwnedTables` 豁免）；`pkg/aistore/llm_cost.go` 提供唯一写入口 `AddLLMCost`（upsert 累加 token/USD/calls）与 `DailyLLMCost`（当日 SUM）。新增 `pkg/ai/budget`：日累计闸 `Gate`（`Check` 读账、`Record` 记账、`Spent` 读面），错误码 `llm_budget_exhausted` / `llm_budget_ledger_error`，读账与记账失败都 fail-closed，额度默认 5 USD（对齐 hermes.yaml）可用 `AI_DAILY_BUDGET_USD` 覆盖，非法值回落默认而非「不设闸」。`pkg/ai/client.go` 加 `budgetGate` + `NewClientWithBudget`，`Chat` 委托 `ChatWithUsage` 使所有生产调用都带 usage 记账；闸在限流等待之前检查，被拒时一次 HTTP 都不发。装配根 `cmd/ai/builders.go` 新增 `newLLMClient(store)` 与 `buildPipeline(sink)`，把 copilot、pipeline 的意图解析/代码修正、explore 因果叙述者全部收口到同一个带闸客户端；`docs/db-schema.md`、`docs/hermes/config/hermes.yaml` 注释同步。
+>
+> **验收（真实输出）**：`go test ./pkg/ai ./pkg/ai/budget ./cmd/ai -run "Budget|Gate"` PASS；真库腿 `TEST_DATABASE_DSN=...tellurion_agent_qt go test ./cmd/ai -run TestLLMBudgetGate`（预置 1 USD 到上限 → 拒调用且 HTTP 命中 0；重建连接池 + Store + Gate 后仍拒；单次百万 token 调用把累计推过上限并落库，重启后新闸仍拒）PASS。**破坏验证**：把 `Gate.Check` 的读账改为常量 0、`Gate.Record` 跳过 `AddLLMCost`（即删掉持久化）→ `pkg/ai/budget` 5 个用例与 `cmd/ai` 两个真库用例全红（`到达日累计上限后必须拒调用` / `百万 token 的调用必须把花费推过上限并落库`），逐字节还原后全绿。
+
+- **① 目标**：把 `hermes.yaml` 声明的预算（`max_cost_per_session`）落成**代码侧日累计 USD 闸 + 持久化**，让 LLM 花费真能被拦住，而不是配置里写着、代码里没人读。
+- **② 上下文**：审查发现 W4-F1（ODR-071）+ 裁决 D4=a。`ResearchBudget` 零代码（`docs/hermes/config/hermes.yaml:57,72` `max_cost_per_session:5.0` + skill:257）；`pkg/ai/metrics/cost.go:136` 的 `ai_costs` 零写者；`metrics.go:35` `dailyCosts` 是进程内 map（重启归零）；`ratelimit.go:29` 10/min + `handlers_explore.go:212-214` MaxTries 20 ⇒ 理论 14,400 次/天，无 USD 上限。
+- **③ 要求**：① 日累计 USD 闸（代码侧，持久化到 `ai.*`，重启不丢）；② `ai_costs` 真写者（每次 LLM 调用记 token×单价）；③ 超预算 fail-closed（拒后续调用，点名预算键）；④ 与 `AGENT-EXPERIMENT-COUNT-SURFACE` 撞 `ai.*` 按单号串行。
+- **④ 约束与非目标**：不硬编码 API key；不改 LLM 提供商；单价口径写死（可配置但默认值明确）。
+- **⑤ 验收**：真累计到上限 ⇒ 拒调用（E1，可用假 LLM 计数）；破坏验证 = 删持久化 ⇒ 重启绕闸用例红。
+- **⑥ 边界**：本仓预算闸与成本写者；hermes.yaml 声明归 `AGENT-HERMES-DOCS-ADR041` 同批核对。
+- **owner**：待定
+
+<a id="AGENT-EXPLORE-STATE-REAP"></a>
+### AGENT-EXPLORE-STATE-REAP · explore 运行态纯内存，崩溃即孤儿（D10=b）[P1] ✅
+
+> 以下六字段为收口前的台账原文，逐字保留：
+
+> **施工记录（2026-11-12）**：收尸落点选 `ai.experiments` 的 `running` 行 —— 那才是崩溃后真正遗留、且有观察面的东西（运行态 map 仍按 D10=b 保持易失，不新增持久 run 表）。`pkg/aistore/experiment.go` 新增 `ReapRunningExperimentsBefore(ctx, before, reason)`：`UPDATE ... SET status='failed', error_message=$reason, finished_at=NOW() WHERE status='running' AND created_at < before`，判据写死为「本进程启动前就已存在」；固定原因常量 `ExperimentOrphanReason`；标 failed 而不删行，保留「断在哪」的证据；重复执行返回 0（幂等）。同时修正该文件顶部关于 running 终态语义的注释：running 作为「被叫停」证据只在单进程生命周期内成立，跨重启遗留按孤儿收尸。`cmd/ai/handlers_explore.go` 新增 `reapExploreLeavings`（收尸失败只 WARN、不阻断启动），`cmd/ai/main.go` 在 Store 就绪后、路由注册前调用，`before = time.Now()`。
+>
+> **验收（真实输出）**：`go test ./cmd/ai ./pkg/aistore -run "Reap"` PASS。真库腿 `TestStore_ReapRunningExperimentsBefore`：插入 3 行（旧 running / 未来 created_at 的 running / 已 completed），收尸后旧行 `running → failed` 且 `error_message=orphaned: ...`、`finished_at` 非空，新行仍 running、completed 行不变；第二次收尸 0 行。装配腿 `TestReapExploreLeavings_*`：真实调用一次、cutoff 与原因原样传入、nil/错误不阻断。**破坏验证**：`reapExploreLeavings` 直接 `return 0` + `ReapRunningExperimentsBefore` 直接 `return 0, nil`（即删收尸）→ `cmd/ai` 与 `pkg/aistore` 的 Reap 用例全红（`expected: 1 actual: 0`、`遗留 running 必须标成 failed` 实际仍 `running`），逐字节还原后全绿（无残留标记）。
+
+- **① 目标**：给 explore 运行态一个**启动收尸**机制，让进程崩溃后遗留的 running 态能被回收，而不是永远卡在内存 map 里。
+- **② 上下文**：审查发现 W4-F2（ODR-071）+ 裁决 D10=b（run 态易失 + 启动收尸）。`pkg/ai/handlers/handlers_explore.go:262-272` 运行态是内存 map；全仓 grep `stale`/`reap`/`recover`/`orphan` 零命中；`pipeline.go:759-764` 尽力而为日志。D10=b：接受 run 态易失，但启动时须收尸（标记遗留 running 为 failed/orphan）。
+- **③ 要求**：① 启动期扫描遗留 running 态并标记 orphan/failed（收尸）；② 收尸口径写死（什么算遗留、怎么标）；③ 不引入跨请求持久 run 态（D10=b 明确易失）。
+- **④ 约束与非目标**：不把 explore 态做成持久队列（那是 orchestration）；不改 pipeline 语义；收尸不静默丢日志。
+- **⑤ 验收**：模拟崩溃遗留 → 重启后收尸标记可见；破坏验证 = 删收尸 ⇒ 遗留态永卡用例红。
+- **⑥ 边界**：本仓 explore 启动收尸；持久 job 队列归 `tellurion-orchestration`。
+- **owner**：待定
+
+<a id="AGENT-CAUSAL-PARSE-TESTS"></a>
+### AGENT-CAUSAL-PARSE-TESTS · 因果叙述者解析逻辑无直测，验证器侧用假叙述者 [P3] ✅
+
+> 以下六字段为收口前的台账原文，逐字保留：
+
+> **施工记录（2026-11-12）**：新增 `pkg/ai/causal/narrator_test.go`，对 `parseTheory` 做**纯函数直测**（固定夹具，不触发任何 LLM 调用），四类输入各自有断言：① 正常 —— 裸 JSON、`min`/`max`/`top_k` 逐字段原样读出；② 空 —— 空串、纯空白、`{}`、`null` 全部显式报错且返回 nil 理论；③ malformed —— 非 JSON、截断 JSON 报「JSON 解析失败」；④ 多段 —— 前后夹散文并包在 json 代码块里、仅代码块、JSON 后跟总结、机制为空但预测齐全，均能正确提取。另加 `TestParseTheory_ErrorCarriesOriginalSnippet` 钉住错误信息必须带原文片段，便于线上判断模型到底吐了什么。生产语义未改动：解析失败仍显式报错，不静默回落成空理论。
+>
+> **验收（真实输出）**：`go test ./pkg/ai/causal -v` PASS（12 个子用例 + 1 个片段用例）。**破坏验证**：同时做两处改坏 —— 删掉花括号提取（`if false` 包住 `Index`/`LastIndex` 段）、`json.Unmarshal` 失败改为返回空理论且无错误（静默回落）→ 7 例红：`空：空字符串`/`空：只有空白`/`malformed：不是_JSON`/`malformed：截断的_JSON`（`应当显式报错，实际返回理论: &{Mechanism: Predictions:[]}`）、`多段：前后夹散文_+_json_代码块`/`多段：JSON_后跟一段总结`（`机制应为 "..."，实际 ""`）、`TestParseTheory_ErrorCarriesOriginalSnippet`（`应当报错`）；逐字节还原后全绿（无残留标记）。
+
+- **① 目标**：给因果叙述者的解析/提取逻辑补**直接单元测试**，而不是只在 validation 侧用假叙述者间接覆盖。
+- **② 上下文**：审查发现 W4-F3（ODR-071）。`pkg/ai/causal/narrator.go:121-143` 的提取逻辑无直测；`ValidateCausal` 的测试在 validation 侧用假叙述者，真解析路径（ malformed LLM 输出 / 空叙述 / 多段）未被钉住。
+- **③ 要求**：① 对 `narrator.go:121-143` 补表驱动测试（正常/空/malformed/多段）；② 解析失败显式报错，不静默回落；③ 与 `AGENT-HYPOTHESIS-FILTER` 撞 causal 包按单号串行。
+- **④ 约束与非目标**：不改叙述者生产语义；不依赖真 LLM（用固定输出夹具）。
+- **⑤ 验收**：解析测试覆盖四类输入；破坏验证 = 改坏提取逻辑 ⇒ 用例红。
+- **⑥ 边界**：本仓 `pkg/ai/causal/narrator.go` 测试；过滤判据归 `AGENT-HYPOTHESIS-FILTER`。
+- **owner**：待定
