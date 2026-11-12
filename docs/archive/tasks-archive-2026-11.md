@@ -23,6 +23,7 @@
 | QT-32-B | AI 生成物接资产服务，拿真 `version_hash` / `artifact_hash` | 2026-11-10 | —（原文未记） | [原文](#QT-32-B) |
 | AUTH-3STATE | 鉴权未启用时默认放行（三态落闸，含工具 RBAC） | 2026-11-12 | `9c048b4` | [施工记录](#AUTH-3STATE)；[`api-schema.md` §1.0](api-schema.md)、[`AGENTS.md` §2.1](../AGENTS.md) |
 | X-DEP-BUMP-CONSUMERS | 消费方依赖抬升（kit v0.5.0 / pgx v5.11.0 / go 1.26.11）+ govulncheck 门 | 2026-11-12 | 见本条 | [施工记录](#X-DEP-BUMP-CONSUMERS) |
+| X-AGENTS-DEPENDENCY-TABLE | `AGENTS.md` §4 依赖表按实际 `go.mod` 订正 | 2026-11-12 | 见本条 | [施工记录](#X-AGENTS-DEPENDENCY-TABLE) |
 
 ---
 
@@ -638,3 +639,12 @@
 > - **验收（真实输出）**：`govulncheck ./...` → `No vulnerabilities found.` / `Your code is affected by 0 vulnerabilities.`，EXIT=0；`gofmt -l` 空；`go build/vet/test ./... -count=1` 全绿。
 > - **破坏验证（真做真还原）**：`go mod edit` 把 kit 降回 `v0.2.0`、pgx 降回 `v5.7.3` 并 `go mod tidy` ⇒ `GO-2026-5004`、EXIT=1；从备份逐字节还原（`go.mod 4A69119E…84FA`、`go.sum 5A84331F…8F0C`）后复跑 EXIT=0。**过程留痕**：首次还原误用了 bump 前的备份（kit v0.2.0），随即重跑 `go get kit@v0.5.0 + go mod tidy` 回到目标态，哈希与 bump 后一致，未把旧 pin 留在工作树。
 > - **边界**：只动本仓 `go.mod`/`go.sum`/CI/文档；AGENTS §4 的版本订正单列在 `X-AGENTS-DEPENDENCY-TABLE`。
+
+<a id="X-AGENTS-DEPENDENCY-TABLE"></a>
+### X-AGENTS-DEPENDENCY-TABLE · `AGENTS.md` §4 依赖表按实际 `go.mod` 订正（跨仓伞 `tellurion:X-AGENTS-DEPENDENCY-TABLE`）
+
+> **施工记录（2026-11-12）**：
+> - **订正前**：表里 contracts 写 `v0.9.0`、kit 写 `v0.2.0`、pgx 写 `v5.7.3`；实际 `go.mod` 为 contracts `v0.10.0`、kit `v0.2.0`、pgx `v5.7.3`。
+> - **订正后**：contracts → `v0.10.0`（注明 2026-11-12 按实际 `go.mod` 订正）、kit → `v0.5.0`（随 `X-DEP-BUMP-CONSUMERS`）、pgx → `v5.11.0`（MVS 抬升，消除 GO-2026-5004，并记 `go` directive 1.26.11）。
+> - **验收**：逐行与 `go.mod` 对读一致；`go build/vet/test` 全绿（同 `X-DEP-BUMP-CONSUMERS` 提交）。
+> - **边界**：只改 `AGENTS.md` §4 表格，不动 §1–§3 与代码。
