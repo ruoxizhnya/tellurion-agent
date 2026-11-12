@@ -50,7 +50,7 @@ for target in $targets; do
     while ! nc -z "$host" "$port" 2>/dev/null; do
         if [ "$waited" -ge "$TIMEOUT" ]; then
             echo "wait-for-deps: 等 ${host}:${port} 超过 ${TIMEOUT}s 仍不可达，放弃启动。" >&2
-            echo "wait-for-deps: 宿主机上的数据库/缓存起了吗？本机用 tools/local-infra.sh start 启停。" >&2
+            echo "wait-for-deps: 宿主机上的数据库起了吗？本仓用 docker compose -f deploy/compose.yaml up -d postgres 启动（或核对 DATABASE_HOST / DATABASE_PORT）。" >&2
             exit 1
         fi
         sleep 1

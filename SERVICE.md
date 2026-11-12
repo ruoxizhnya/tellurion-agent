@@ -74,7 +74,7 @@ verified-by: 2026-11-12 补 `docs/runbook.md`（起停、`/health` vs `/readyz`�
 | LLM 服务（OpenAI 兼容） | HTTP | Copilot 自然语言 → 代码 | 未配置时 503 `AI not configured`；已配置但不可达则生成 job 失败 |
 
 > 外部 LLM 的地址与凭证只从环境变量注入，不写进本卡。
-> **已知 P0 断边**：`pkg/ai/client/factor_client.go` 的 `factor.compute` / `factor.evaluate` 打向 core 的 `/api/factor/compute` / `/api/factor/evaluate`，而 core 只有 `/api/factor/compute-returns`；这两个工具当前必失败，见 `tellurion-docs:docs/design/ddd-boundary-review-2026-11-11.md` C1。
+> **因子求值能力当前未提供（ADR-041，已裁决；不是运行时断边）**：`pkg/ai/client/factor_client.go` 的 `factor.compute` / `factor.evaluate` / `compute_factor_ic` **不发起 HTTP 请求**，直接返回 `ErrFactorCapabilityUnavailable`；core 只注册治理面 `POST /api/factor/registrations`（admin），`GET /api/factors/:name` 已退役为 `410 factor_http_surface_retired`，求值 / IC 端点不存在。替代路径：提交回测并读结果（`backtest.run`）。
 
 ## 4. 运行时身份
 

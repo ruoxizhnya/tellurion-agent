@@ -727,3 +727,14 @@
 > - **门禁（改动后真跑）**：`gofmt -l .` 空；`go build ./...`、`go vet ./...` 均 EXIT=0；
 >   `go test ./... -count=1` 全部 `ok`（28 个含测试包，EXIT=0）。
 > - **边界**：只改本仓文档 + 上述一处失败文案；不动生成链语义、镜像、compose。
+> - **补记（2026-11-12，主任指令，`docs(agent): SERVICE.md 因子工具现状与 wait-for-deps 提示订正`）**：
+>   ① `SERVICE.md` §1 的「已知 P0 断边」改为 ADR-041 现状——三个因子工具**不发 HTTP**、直接返回
+>   `ErrFactorCapabilityUnavailable`；core 只注册治理面 `POST /api/factor/registrations`，
+>   `GET /api/factors/:name` 已退役为 `410 factor_http_surface_retired`；替代路径 `backtest.run` 读结果。
+>   依据：ADR-041 + core 路由只读核对（2026-11-12，HEAD `9858dd6`）。
+>   ② `deploy/wait-for-deps.sh` 超时提示原指向不存在的 `tools/local-infra.sh`，改为可照抄的
+>   `docker compose -f deploy/compose.yaml up -d postgres`（脚本逻辑未动，`bash -n` EXIT=0）。
+> - **同类残留（已列未改，待主任定）**：`config/ai-service.yaml:71-73` 注释仍称三个因子工具经
+>   `factor_api_url` 打 analysis 的 `/api/factor/*`（该键现用于 QT-67 日历/上市窗口只读）；
+>   `pkg/copilot/copilot.go:285` 与 `copilot_test.go:351` 注释仍提 `analysis-service.yaml`；
+>   `SERVICE.md` §5 仍写「`factor_returns` / `ic_analysis` 归属尚未裁决」（ADR-038 已裁归 core）。
