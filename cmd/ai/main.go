@@ -175,16 +175,20 @@ func analysisAPIURL(v *viper.Viper) string {
 	return "http://localhost:8085"
 }
 
-// aiPublicPaths 是免鉴权路径。与 core 的 auth.PublicPaths() 逐字一致：
+// aiPublicPaths 是免鉴权路径。与 core 的 auth.PublicPaths() 基本一致：
 // 本进程并不注册 /api/auth/* 这些路由，但反代/探针可能把请求打到这里，
 // 401 与 404 的区别会影响前端的鉴权姿势判断，故保持同一张表。
+//
+// **不收 core 的 `/api/health`**：本进程只注册 `/health`（存活）与
+// `/readyz`、`/api/readyz`（就绪），没有 `/api/health`。多留一条不存在的
+// 路径，只会让误打过来的探针把 404 当成「路由在、但服务异常」，把配置错误
+// 藏起来（X-LOW-CLEANUP，2026-11-12）。
 var aiPublicPaths = []string{
 	"/api/auth/login",
 	"/api/auth/refresh",
 	"/api/auth/status",
 	"/api/auth/bootstrap",
 	"/health",
-	"/api/health",
 	"/readyz",
 	"/api/readyz",
 	"/metrics",

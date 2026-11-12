@@ -25,6 +25,7 @@
 | X-DEP-BUMP-CONSUMERS | 消费方依赖抬升（kit v0.5.0 / pgx v5.11.0 / go 1.26.11）+ govulncheck 门 | 2026-11-12 | 见本条 | [施工记录](#X-DEP-BUMP-CONSUMERS) |
 | X-AGENTS-DEPENDENCY-TABLE | `AGENTS.md` §4 依赖表按实际 `go.mod` 订正 | 2026-11-12 | 见本条 | [施工记录](#X-AGENTS-DEPENDENCY-TABLE) |
 | X-CI-RACE-STATICCHECK | CI 补 `-race` 与 `staticcheck`（含 20+ 条存量告警清理） | 2026-11-12 | 见本条 | [施工记录](#X-CI-RACE-STATICCHECK) |
+| X-LOW-CLEANUP（agent 腿） | 核 `/api/health` 豁免注册并订正（两处豁免表都不再收它） | 2026-11-12 | 见本条 | [施工记录](#X-LOW-CLEANUP-agent) |
 
 ---
 
@@ -639,6 +640,7 @@
 > - **CI**：`go-version` 由 `1.25` 改为 `1.26.11`；在 `Vet` 之后新增 `Govulncheck` 步（与 core 腿同一做法）。
 > - **验收（真实输出）**：`govulncheck ./...` → `No vulnerabilities found.` / `Your code is affected by 0 vulnerabilities.`，EXIT=0；`gofmt -l` 空；`go build/vet/test ./... -count=1` 全绿。
 > - **破坏验证（真做真还原）**：`go mod edit` 把 kit 降回 `v0.2.0`、pgx 降回 `v5.7.3` 并 `go mod tidy` ⇒ `GO-2026-5004`、EXIT=1；从备份逐字节还原（`go.mod 4A69119E…84FA`、`go.sum 5A84331F…8F0C`）后复跑 EXIT=0。**过程留痕**：首次还原误用了 bump 前的备份（kit v0.2.0），随即重跑 `go get kit@v0.5.0 + go mod tidy` 回到目标态，哈希与 bump 后一致，未把旧 pin 留在工作树。
+> - **补丁（2026-11-12 发现，同批补）**：`go` directive 升到 1.26.11 后，`Dockerfile` 仍是 `golang:1.25-alpine` 且 `GOTOOLCHAIN=local`，`docker build` 在 `go mod download` 处硬失败（`go.mod requires go >= 1.26.11 (running go 1.25.14)`）；builder 升 `golang:1.26.11-alpine`，实建 `docker build -f Dockerfile` 通过。
 > - **边界**：只动本仓 `go.mod`/`go.sum`/CI/文档；AGENTS §4 的版本订正单列在 `X-AGENTS-DEPENDENCY-TABLE`。
 
 <a id="X-AGENTS-DEPENDENCY-TABLE"></a>
@@ -663,3 +665,16 @@
 > - **验收（真实输出）**：`gofmt -l .` 空；`go build/vet ./...` EXIT=0；`staticcheck ./...` EXIT=0；`go test ./... -count=1` 全绿（25 包 ok，无测试删除）。
 > - **`-race` 本地覆盖（Docker 容器，非仅 CI）**：`docker run --rm -v <repo>:/w -w /w golang:1.26 sh -c "go test -race ./... -count=1"` → 全部包 ok、EXIT=0。本机 Windows 无 cgo 的限制已用容器绕开，`-race` 不再列为盲区。
 > - **边界**：只动本仓 CI/代码/文档；data / strategy / contracts 的同类告警与门由各自伞腿承担。
+
+---
+
+<a id="X-LOW-CLEANUP-agent"></a>
+### X-LOW-CLEANUP（agent 腿）· 核 `/api/health` 豁免注册并订正（跨仓伞 `tellurion:X-LOW-CLEANUP`）
+
+> **施工记录（2026-11-12）**：
+> - **取证**：ODR-069 W2-F7「命名/分页/死注释残余」与 W2-F5（k8s 探针）都涉及 `/health` 口径；本仓 `aiPublicPaths`（`cmd/ai/main.go`）与 `rateLimitExemptPaths`（`cmd/ai/lifecycle.go`）各有一条 `/api/health`。
+> - **核查结论**：本进程只注册 `/health`（存活）、`/readyz` 与 `/api/readyz`（就绪）、`/metrics` 及 `/api/auth/*`；**没有** `/api/health` 路由（全仓注册点 grep 仅豁免表两处 + 注释）。两张表里的 `/api/health` 是照抄 core 的残留。
+> - **订正**：两处豁免表都删掉 `/api/health`；`lifecycle.go` 顶部注释由「与 core 逐字一致」改为「按本进程实际注册的探针收敛」；`main.go` 注释写清为什么不收 `/api/health`（豁免一条不存在的路径只会把 404 伪装成「路由在、服务异常」）。
+> - **行为影响**：对 `/api/health` 的请求由「免鉴权 + 免限流后 404」变为「免鉴权 → 过限流 → 404」，状态码不变（仍 404），不改变任何已注册端点的鉴权限流姿势。
+> - **验收（真实执行）**：`gofmt -l .` 空；`go build ./...` / `go vet ./...` EXIT=0；`go test ./... -count=1` 全 `ok`。
+> - **边界**：只改 `cmd/ai/main.go` / `cmd/ai/lifecycle.go` 两张表与注释；不动 auth 中间件、限流参数、路由注册。

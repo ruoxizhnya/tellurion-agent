@@ -10,8 +10,9 @@ package main
 //
 // 与 core 版本的差异都收在这里，如实登记：
 //   - HTTP client 的 outbound service 标签仍是 "data"（历史面板口径不变）；
-//   - rate limiter 的豁免表与 core 逐字一致（/health、/api/health、
-//     /api/auth/status），原因见下方注释；
+//   - rate limiter 的豁免表按本进程**实际注册**的探针收敛（/health、
+//     /readyz、/api/readyz、/api/auth/status）；core 的 `/api/health` 不抄
+//     —— 本进程没有该路由，豁免一条 404 路径没有意义（X-LOW-CLEANUP）；
 //   - LoopbackOnly 未上收 kit（kit v0.1.0 没有），这里自带一份同样语义的实现。
 
 import (
@@ -140,7 +141,6 @@ func newRateLimiter(rate int, window time.Duration) *rateLimiter {
 // 匹配会被 `..` 之类的写法绕过）。
 var rateLimitExemptPaths = []string{
 	"/health",
-	"/api/health",
 	"/readyz",
 	"/api/readyz",
 	"/api/auth/status",
