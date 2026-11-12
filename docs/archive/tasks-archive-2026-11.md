@@ -35,6 +35,7 @@
 | AGENT-LLM-BUDGET-GATE | ResearchBudget 零代码，日累计 USD 闸缺失（D4=a） | 2026-11-12 | 见本条 | [施工记录](#AGENT-LLM-BUDGET-GATE) |
 | AGENT-EXPLORE-STATE-REAP | explore 运行态纯内存，崩溃即孤儿（D10=b） | 2026-11-12 | 见本条 | [施工记录](#AGENT-EXPLORE-STATE-REAP) |
 | AGENT-CAUSAL-PARSE-TESTS | 因果叙述者解析逻辑无直测，验证器侧用假叙述者 | 2026-11-12 | 见本条 | [施工记录](#AGENT-CAUSAL-PARSE-TESTS) |
+| AGENT-EXPLORE-INTERVENTIONS | UI 子台账 B-06 的三条干预写面（G2 指方向 / G3 追问 / G4 标记）缺端点 | 2026-11-12 | `76c98ee`、`9b4e381`、`4d27919`、`2f4b8a1` | [施工记录](#AGENT-EXPLORE-INTERVENTIONS) |
 
 ---
 
@@ -888,3 +889,21 @@
 - **⑤ 验收**：解析测试覆盖四类输入；破坏验证 = 改坏提取逻辑 ⇒ 用例红。
 - **⑥ 边界**：本仓 `pkg/ai/causal/narrator.go` 测试；过滤判据归 `AGENT-HYPOTHESIS-FILTER`。
 - **owner**：待定
+
+<a id="AGENT-EXPLORE-INTERVENTIONS"></a>
+### AGENT-EXPLORE-INTERVENTIONS · UI 子台账 B-06 的三条干预写面（G2 指方向 / G3 追问 / G4 标记）缺端点 [P1] ✅
+
+- **① 目标**：把 `tellurion-ui:docs/design/stitch_quantlab_ux_redesign/TASKS.md` B-06 与 `ANNOTATIONS.md` §2/§6 里画了三屏、但一直 `disabled` 的三条干预写面补齐：指方向（G2）、追问（G3）、标记（G4），并确认既有 `adoption` / `calibration` 两条读写的契约稳定。
+- **② 上下文**：`cmd/ai/handlers_explore.go` 此前只有 `POST /api/explore/runs`、`GET .../{runID}`、`GET .../stream`、`POST .../stop` 四条；`pkg/ai/loop.Controller` 没有方向注入面；`ai.*` 没有存人工标注的表。UI 侧三处上下文入口（候选卡 / 被放弃的尝试 / 结果流）共用 `run_id`（+ `attempt_seq`）坐标。
+- **③ 要求与实现**：
+  - **G2 指方向**：`POST /api/explore/runs/{runID}/steer`，`direction`（≤1000 rune）+ 可选 `attempt_seq`。`loop.Controller` 新增 `Steer/Directions/applyDirections`：方向只影响**后续**尝试，并进描述（底座约束）与 `hypothesis`（落 `ai.experiments` 可查）；已结束 run 返回 `409`，不接受永远不会生效的承诺。commit `76c98ee`。
+  - **G3 追问**：`POST /api/explore/runs/{runID}/attempts/{seq}/ask`，`question`（≤500 rune）。答案只从该次尝试自身的证据拼装（错误、参数、验证器裁决），`source:"evidence"`，不额外调模型、不编造该次从未跑过的结果；参数按键排序保证可复现；无裁决时不伪造 0 分裁决。commit `9b4e381`。
+  - **G4 标记**：`POST /api/explore/runs/{runID}/attempts/{seq}/mark`，`kind` 仅 `derive`/`promote`，`note` 自由文本（≤2000 rune）。新增自持表 `ai.explore_marks`（`run_id` + `attempt_seq` 与 `ai.experiments` 同坐标，DDL CHECK 闭合 kind 词表，索引 `(run_id, attempt_seq)`）；不是裁决、不参与校准、同一坐标允许重复标记；写面要求内存运行态里 run/seq 都存在（否则 `404`），存储未接 `503`。commit `4d27919`。
+  - **adoption / calibration 契约确认**：`POST /api/pipeline/adoption` 的 201 从 `{id, proposal_id}` 扩展为整条决策回显（含 `intervention` 自由文本与 `claimed_confidence` 概率快照，`is_holdout` 恒显式）；`GET /api/pipeline/calibration` 的 `Report` 增加 `entries` 原样快照（含 pending/holdout 行），校准口径不变。commit `2f4b8a1`。
+- **④ 契约形状（供 contracts 仓收口 openapi，本仓只写实现）**：
+  - `POST /api/explore/runs/{runID}/steer` req `{direction:string!, attempt_seq:int?}` → 200 `{run_id, accepted:true, count:int, directions:[{text, attempt_seq?, at}], applied_to:"next_attempt"}`；400/404/409。
+  - `POST /api/explore/runs/{runID}/attempts/{seq}/ask` req `{question:string!}` → 200 `{run_id, seq, question, answer, source:"evidence", evidence:{hypothesis, params, experiment_id, num_trials, ok, error?, sharpe, verdict_probability?, blocking, challenges:[]}}`；400/404。
+  - `POST /api/explore/runs/{runID}/attempts/{seq}/mark` req `{kind:"derive"|"promote"!, note?, actor?}` → 201 `{id, run_id, attempt_seq, kind, note, actor, experiment_id, created_at}`；400/404/503。
+  - `POST /api/pipeline/adoption` → 201 增加 `actor / intervention / adopted / claimed_confidence / is_holdout / outcome_hit / result_ref`；`GET /api/pipeline/calibration` → 增加 `entries: AdoptionDecision[]`。
+- **⑤ 验收（真实输出）**：`go test ./pkg/ai/loop ./cmd/ai ./pkg/aistore` 全绿；真库腿 `TestStore_ExploreMark`、`TestAdoptionLedger_EndToEnd` PASS（DSN=`.../tellurion_agent_qt`）。每条端点都有契约测试：G2 覆盖注入只影响后续/空超长缺字段 400/未知 run 404/结束 run 409；G3 覆盖失败尝试答案、blocking 证据、404/400；G4 覆盖落库字段/note 去空白/重复标记/kind 与坐标拒绝/503/三入口同坐标。**破坏验证**（逐条改坏即红、还原复绿、无残留标记）：G2 去掉 `applyDirections` 调用 → 控制器与端点用例红；G3 让 `explainAttempt` 返回空答案 → 追问用例红；G4 去掉 kind 校验 → `kind=archive` 意外 201，用例红。
+- **⑥ 边界与已知限制**：openapi 由 contracts 仓统一收口，本仓只写实现并回报形状；G3 当前只用证据拼装（未接 LLM 个性化回答）；G4 严格要求内存运行态存在，重启后旧 run 不可再标（标注本身持久，读取面由后续 UI 读 `ai.explore_marks`）。
