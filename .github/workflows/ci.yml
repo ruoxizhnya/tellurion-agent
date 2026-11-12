@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.11"
           cache: true
 
       - name: Build
@@ -27,6 +27,11 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      # X-DEP-BUMP-CONSUMERS：依赖漏洞门（kit v0.5.0 起要求 go 1.26.11）。
+      # govulncheck 按“符号级可达性”判定，只对真正被调用到的漏洞报红。
+      - name: Govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       - name: Test
         run: go test ./... -count=1
