@@ -47,6 +47,7 @@ var Tables = []string{
 	"ai.generation_chain",
 	"ai.adoption_ledger",
 	"ai.ai_costs",
+	"ai.explore_marks",
 }
 
 // statements is the execution truth: idempotent DDL, executed in order by
@@ -278,6 +279,31 @@ var statements = []string{
 		updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 		PRIMARY KEY (day, model)
 	)`,
+
+	// explore_marks — AGENT-EXPLORE-INTERVENTIONS（G4 标记，本仓自持）。
+	//
+	// 「结果流上的轻量标注」：一行 = 某次尝试上的一次人工标记。它不是裁决
+	// （采纳台账），不参与校准，也不改运行态；用途是把「我想围绕它多试 /
+	// 我想提它的权重」这件事留下来，重启后仍在。
+	//
+	// 口径：
+	//   - kind 只有 derive（派生子 run）与 promote（提升权重）两种，写面校验；
+	//   - (run_id, attempt_seq) 指向 explore 的运行态坐标，不设外键 —— 运行态
+	//     是内存态（D10=b），重启后坐标仍应可查；
+	//   - experiment_id 是该次尝试在 ai.experiments 的行 ID（0 = 当时没落库），
+	//     便于把标注 join 回证据；
+	//   - 同一坐标允许重复标记（标注是流水，不是唯一决策）。
+	`CREATE TABLE IF NOT EXISTS ai.explore_marks (
+		id            BIGSERIAL PRIMARY KEY,
+		run_id        VARCHAR(64)  NOT NULL,
+		attempt_seq   INT          NOT NULL,
+		kind          VARCHAR(16)  NOT NULL CHECK (kind IN ('derive','promote')),
+		note          TEXT         NOT NULL DEFAULT '',
+		actor         VARCHAR(100) NOT NULL DEFAULT '',
+		experiment_id BIGINT       NOT NULL DEFAULT 0,
+		created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_explore_marks_run ON ai.explore_marks(run_id, attempt_seq)`,
 }
 
 // Statements returns a copy of the DDL in execution order. Mutating the result

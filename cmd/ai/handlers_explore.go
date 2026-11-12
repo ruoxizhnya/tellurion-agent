@@ -101,9 +101,16 @@ type ExploreHandler struct {
 	// counter 是一轮已落库尝试计数的来源（实验计数持久化）。nil = 只用内存
 	// seq；生产装配从 sink 上探得 *aistore.Store 后必须接上。
 	counter loop.TrialCounter
+	// marks 是 G4 标记的落点。nil = 标记写入返回 503，而不是假装记下了。
+	marks exploreMarkSink
 
 	mu   sync.Mutex
 	runs map[string]*exploreRun
+}
+
+// exploreMarkSink 是 G4 标记的写入面。*aistore.Store 满足它。
+type exploreMarkSink interface {
+	InsertExploreMark(ctx context.Context, m aistore.ExploreMark) (aistore.ExploreMark, error)
 }
 
 // biasInput 组装这一轮的偏差维输入（P2-4）。
@@ -206,11 +213,12 @@ func (h *ExploreHandler) RegisterExploreRoutes(router *gin.RouterGroup) {
 		g.GET("/runs/:runID", h.Status)
 		g.GET("/runs/:runID/stream", h.Stream)
 		g.POST("/runs/:runID/stop", h.Stop)
-		// G2 指方向：只作用于**后续**尝试，run 续跑时把约束注入描述与假设。
-		// G3 追问：挂在被放弃的尝试上，答案只从该次尝试的证据生成。
-		// 三处上下文入口（候选卡 / 被放弃的尝试 / 结果流）共用 run_id + attempt_seq 坐标。
+		// 三条人工干预写面（B-06 G2/G3/G4）：指方向、追问、标记。
+		// 三处上下文入口（候选卡 / 被放弃的尝试 / 结果流）共用同一组坐标：
+		// run_id + attempt_seq。
 		g.POST("/runs/:runID/steer", h.Steer)
 		g.POST("/runs/:runID/attempts/:seq/ask", h.AskAttempt)
+		g.POST("/runs/:runID/attempts/:seq/mark", h.MarkAttempt)
 	}
 }
 
@@ -233,6 +241,10 @@ func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, s
 	// 实验计数同样从 sink 上探：*aistore.Store 既能写日志也能按 run 计数。
 	if tc, ok := sink.(loop.TrialCounter); ok {
 		handler.counter = tc
+	}
+	// G4 标记同样同源：接不上就 503，不假装记下了。
+	if ms, ok := sink.(exploreMarkSink); ok {
+		handler.marks = ms
 	}
 	// 因果维要真调一次模型：没配 key 就不配叙述者，那一维老老实实记成
 	// 未评估。配了却调不通也一样 —— ValidateCausal 返回的错误只记日志，
@@ -565,7 +577,7 @@ func (h *ExploreHandler) Stop(c *gin.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// B-06 人工干预写面（G2 指方向 / G3 追问）
+// B-06 人工干预三端点（G2 指方向 / G3 追问 / G4 标记）
 //
 // 三处 UI 上下文入口（候选卡、被放弃的尝试、结果流）共用同一组坐标：
 // run_id（+ attempt_seq）。语义分开，形状一致，前端不必为每个入口记一套参数。
@@ -773,6 +785,70 @@ func explainAttempt(a loop.Attempt) (string, AttemptEvidence) {
 		b.WriteString(fmt.Sprintf("统计校正用的累计尝试数：%d。", ev.NumTrials))
 	}
 	return b.String(), ev
+}
+
+// MarkAttemptRequest 是 G4 标记的请求体。
+type MarkAttemptRequest struct {
+	// Kind 只有 derive（派生子 run）与 promote（提升权重）两种。
+	Kind  string `json:"kind" binding:"required" enums:"derive,promote" example:"derive"`
+	Note  string `json:"note" example:"这一路值得围绕它多试几组"`
+	Actor string `json:"actor" example:"ruoxi"`
+}
+
+// MarkAttempt 给结果流上的一次尝试打轻量标注（G4）。
+//
+// 它不是裁决：不参与校准、不覆盖历史，同一坐标可以重复标记。写面要求 run
+// 与 seq 都能在内存运行态里对上 —— 宁可 404，也不给一个不存在的坐标留标注。
+func (h *ExploreHandler) MarkAttempt(c *gin.Context) {
+	runID := c.Param("runID")
+	if h.marks == nil {
+		httpserver.Fail(c, http.StatusServiceUnavailable, "explore mark store not configured")
+		return
+	}
+	run, ok := h.lookupRun(runID)
+	if !ok {
+		httpserver.Fail(c, http.StatusNotFound, "run not found")
+		return
+	}
+	seq, ok := parseAttemptSeq(c)
+	if !ok {
+		return
+	}
+	a, ok := findAttempt(run, seq)
+	if !ok {
+		httpserver.Fail(c, http.StatusNotFound, "attempt not found")
+		return
+	}
+
+	var req MarkAttemptRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpserver.Error(c, http.StatusBadRequest, err)
+		return
+	}
+	kind := strings.ToLower(strings.TrimSpace(req.Kind))
+	if kind != aistore.ExploreMarkDerive && kind != aistore.ExploreMarkPromote {
+		httpserver.Fail(c, http.StatusBadRequest, "kind must be derive or promote")
+		return
+	}
+	note := strings.TrimSpace(req.Note)
+	if len([]rune(note)) > 2000 {
+		httpserver.Fail(c, http.StatusBadRequest, "note is too long (max 2000 characters)")
+		return
+	}
+
+	m, err := h.marks.InsertExploreMark(c.Request.Context(), aistore.ExploreMark{
+		RunID:        runID,
+		AttemptSeq:   seq,
+		Kind:         kind,
+		Note:         note,
+		Actor:        strings.TrimSpace(req.Actor),
+		ExperimentID: a.ExperimentID,
+	})
+	if err != nil {
+		httpserver.Error(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusCreated, m)
 }
 
 // lookupRun 取内存运行态。

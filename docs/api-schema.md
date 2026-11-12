@@ -24,6 +24,7 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 | POST | `/api/explore/runs/{runID}/stop` | 停止（只停调度，不 cancel 已开跑的回测） |
 | POST | `/api/explore/runs/{runID}/steer` | G2 指方向：把人的约束注入后续尝试 |
 | POST | `/api/explore/runs/{runID}/attempts/{seq}/ask` | G3 追问：针对被放弃尝试的证据问答 |
+| POST | `/api/explore/runs/{runID}/attempts/{seq}/mark` | G4 标记：结果流上的轻量标注（derive/promote） |
 | POST | `/api/copilot/generate` | 自然语言 → 代码生成（异步 job） |
 | GET | `/api/copilot/generate/{job_id}` | 生成任务状态 |
 | GET | `/api/copilot/stats` | Copilot 生成统计（接受率） |
@@ -110,6 +111,17 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 响应 `200` `AttemptAnswerResponse`：`run_id` / `seq` / `question` / `answer` / `source`（当前恒为 `evidence`）/ `evidence`。
 `evidence`：`hypothesis` / `params` / `experiment_id` / `num_trials` / `ok` / `error`（仅失败）/ `sharpe` / `verdict_probability`（仅当次尝试有裁决，缺失即未评估）/ `blocking` / `challenges`（阻断级质疑，格式「维度：消息」）。
 答案只从这次尝试自身的证据拼装（错误、参数、验证器裁决），不额外调模型、不编造该次从未跑过的结果；参数按键排序保证同一输入同一段文字。run 或 attempt 不存在 → `404`；`seq` 非法 → `400`。
+
+**`POST /api/explore/runs/{runID}/attempts/{seq}/mark`** — G4 标记。请求体 `MarkAttemptRequest`：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `kind` | string | 是 | 仅 `derive`（派生子 run）/ `promote`（提升权重）；其他值 → `400` |
+| `note` | string | 否 | 自由文本，≤2000 字符；首尾空白会被去掉 |
+| `actor` | string | 否 | 标注者 |
+
+响应 `201` `ExploreMark`：`{"id": <int64>, "run_id": "...", "attempt_seq": <int>, "kind": "<derive|promote>", "note": "...", "actor": "...", "experiment_id": <int64>, "created_at": "<RFC3339>"}`。
+写面要求内存运行态里 run 与 `attempt_seq` 都存在 → 否则 `404`；台账存储未接 → `503`。**同一坐标允许重复标记**：它是流水标注，不是唯一决策，也不参与校准。
 
 ### 1.2 Copilot（`cmd/ai/handlers_copilot.go` · `pkg/copilot`）
 
