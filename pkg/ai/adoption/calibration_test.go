@@ -1,13 +1,55 @@
 package adoption
 
 import (
+	"encoding/json"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"tellurion-agent/pkg/aistore"
 )
 
 func hit(v bool) *bool { return &v }
+
+// TestReport_EntriesJSONKeysAreSnakeCase 锁序列化契约：calibration.entries[]
+// 直接序列化 aistore.AdoptionDecision，缺少 json tag 会冒 PascalCase 键，
+// 与 docs/api-schema.md 及 adoption 201 回显三处不一致。以后加字段也必须
+// 在这里登记 snake_case 键名。
+func TestReport_EntriesJSONKeysAreSnakeCase(t *testing.T) {
+	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+	r := Compute([]aistore.AdoptionDecision{{
+		ID: 7, ProposalID: "p1", Actor: "alice", Intervention: "lookback 20->60",
+		Adopted: true, ClaimedConfidence: 0.6, IsHoldout: false,
+		OutcomeHit: hit(true), ResultRef: "exp:12",
+		CreatedAt: now, ResolvedAt: &now,
+	}})
+
+	raw, err := json.Marshal(r)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+
+	entries, ok := body["entries"].([]any)
+	require.True(t, ok, "entries 必须是数组")
+	require.Len(t, entries, 1)
+	entry, ok := entries[0].(map[string]any)
+	require.True(t, ok)
+
+	keys := make([]string, 0, len(entry))
+	for k := range entry {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	assert.Equal(t, []string{
+		"actor", "adopted", "claimed_confidence", "created_at", "id",
+		"intervention", "is_holdout", "outcome_hit", "proposal_id",
+		"resolved_at", "result_ref",
+	}, keys, "entries[] 的键名必须是 snake_case，且字段集合与文档一致")
+}
 
 // TestCompute_CalibrationAndHoldoutIsolation 锁「校准误差 + holdout 隔离」口径。
 //

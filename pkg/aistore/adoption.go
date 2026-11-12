@@ -16,19 +16,22 @@ import (
 var ErrDuplicateAdoption = errors.New("adoption decision already recorded")
 
 // AdoptionDecision 是 ai.adoption_ledger 的一行：一个提案的一次人工裁决。
+//
+// json tag 必须与 docs/api-schema.md 一致：`calibration.entries[]` 直接序列化
+// 这个结构，缺 tag 会冒出 PascalCase 键，和文档、201 回显三处对不上。
 type AdoptionDecision struct {
-	ID                int64
-	ProposalID        string
-	Actor             string
-	Intervention      string
-	Adopted           bool
-	ClaimedConfidence float64
-	IsHoldout         bool
+	ID                int64   `json:"id"`
+	ProposalID        string  `json:"proposal_id"`
+	Actor             string  `json:"actor"`
+	Intervention      string  `json:"intervention"`
+	Adopted           bool    `json:"adopted"`
+	ClaimedConfidence float64 `json:"claimed_confidence"`
+	IsHoldout         bool    `json:"is_holdout"`
 	// OutcomeHit 为空 = 结果尚未回填；非空才算「已对账」。
-	OutcomeHit *bool
-	ResultRef  string
-	CreatedAt  time.Time
-	ResolvedAt *time.Time
+	OutcomeHit *bool      `json:"outcome_hit"`
+	ResultRef  string     `json:"result_ref"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ResolvedAt *time.Time `json:"resolved_at"`
 }
 
 // InsertAdoptionDecision 落一行台账。proposal_id 冲突时返回 ErrDuplicateAdoption。

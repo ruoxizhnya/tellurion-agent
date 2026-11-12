@@ -223,7 +223,7 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 }
 ```
 
-`entries` 是台账**原样快照**（含 pending 与 holdout 行，与校准分母口径不同）：汇总值不保留自由文本，快照必须保留，UI 才能把每个数字对回「哪次干预、当时声称多少」。`adoption_decision` 字段见上一条 POST 请求体。
+`entries` 是台账**原样快照**（含 pending 与 holdout 行，与校准分母口径不同）：汇总值不保留自由文本，快照必须保留，UI 才能把每个数字对回「哪次干预、当时声称多少」。每条决策的键名固定为 snake_case：`id / proposal_id / actor / intervention / adopted / claimed_confidence / is_holdout / outcome_hit / result_ref / created_at / resolved_at`（`outcome_hit` 与 `resolved_at` 未回填时为 `null`，键始终存在）。
 
 口径（实现在 [`pkg/ai/adoption`](../pkg/ai/adoption)）：校准集 = 已回填结果且 `is_holdout=false` 的行；`calibration_error = |hit_rate - claimed_rate|`；`brier_score = mean((claimed_confidence - outcome)^2)`；`is_holdout=true` 的行只进 `holdout`，不参与校准；`outcome_hit` 为空的行只进 `pending`。未接台账时 `503`。
 

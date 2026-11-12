@@ -37,6 +37,7 @@
 | AGENT-CAUSAL-PARSE-TESTS | 因果叙述者解析逻辑无直测，验证器侧用假叙述者 | 2026-11-12 | 见本条 | [施工记录](#AGENT-CAUSAL-PARSE-TESTS) |
 | AGENT-EXPLORE-INTERVENTIONS | UI 子台账 B-06 的三条干预写面（G2 指方向 / G3 追问 / G4 标记）缺端点 | 2026-11-12 | `76c98ee`、`9b4e381`、`4d27919`、`2f4b8a1` | [施工记录](#AGENT-EXPLORE-INTERVENTIONS) |
 | AGENT-REVIEW-PENDING-SOURCE | core「待审阅 N」聚合面已定稿，agent 缺上游读面 `GET /api/explore/review/pending` | 2026-11-12 | 见本条 | [施工记录](#AGENT-REVIEW-PENDING-SOURCE) |
+| AGENT-ADOPTION-DECISION-JSON-TAGS | `AdoptionDecision` 缺 json tag，`calibration.entries[]` 实际输出 PascalCase，与 api-schema 不一致 | 2026-11-12 | 见本条 | [施工记录](#AGENT-ADOPTION-DECISION-JSON-TAGS) |
 
 ---
 
@@ -921,3 +922,12 @@
 - **④ 口径与边界（须产品确认的一条）**：`pending` 只数**采纳台账里结果未回填**（`outcome_hit IS NULL`）的行 —— 这是本仓唯一持久、可机器判定的待办队列。探索候选的运行态是纯内存（D10=b），且 `ai.experiments` 与 `ai.adoption_ledger` 之间没有稳定关联键（`result_ref` 是自由文本），把它算进来只能靠猜测的 join，会让角标时真时假。若产品要的是「未采纳候选数」，需先补持久候选索引 + 关联键，另立单。
 - **⑤ 验收（真实输出）**：`go test ./cmd/ai -run ReviewPending` 4 组 PASS（形状、真 0 是数字、未接 503、取数失败 500）；真库腿 `TestStore_CountPendingReviews` PASS（前后差值断言 = +2，已回填行不计入）。**破坏验证**：SQL 去掉 `WHERE outcome_hit IS NULL` → 真库腿红；JSON tag `pending` 改成别的 → 契约用例红；均还原复绿、无残留标记。
 - **⑥ 契约形状（与 core 已定稿一致，无需 contracts 新增）**：`GET /api/explore/review/pending` → `200 {"pending": int, "as_of": RFC3339}`；`503`/`500` 由 core 编码为源 `unavailable`。
+
+<a id="AGENT-ADOPTION-DECISION-JSON-TAGS"></a>
+### AGENT-ADOPTION-DECISION-JSON-TAGS · `AdoptionDecision` 序列化键名与文档不一致 [P1] ✅
+
+- **① 目标**：contracts 形状核对发现 `aistore.AdoptionDecision` 没有 json tag，`GET /api/pipeline/calibration` 的 `entries[]` 实际序列化为 `ID` / `ProposalID` / `CreatedAt` 等 PascalCase，而 `docs/api-schema.md` 与 `POST /api/pipeline/adoption` 的 201 回显都是 snake_case。
+- **② 外部消费约定核查**：全仓检索 `AdoptionDecision` 的序列化点只有两处 —— `POST /api/pipeline/adoption` 的 201（`gin.H`，本就是 snake_case）与 `calibration.Report.Entries`（直接序列化结构体）；`tellurion-ui` 当前无任何 `AdoptionDecision` 字段消费（`claimed_confidence` / `result_ref` 均无命中）。**不存在必须保留 PascalCase 的外部约定**，按仓内其它 DTO 惯例统一 snake_case。
+- **③ 实现**：给 `AdoptionDecision` 补 11 个 snake_case tag（`id / proposal_id / actor / intervention / adopted / claimed_confidence / is_holdout / outcome_hit / result_ref / created_at / resolved_at`），`outcome_hit`、`resolved_at` 不加 `omitempty` —— 未回填时显式 `null`，与既有「`is_holdout` 恒显式」一致。
+- **④ 验收**：新增 `pkg/ai/adoption/calibration_test.go:TestReport_EntriesJSONKeysAreSnakeCase`，对实际 `json.Marshal(Report)` 的 `entries[0]` 键集合做精确断言（排序后逐项相等，PascalCase 混入即红）。`go test ./pkg/aistore ./pkg/ai/adoption ./cmd/ai` 全绿。**破坏验证**：把 `proposal_id` 的 tag 改成 `proposalId` → 该用例红；还原复绿、无残留标记。
+- **⑤ 契约形状（不变，只是实际输出归位）**：`calibration.entries[]` 每条键名固定为上述 11 个 snake_case；`adoption` 201 回显字段不变。无 contracts 仓改动需求。
