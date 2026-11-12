@@ -306,7 +306,7 @@ func (i *Intent) validate() error {
 // ToYAML converts the intent to YAML configuration format
 func (i *Intent) ToYAML() string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("strategy:\n"))
+	b.WriteString("strategy:\n")
 	b.WriteString(fmt.Sprintf("  name: %s\n", i.StrategyName))
 	b.WriteString(fmt.Sprintf("  type: %s\n", i.StrategyType))
 	b.WriteString(fmt.Sprintf("  description: %s\n", i.Description))
@@ -314,14 +314,14 @@ func (i *Intent) ToYAML() string {
 	b.WriteString(fmt.Sprintf("  timeframe: %s\n", i.Timeframe))
 
 	if len(i.Indicators) > 0 {
-		b.WriteString(fmt.Sprintf("  indicators:\n"))
+		b.WriteString("  indicators:\n")
 		for _, ind := range i.Indicators {
 			b.WriteString(fmt.Sprintf("    - %s\n", ind))
 		}
 	}
 
 	if len(i.Parameters) > 0 {
-		b.WriteString(fmt.Sprintf("  parameters:\n"))
+		b.WriteString("  parameters:\n")
 		for _, p := range i.Parameters {
 			b.WriteString(fmt.Sprintf("    %s:\n", p.Name))
 			b.WriteString(fmt.Sprintf("      type: %s\n", p.Type))
@@ -339,7 +339,7 @@ func (i *Intent) ToYAML() string {
 	}
 
 	if i.RiskConstraints != nil {
-		b.WriteString(fmt.Sprintf("  risk:\n"))
+		b.WriteString("  risk:\n")
 		if i.RiskConstraints.MaxPositions != nil {
 			b.WriteString(fmt.Sprintf("    max_positions: %d\n", *i.RiskConstraints.MaxPositions))
 		}

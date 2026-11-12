@@ -856,9 +856,7 @@ func parseUniverse(universe string) []string {
 	if universe == "" || universe == "all" {
 		return nil
 	}
-	if strings.HasPrefix(universe, "universe:") {
-		universe = strings.TrimPrefix(universe, "universe:")
-	}
+	universe = strings.TrimPrefix(universe, "universe:")
 	parts := strings.Split(universe, ",")
 	result := make([]string, 0, len(parts))
 	for _, p := range parts {

@@ -37,13 +37,6 @@ func equityCurve(yearly []float64) []domain.PortfolioValue {
 	return out
 }
 
-func resultWithCurve(sharpes ...float64) *domain.BacktestResult {
-	return &domain.BacktestResult{
-		SharpeRatio:     sharpes[0],
-		PortfolioValues: equityCurve(sharpes),
-	}
-}
-
 func neighbors(sharpes ...float64) []NeighborPoint {
 	out := make([]NeighborPoint, 0, len(sharpes))
 	for _, s := range sharpes {

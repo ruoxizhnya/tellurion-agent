@@ -46,8 +46,7 @@ func main() {
 	if err != nil {
 		preLogger.Fatal().Err(err).Msg("Failed to read config file")
 	}
-	kitlogging.Init(v.GetString("logging.level"), v.GetString("logging.format"))
-	logger := kitlogging.Logger
+	logger := kitlogging.New(v.GetString("logging.level"), v.GetString("logging.format"), os.Stdout)
 	m := initMetrics(logger)
 
 	// 出站地址启动期体检：宿主机上若还留着容器 DNS（data-service 等），

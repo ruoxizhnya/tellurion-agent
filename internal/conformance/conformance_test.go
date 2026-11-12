@@ -112,6 +112,7 @@ func locateCorpus(t *testing.T) string {
 	if bin, err := exec.LookPath("go"); err == nil {
 		tryGo(bin)
 	}
+	//lint:ignore SA1019 runtime.GOROOT 是不依赖外部 go 进程即可拿到安装根的兜底；exec.LookPath 失败时仍能从 GOROOT/bin 找 go，改成 `go env GOROOT` 会丢掉这条兜底
 	if root := runtime.GOROOT(); root != "" {
 		for _, name := range []string{"go", "go.exe"} {
 			bin := filepath.Join(root, "bin", name)
@@ -368,18 +369,6 @@ func decodeStrict(raw json.RawMessage, dst any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	return dec.Decode(dst)
-}
-
-func parseTimeArg(t *testing.T, c caseSpec, field, value string) time.Time {
-	t.Helper()
-	if value == "" {
-		return time.Time{}
-	}
-	ts, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		t.Fatalf("用例 %q 的 %s=%q 不是 RFC3339: %v", c.ID, field, value, err)
-	}
-	return ts
 }
 
 func parseDateArg(t *testing.T, c caseSpec, field, value string) time.Time {

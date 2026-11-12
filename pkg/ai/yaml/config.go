@@ -43,13 +43,13 @@ func ParseConfig(yamlStr string) (*Config, error) {
 
 	// Validate required top-level section.
 	if config.Strategy.Name == "" && config.Strategy.Type == "" && config.Strategy.Description == "" {
-		return nil, fmt.Errorf("yaml: ParseConfig: missing required section: strategy:")
+		return nil, fmt.Errorf("yaml: ParseConfig: missing required section: strategy")
 	}
 
 	// Validate required strategy.name field. We treat name as the
 	// primary identifier (it becomes a log label downstream).
 	if config.Strategy.Name == "" {
-		return nil, fmt.Errorf("yaml: ParseConfig: missing required strategy field: name:")
+		return nil, fmt.Errorf("yaml: ParseConfig: missing required strategy field: name")
 	}
 
 	return &config, nil

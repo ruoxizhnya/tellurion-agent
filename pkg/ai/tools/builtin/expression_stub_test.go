@@ -22,11 +22,9 @@ import (
 
 // expressionStubVerdict 是替身为某些表达式给出的固定判定。
 type expressionStubVerdict struct {
-	valid  bool
-	error  string
-	stage  string
-	inputs []string
-	ast    string
+	valid bool
+	error string
+	stage string
 }
 
 // fieldsHintSuffix 复刻 core 闸门错误里附带的字段清单（registry.go 的

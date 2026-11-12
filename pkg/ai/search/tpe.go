@@ -4,7 +4,6 @@ import (
 	"math"
 	"math/rand"
 	"sort"
-	"sync"
 )
 
 // TPEOptimizer implements Tree-structured Parzen Estimator for Bayesian optimization.
@@ -12,7 +11,6 @@ type TPEOptimizer struct {
 	rng            *rand.Rand
 	gamma          float64 // Quantile for splitting observations
 	nStartupTrials int
-	mu             sync.Mutex
 }
 
 // NewTPEOptimizer creates a new TPE optimizer.

@@ -20,7 +20,6 @@ import (
 // Narrator 用 LLM 讲机制 + 下可证伪的预测。
 type Narrator struct {
 	client *ai.Client
-	model  string
 }
 
 // New 构造叙述者。client 未配置（无 API key）时 Narrate 会直接失败 ——

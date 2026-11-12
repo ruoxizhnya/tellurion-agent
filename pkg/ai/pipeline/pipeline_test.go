@@ -888,7 +888,7 @@ data:
 	// The returned err is the original ParseConfig error; the wrapped
 	// "YAML parse failed: ..." message is stored in result.BuildError
 	// by p.fail (same pattern as Execute/ExecuteAsync).
-	assert.Contains(t, err.Error(), "missing required section: strategy:")
+	assert.Contains(t, err.Error(), "missing required section: strategy")
 	assert.Contains(t, result.BuildError, "YAML parse failed")
 }
 

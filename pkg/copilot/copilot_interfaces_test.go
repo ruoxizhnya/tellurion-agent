@@ -50,7 +50,6 @@ type stubLLMClient struct {
 	fixResponse      string
 	fixErr           error
 
-	mu            sync.Mutex
 	generateCalls int32
 	fixCalls      int32
 }

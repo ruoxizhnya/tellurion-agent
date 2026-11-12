@@ -361,10 +361,6 @@ func (c *Client) ChatWithUsage(ctx context.Context, messages []ChatMessage) (str
 	start := time.Now()
 	attemptCount := 0
 	var lastUsage Usage
-	type chatResult struct {
-		text  string
-		usage Usage
-	}
 	result, status, err := retry.Do(ctx, func(ctx context.Context, attempt int) (string, int, error) {
 		attemptCount = attempt
 		span.SetAttribute(AttrAIRetryCount, attempt-1)
@@ -417,14 +413,6 @@ func (c *Client) ChatWithUsage(ctx context.Context, messages []ChatMessage) (str
 	}
 
 	return result, lastUsage, err
-}
-
-// doChatOnce performs a single HTTP request (no retry, no rate limit).
-// Used internally by Chat() and ChatWithUsage(); exported via the
-// retryable signature.
-func (c *Client) doChatOnce(ctx context.Context, messages []ChatMessage) (string, int, error) {
-	text, _, status, err := c.doChatOnceFull(ctx, messages)
-	return text, status, err
 }
 
 // doChatOnceWithUsage is the version that returns usage. Returns

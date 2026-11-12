@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -19,8 +18,7 @@ import (
 // The implementation wraps `golang.org/x/time/rate.Limiter` (already a
 // transitive dep through cron/v3) — no new dependency introduced.
 type Limiter struct {
-	mu sync.Mutex
-	l  *rate.Limiter
+	l *rate.Limiter
 	// Now is overridable for tests; defaults to time.Now.
 	Now func() time.Time
 }

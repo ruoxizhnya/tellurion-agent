@@ -468,11 +468,14 @@ func TestGetMarketRegimeTool_JSONMarshalable(t *testing.T) {
 	assert.False(t, hasBars, "输出里不该有 bars_analyzed")
 }
 
+// testCtxKey 是测试专用 context key 类型，避免用内建 string 作 key（SA1029）。
+type testCtxKey struct{}
+
 func TestGetMarketRegimeTool_ContextPropagatedToClient(t *testing.T) {
 	regime := &mockRegimeClient{regime: &domain.MarketRegime{}}
 	tool := NewGetMarketRegimeTool(regime)
 
-	ctx := context.WithValue(context.Background(), "testkey", "testval")
+	ctx := context.WithValue(context.Background(), testCtxKey{}, "testval")
 	_, err := tool.Execute(ctx, map[string]interface{}{
 		"start_date": "2023-01-01",
 		"end_date":   "2024-01-01",
