@@ -103,9 +103,17 @@ type ExploreHandler struct {
 	counter loop.TrialCounter
 	// marks 是 G4 标记的落点。nil = 标记写入返回 503，而不是假装记下了。
 	marks exploreMarkSink
+	// pending 是顶栏「待审阅 N」的取数面。nil = 读面 503，由 core 聚合层
+	// 编码成 unavailable（UI 显示「—」），不给一个看起来正常的 0。
+	pending reviewPendingSource
 
 	mu   sync.Mutex
 	runs map[string]*exploreRun
+}
+
+// reviewPendingSource 是「待审阅 N」的取数面。*aistore.Store 满足它。
+type reviewPendingSource interface {
+	CountPendingReviews(ctx context.Context) (int, error)
 }
 
 // exploreMarkSink 是 G4 标记的写入面。*aistore.Store 满足它。
@@ -219,6 +227,8 @@ func (h *ExploreHandler) RegisterExploreRoutes(router *gin.RouterGroup) {
 		g.POST("/runs/:runID/steer", h.Steer)
 		g.POST("/runs/:runID/attempts/:seq/ask", h.AskAttempt)
 		g.POST("/runs/:runID/attempts/:seq/mark", h.MarkAttempt)
+		// 顶栏「待审阅 N」的上游读面（core /api/review/pending 的 ai_explore 源）。
+		g.GET("/review/pending", h.ReviewPending)
 	}
 }
 
@@ -245,6 +255,10 @@ func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, s
 	// G4 标记同样同源：接不上就 503，不假装记下了。
 	if ms, ok := sink.(exploreMarkSink); ok {
 		handler.marks = ms
+	}
+	// 待审阅计数同样从 sink 上探；接不上就让读面 503，由 core 报 unavailable。
+	if ps, ok := sink.(reviewPendingSource); ok {
+		handler.pending = ps
 	}
 	// 因果维要真调一次模型：没配 key 就不配叙述者，那一维老老实实记成
 	// 未评估。配了却调不通也一样 —— ValidateCausal 返回的错误只记日志，
@@ -879,4 +893,31 @@ func findAttempt(run *exploreRun, seq int) (loop.Attempt, bool) {
 		}
 	}
 	return loop.Attempt{}, false
+}
+
+// ReviewPendingResponse 是顶栏「待审阅 N」的上游契约（core 的 ai_explore 源）。
+type ReviewPendingResponse struct {
+	Pending int    `json:"pending" example:"3"`
+	AsOf    string `json:"as_of" example:"2026-11-12T09:00:00Z"`
+}
+
+// ReviewPending 返回待审阅条数。
+//
+// 口径见 aistore.CountPendingReviews：台账里 outcome_hit 为空的行 = 结果尚未
+// 回填、等待人工复盘。0 是可信答案（真的没有待审）；取不到数时返回 5xx，
+// 让 core 聚合层如实标成 unavailable —— 不在这里把「不知道」写成 0。
+func (h *ExploreHandler) ReviewPending(c *gin.Context) {
+	if h.pending == nil {
+		httpserver.Fail(c, http.StatusServiceUnavailable, "review pending source not configured")
+		return
+	}
+	n, err := h.pending.CountPendingReviews(c.Request.Context())
+	if err != nil {
+		httpserver.Error(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, ReviewPendingResponse{
+		Pending: n,
+		AsOf:    time.Now().UTC().Format(time.RFC3339),
+	})
 }

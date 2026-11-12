@@ -53,6 +53,22 @@ func (s *Store) InsertAdoptionDecision(ctx context.Context, d AdoptionDecision) 
 	return id, nil
 }
 
+// CountPendingReviews 返回「待审阅」条数。
+//
+// 口径：台账里 outcome_hit 为空 = 结果尚未回填、等待人工复盘/对账的行。
+// 这是本仓唯一持久、可机器判定的待办队列：探索候选的运行态是纯内存
+// （D10=b），且没有到台账的稳定关联键，把猜测的 join 当成「待审阅」会
+// 让角标时真时假 —— 宁可只数确定的那部分，也不谎报。
+func (s *Store) CountPendingReviews(ctx context.Context) (int, error) {
+	var n int
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*) FROM ai.adoption_ledger WHERE outcome_hit IS NULL
+	`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("failed to count pending reviews: %w", err)
+	}
+	return n, nil
+}
+
 // ListAdoptionLedger 按写入顺序返回全部台账行。读面自己决定怎么分组
 // （校准集 / holdout / pending），存储层不替它筛。
 func (s *Store) ListAdoptionLedger(ctx context.Context) ([]AdoptionDecision, error) {

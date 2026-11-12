@@ -36,6 +36,7 @@
 | AGENT-EXPLORE-STATE-REAP | explore 运行态纯内存，崩溃即孤儿（D10=b） | 2026-11-12 | 见本条 | [施工记录](#AGENT-EXPLORE-STATE-REAP) |
 | AGENT-CAUSAL-PARSE-TESTS | 因果叙述者解析逻辑无直测，验证器侧用假叙述者 | 2026-11-12 | 见本条 | [施工记录](#AGENT-CAUSAL-PARSE-TESTS) |
 | AGENT-EXPLORE-INTERVENTIONS | UI 子台账 B-06 的三条干预写面（G2 指方向 / G3 追问 / G4 标记）缺端点 | 2026-11-12 | `76c98ee`、`9b4e381`、`4d27919`、`2f4b8a1` | [施工记录](#AGENT-EXPLORE-INTERVENTIONS) |
+| AGENT-REVIEW-PENDING-SOURCE | core「待审阅 N」聚合面已定稿，agent 缺上游读面 `GET /api/explore/review/pending` | 2026-11-12 | 见本条 | [施工记录](#AGENT-REVIEW-PENDING-SOURCE) |
 
 ---
 
@@ -907,3 +908,16 @@
   - `POST /api/pipeline/adoption` → 201 增加 `actor / intervention / adopted / claimed_confidence / is_holdout / outcome_hit / result_ref`；`GET /api/pipeline/calibration` → 增加 `entries: AdoptionDecision[]`。
 - **⑤ 验收（真实输出）**：`go test ./pkg/ai/loop ./cmd/ai ./pkg/aistore` 全绿；真库腿 `TestStore_ExploreMark`、`TestAdoptionLedger_EndToEnd` PASS（DSN=`.../tellurion_agent_qt`）。每条端点都有契约测试：G2 覆盖注入只影响后续/空超长缺字段 400/未知 run 404/结束 run 409；G3 覆盖失败尝试答案、blocking 证据、404/400；G4 覆盖落库字段/note 去空白/重复标记/kind 与坐标拒绝/503/三入口同坐标。**破坏验证**（逐条改坏即红、还原复绿、无残留标记）：G2 去掉 `applyDirections` 调用 → 控制器与端点用例红；G3 让 `explainAttempt` 返回空答案 → 追问用例红；G4 去掉 kind 校验 → `kind=archive` 意外 201，用例红。
 - **⑥ 边界与已知限制**：openapi 由 contracts 仓统一收口，本仓只写实现并回报形状；G3 当前只用证据拼装（未接 LLM 个性化回答）；G4 严格要求内存运行态存在，重启后旧 run 不可再标（标注本身持久，读取面由后续 UI 读 `ai.explore_marks`）。
+
+<a id="AGENT-REVIEW-PENDING-SOURCE"></a>
+### AGENT-REVIEW-PENDING-SOURCE · 顶栏「待审阅 N」的 agent 上游读面 [P1] ✅
+
+- **① 目标**：core 已定稿 `GET /api/review/pending` 多源聚合（`CORE-REVIEW-PENDING-AGGREGATE`），其 `ai_explore` 源要求 agent 提供 `GET {ai_service.url}/api/explore/review/pending` → `200 {"pending": <int>, "as_of": "<RFC3339>"}`。本条补齐该上游读面。
+- **② 契约来源（先确认再实现，不自行发明）**：`tellurion:docs/openapi.yaml`（`/api/review/pending` 的 description 明写上游契约）与 `tellurion:cmd/analysis/handlers_review_pending.go`（`aiReviewPendingResponse` 只认 `pending` / `as_of`；非 200、缺字段、负数一律转 `unavailable`）。
+- **③ 实现**：
+  - `pkg/aistore/adoption.go` 新增 `CountPendingReviews`：`SELECT count(*) FROM ai.adoption_ledger WHERE outcome_hit IS NULL`。
+  - `cmd/ai/handlers_explore.go` 新增 `GET /api/explore/review/pending` 与 `reviewPendingSource` 接口，装配从 sink 上探得 `*aistore.Store` 后注入；响应 `{pending, as_of}`，`as_of` 统一 UTC。
+  - 错误面：存储未接 → `503`；取数失败 → `500`；真的 0 条 → `200 {"pending":0}`（不让 core 误判为「不知道」）。
+- **④ 口径与边界（须产品确认的一条）**：`pending` 只数**采纳台账里结果未回填**（`outcome_hit IS NULL`）的行 —— 这是本仓唯一持久、可机器判定的待办队列。探索候选的运行态是纯内存（D10=b），且 `ai.experiments` 与 `ai.adoption_ledger` 之间没有稳定关联键（`result_ref` 是自由文本），把它算进来只能靠猜测的 join，会让角标时真时假。若产品要的是「未采纳候选数」，需先补持久候选索引 + 关联键，另立单。
+- **⑤ 验收（真实输出）**：`go test ./cmd/ai -run ReviewPending` 4 组 PASS（形状、真 0 是数字、未接 503、取数失败 500）；真库腿 `TestStore_CountPendingReviews` PASS（前后差值断言 = +2，已回填行不计入）。**破坏验证**：SQL 去掉 `WHERE outcome_hit IS NULL` → 真库腿红；JSON tag `pending` 改成别的 → 契约用例红；均还原复绿、无残留标记。
+- **⑥ 契约形状（与 core 已定稿一致，无需 contracts 新增）**：`GET /api/explore/review/pending` → `200 {"pending": int, "as_of": RFC3339}`；`503`/`500` 由 core 编码为源 `unavailable`。
