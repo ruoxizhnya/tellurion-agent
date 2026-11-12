@@ -23,6 +23,7 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 | GET | `/api/explore/runs/{runID}/stream` | SSE 推状态（`progress` / `complete`） |
 | POST | `/api/explore/runs/{runID}/stop` | 停止（只停调度，不 cancel 已开跑的回测） |
 | POST | `/api/explore/runs/{runID}/steer` | G2 指方向：把人的约束注入后续尝试 |
+| POST | `/api/explore/runs/{runID}/attempts/{seq}/ask` | G3 追问：针对被放弃尝试的证据问答 |
 | POST | `/api/copilot/generate` | 自然语言 → 代码生成（异步 job） |
 | GET | `/api/copilot/generate/{job_id}` | 生成任务状态 |
 | GET | `/api/copilot/stats` | Copilot 生成统计（接受率） |
@@ -99,6 +100,16 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 
 响应 `200`：`{"run_id": "...", "accepted": true, "count": <int>, "directions": [{"text": "...", "attempt_seq": <int?>, "at": "<RFC3339>"}], "applied_to": "next_attempt"}`。
 只作用于**后续**尝试：方向并进后续尝试的描述（底座约束）与 `hypothesis`（落 `ai.experiments` 可查），已跑完的尝试不追溯改写。run 不存在 → `404`；run 已结束 → `409`（没有可以作用的下一次尝试）。
+
+**`POST /api/explore/runs/{runID}/attempts/{seq}/ask`** — G3 追问。请求体 `AttemptQuestionRequest`：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `question` | string | 是 | ≤500 字符；空/超长 → `400` |
+
+响应 `200` `AttemptAnswerResponse`：`run_id` / `seq` / `question` / `answer` / `source`（当前恒为 `evidence`）/ `evidence`。
+`evidence`：`hypothesis` / `params` / `experiment_id` / `num_trials` / `ok` / `error`（仅失败）/ `sharpe` / `verdict_probability`（仅当次尝试有裁决，缺失即未评估）/ `blocking` / `challenges`（阻断级质疑，格式「维度：消息」）。
+答案只从这次尝试自身的证据拼装（错误、参数、验证器裁决），不额外调模型、不编造该次从未跑过的结果；参数按键排序保证同一输入同一段文字。run 或 attempt 不存在 → `404`；`seq` 非法 → `400`。
 
 ### 1.2 Copilot（`cmd/ai/handlers_copilot.go` · `pkg/copilot`）
 

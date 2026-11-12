@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -205,8 +207,10 @@ func (h *ExploreHandler) RegisterExploreRoutes(router *gin.RouterGroup) {
 		g.GET("/runs/:runID/stream", h.Stream)
 		g.POST("/runs/:runID/stop", h.Stop)
 		// G2 指方向：只作用于**后续**尝试，run 续跑时把约束注入描述与假设。
-		// 三处上下文入口（候选卡 / 被放弃的尝试 / 结果流）共用 run_id 坐标。
+		// G3 追问：挂在被放弃的尝试上，答案只从该次尝试的证据生成。
+		// 三处上下文入口（候选卡 / 被放弃的尝试 / 结果流）共用 run_id + attempt_seq 坐标。
 		g.POST("/runs/:runID/steer", h.Steer)
+		g.POST("/runs/:runID/attempts/:seq/ask", h.AskAttempt)
 	}
 }
 
@@ -561,7 +565,10 @@ func (h *ExploreHandler) Stop(c *gin.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// B-06 人工干预写面（G2 指方向）
+// B-06 人工干预写面（G2 指方向 / G3 追问）
+//
+// 三处 UI 上下文入口（候选卡、被放弃的尝试、结果流）共用同一组坐标：
+// run_id（+ attempt_seq）。语义分开，形状一致，前端不必为每个入口记一套参数。
 // ---------------------------------------------------------------------------
 
 // SteerRequest 是 G2 指方向的请求体。
@@ -617,10 +624,183 @@ func (h *ExploreHandler) Steer(c *gin.Context) {
 	})
 }
 
+// AttemptQuestionRequest 是 G3 追问的请求体。
+type AttemptQuestionRequest struct {
+	Question string `json:"question" binding:"required" example:"为什么放弃这个方向？"`
+}
+
+// AttemptEvidence 是回答所依据的证据快照 —— 追问不能是又一段无出处的故事。
+type AttemptEvidence struct {
+	Hypothesis   string         `json:"hypothesis"`
+	Params       map[string]any `json:"params"`
+	ExperimentID int64          `json:"experiment_id"`
+	NumTrials    int            `json:"num_trials"`
+	OK           bool           `json:"ok"`
+	Error        string         `json:"error,omitempty"`
+	Sharpe       float64        `json:"sharpe"`
+	// VerdictProbability / Blocking / Challenges 是验证器裁决的摘录；
+	// 没有裁决时整体缺席，而不是给一个 0 分裁决。
+	VerdictProbability *float64 `json:"verdict_probability,omitempty"`
+	Blocking           int      `json:"blocking"`
+	Challenges         []string `json:"challenges"`
+}
+
+// AttemptAnswerResponse 是 G3 的回答。
+type AttemptAnswerResponse struct {
+	RunID    string `json:"run_id"`
+	Seq      int    `json:"seq"`
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+	// Source 说明答案从哪来。当前只有 evidence —— 用这次尝试的落库坐标、
+	// 参数、错误与裁决拼出来，不额外调模型，因此可复现。
+	Source   string          `json:"source"`
+	Evidence AttemptEvidence `json:"evidence"`
+}
+
+// AskAttempt 回答「关于某次尝试的一个问题」（G3）。
+//
+// 追问挂在**被放弃的尝试**上：答案只从这次尝试自身的证据生成（错误、参数、
+// 验证器质疑），不编造那一次从未跑过的结果。没有 LLM 也能给出确定答案。
+func (h *ExploreHandler) AskAttempt(c *gin.Context) {
+	runID := c.Param("runID")
+	run, ok := h.lookupRun(runID)
+	if !ok {
+		httpserver.Fail(c, http.StatusNotFound, "run not found")
+		return
+	}
+	seq, ok := parseAttemptSeq(c)
+	if !ok {
+		return
+	}
+	a, ok := findAttempt(run, seq)
+	if !ok {
+		httpserver.Fail(c, http.StatusNotFound, "attempt not found")
+		return
+	}
+
+	var req AttemptQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpserver.Error(c, http.StatusBadRequest, err)
+		return
+	}
+	req.Question = strings.TrimSpace(req.Question)
+	if req.Question == "" {
+		httpserver.Fail(c, http.StatusBadRequest, "question is required")
+		return
+	}
+	if len([]rune(req.Question)) > 500 {
+		httpserver.Fail(c, http.StatusBadRequest, "question is too long (max 500 characters)")
+		return
+	}
+
+	answer, evidence := explainAttempt(a)
+	c.JSON(http.StatusOK, AttemptAnswerResponse{
+		RunID:    runID,
+		Seq:      seq,
+		Question: req.Question,
+		Answer:   answer,
+		Source:   "evidence",
+		Evidence: evidence,
+	})
+}
+
+// explainAttempt 从一次尝试的证据拼出确定答案。
+//
+// 顺序刻意固定：先讲做了什么，再讲结果/失败，再讲裁决，最后讲当时搜的参数。
+// 参数按键排序，保证同一输入永远给同一段文字（契约测试要能逐字断言）。
+func explainAttempt(a loop.Attempt) (string, AttemptEvidence) {
+	ev := AttemptEvidence{
+		Hypothesis:   a.Hypothesis,
+		Params:       a.Params,
+		ExperimentID: a.ExperimentID,
+		NumTrials:    a.NumTrials,
+		OK:           a.OK,
+		Challenges:   []string{},
+	}
+	if a.Result != nil && a.Result.BacktestResult != nil {
+		ev.Sharpe = a.Result.BacktestResult.SharpeRatio
+	}
+	if a.Err != nil {
+		ev.Error = a.Err.Error()
+	}
+	if a.Verdict != nil {
+		p := a.Verdict.Probability
+		ev.VerdictProbability = &p
+		ev.Blocking = a.Verdict.Blocking
+		for _, ch := range a.Verdict.Challenges {
+			if ch.Severity == validation.SeverityBlocking {
+				ev.Challenges = append(ev.Challenges, ch.Dimension+"："+ch.Message)
+			}
+		}
+	}
+
+	var b strings.Builder
+	if ev.Hypothesis != "" {
+		b.WriteString("这次尝试是在「" + ev.Hypothesis + "」上做的。")
+	} else {
+		b.WriteString("这次尝试没有记录假设。")
+	}
+	switch {
+	case ev.Error != "":
+		b.WriteString("它没有跑完：" + ev.Error + "。")
+	case a.Result == nil || a.Result.BacktestResult == nil:
+		b.WriteString("它没有产出可用的回测结果。")
+	default:
+		b.WriteString(fmt.Sprintf("它跑出了结果，Sharpe=%.2f。", ev.Sharpe))
+	}
+	if ev.VerdictProbability != nil {
+		b.WriteString(fmt.Sprintf("验证器综合概率 %.0f%%，%d 条阻断质疑。",
+			*ev.VerdictProbability*100, ev.Blocking))
+		if len(ev.Challenges) > 0 {
+			b.WriteString("阻断点：" + strings.Join(ev.Challenges, "；") + "。")
+		}
+	} else if ev.Error == "" {
+		b.WriteString("这次尝试没有验证器裁决。")
+	}
+	if len(a.Params) > 0 {
+		keys := make([]string, 0, len(a.Params))
+		for k := range a.Params {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%v", k, a.Params[k]))
+		}
+		b.WriteString("当时搜的参数：" + strings.Join(parts, "，") + "。")
+	}
+	if ev.NumTrials > 0 {
+		b.WriteString(fmt.Sprintf("统计校正用的累计尝试数：%d。", ev.NumTrials))
+	}
+	return b.String(), ev
+}
+
 // lookupRun 取内存运行态。
 func (h *ExploreHandler) lookupRun(runID string) (*exploreRun, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	run, ok := h.runs[runID]
 	return run, ok
+}
+
+// parseAttemptSeq 解析路径里的 attempt seq；非法时已写好 400，调用方直接返回。
+func parseAttemptSeq(c *gin.Context) (int, bool) {
+	seq, err := strconv.Atoi(c.Param("seq"))
+	if err != nil || seq < 0 {
+		httpserver.Fail(c, http.StatusBadRequest, "invalid attempt seq")
+		return 0, false
+	}
+	return seq, true
+}
+
+// findAttempt 持 run.mu 复制一份尝试快照，避免与探索 goroutine 并发读写。
+func findAttempt(run *exploreRun, seq int) (loop.Attempt, bool) {
+	run.mu.Lock()
+	defer run.mu.Unlock()
+	for _, a := range run.attempts {
+		if a.Seq == seq {
+			return a, true
+		}
+	}
+	return loop.Attempt{}, false
 }
