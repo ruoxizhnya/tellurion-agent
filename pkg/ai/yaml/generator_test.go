@@ -457,10 +457,14 @@ func TestGenerator_FullWorkflow(t *testing.T) {
 
 	// Generate minimal version
 	minimal := g.GenerateMinimal(i)
+	// GenerateMinimal 是「快速测试用的最小完整配置」，Validate 必须接受它。
+	// 原用例把 err 赋了值却从不检查，等于没验——这里补上断言，
+	// 否则 minimal 退化到缺段也不会红。
 	err = g.Validate(minimal)
-	// Minimal might not have all required sections, so this may fail
-	// But it should still have strategy section
+	require.NoError(t, err)
 	assert.Contains(t, minimal, "strategy:")
+	assert.Contains(t, minimal, "backtest:")
+	assert.Contains(t, minimal, "data:")
 }
 
 // Helper function
