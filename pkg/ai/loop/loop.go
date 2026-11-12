@@ -10,7 +10,9 @@ package loop
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/ruoxizhnya/tellurion-contracts/domain"
@@ -131,6 +133,17 @@ type TrialCounter interface {
 	ExperimentTrialStats(ctx context.Context, runID string) (aistore.TrialStats, error)
 }
 
+// Direction 是一条人类指方向（G2），只作用于本轮**后续**尝试。
+//
+// 它不是配置：已经跑完的尝试不会因为后来指了方向而重算。把它记在 Attempt 的
+// Hypothesis 里，是为了让「这一轮后来被带去哪」在 ai.experiments 里有行可查。
+type Direction struct {
+	Text string `json:"text"`
+	// AttemptSeq 记录用户是从哪张候选卡指的方向；nil = 卡外指方向。
+	AttemptSeq *int      `json:"attempt_seq,omitempty"`
+	At         time.Time `json:"at"`
+}
+
 // Controller 驱动一轮探索。
 type Controller struct {
 	runner   TryRunner
@@ -142,6 +155,9 @@ type Controller struct {
 
 	mu      sync.Mutex
 	stopped bool
+	// directions 是人类在运行期追加的指方向（G2）。与 stopped 同一把锁 ——
+	// 它们都是「跑的过程中被外面的手改过的状态」。
+	directions []Direction
 }
 
 // NewController 构造控制器。backtest 可以为 nil，此时 pipeline 会跳过回测
@@ -170,6 +186,54 @@ func (c *Controller) isStopped() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.stopped
+}
+
+// Steer 追加一条人类指方向（G2）。空文本被忽略。返回当前累计条数。
+//
+// 只影响后续尝试：注入方式是把方向文本并进后续每次 Execute 的描述与假设。
+// 正在跑的那次不动 —— 与 Stop 同一语义，避免把一次尝试改成半人半机。
+func (c *Controller) Steer(text string, attemptSeq *int) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return len(c.Directions())
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.directions = append(c.directions, Direction{Text: text, AttemptSeq: attemptSeq, At: time.Now()})
+	return len(c.directions)
+}
+
+// Directions 返回当前已追加的指方向快照。
+func (c *Controller) Directions() []Direction {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]Direction, len(c.directions))
+	copy(out, c.directions)
+	return out
+}
+
+// applyDirections 把当前方向并进描述与假设。没有方向时原样返回。
+func (c *Controller) applyDirections(description, hypothesis string) (string, string) {
+	dirs := c.Directions()
+	if len(dirs) == 0 {
+		return description, hypothesis
+	}
+	texts := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		texts = append(texts, d.Text)
+	}
+	joined := strings.Join(texts, "；")
+	if description != "" {
+		description += "\n\n【人类指方向】" + joined
+	} else {
+		description = "【人类指方向】" + joined
+	}
+	if hypothesis != "" {
+		hypothesis += " | 人指方向: " + joined
+	} else {
+		hypothesis = "人指方向: " + joined
+	}
+	return description, hypothesis
 }
 
 // Run 连续跑最多 MaxTries 次尝试，直到跑满或被叫停。
@@ -217,12 +281,15 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 		}
 
 		sug := c.proposer.Suggest(observed)
+		// G2：人类指方向只影响「从下一条开始」的尝试。并进描述（告诉底座）
+		// 与假设（落到 ai.experiments 行），已经跑完的尝试不重算。
+		description, hypothesis := c.applyDirections(cfg.Description, sug.Hypothesis)
 
 		execCtx := pipeline.WithExperimentContext(ctx, pipeline.ExperimentContext{
 			RunID:        cfg.RunID,
 			Seq:          seq,
 			ParentID:     resolveParent(idBySeq, sug.ParentSeq),
-			Hypothesis:   sug.Hypothesis,
+			Hypothesis:   hypothesis,
 			DatasetSplit: cfg.DatasetSplit,
 		})
 		// P1-2b：把这次的参数真的交给底座。少了这一步，控制器搜它的、
@@ -231,12 +298,12 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 			execCtx = pipeline.WithParameterOverrides(execCtx, sug.Params)
 		}
 
-		res, err := c.runner.Execute(execCtx, cfg.Description, c.backtest)
+		res, err := c.runner.Execute(execCtx, description, c.backtest)
 
 		a := Attempt{
 			Seq:        seq,
 			Params:     sug.Params,
-			Hypothesis: sug.Hypothesis,
+			Hypothesis: hypothesis,
 			Result:     res,
 			Err:        err,
 		}

@@ -204,6 +204,9 @@ func (h *ExploreHandler) RegisterExploreRoutes(router *gin.RouterGroup) {
 		g.GET("/runs/:runID", h.Status)
 		g.GET("/runs/:runID/stream", h.Stream)
 		g.POST("/runs/:runID/stop", h.Stop)
+		// G2 指方向：只作用于**后续**尝试，run 续跑时把约束注入描述与假设。
+		// 三处上下文入口（候选卡 / 被放弃的尝试 / 结果流）共用 run_id 坐标。
+		g.POST("/runs/:runID/steer", h.Steer)
 	}
 }
 
@@ -555,4 +558,69 @@ func (h *ExploreHandler) Stop(c *gin.Context) {
 		run.cancel()
 	}
 	c.JSON(http.StatusOK, gin.H{"run_id": c.Param("runID"), "stopping": true})
+}
+
+// ---------------------------------------------------------------------------
+// B-06 人工干预写面（G2 指方向）
+// ---------------------------------------------------------------------------
+
+// SteerRequest 是 G2 指方向的请求体。
+type SteerRequest struct {
+	// Direction 是人给的约束文本（「先别扩参数空间，只试反转类」）。
+	Direction string `json:"direction" binding:"required" example:"先别扩大参数空间，只试反转类"`
+	// AttemptSeq 记录这次方向是从哪张候选卡指出来的；省略 = 卡外指方向。
+	AttemptSeq *int `json:"attempt_seq"`
+}
+
+// Steer 是一次人类指方向（G2）。
+//
+// 只影响**后续**尝试：正在跑的那次不改。已结束的 run 返回 409 —— 方向没有
+// 可以作用的下一次尝试，接受它就是制造一个永远不会生效的承诺。
+func (h *ExploreHandler) Steer(c *gin.Context) {
+	runID := c.Param("runID")
+	run, ok := h.lookupRun(runID)
+	if !ok {
+		httpserver.Fail(c, http.StatusNotFound, "run not found")
+		return
+	}
+
+	var req SteerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpserver.Error(c, http.StatusBadRequest, err)
+		return
+	}
+	req.Direction = strings.TrimSpace(req.Direction)
+	if req.Direction == "" {
+		httpserver.Fail(c, http.StatusBadRequest, "direction is required")
+		return
+	}
+	if len([]rune(req.Direction)) > 1000 {
+		httpserver.Fail(c, http.StatusBadRequest, "direction is too long (max 1000 characters)")
+		return
+	}
+
+	run.mu.Lock()
+	done := run.done
+	run.mu.Unlock()
+	if done {
+		httpserver.Fail(c, http.StatusConflict, "run already finished")
+		return
+	}
+
+	n := run.ctrl.Steer(req.Direction, req.AttemptSeq)
+	c.JSON(http.StatusOK, gin.H{
+		"run_id":     runID,
+		"accepted":   true,
+		"count":      n,
+		"directions": run.ctrl.Directions(),
+		"applied_to": "next_attempt",
+	})
+}
+
+// lookupRun 取内存运行态。
+func (h *ExploreHandler) lookupRun(runID string) (*exploreRun, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	run, ok := h.runs[runID]
+	return run, ok
 }
