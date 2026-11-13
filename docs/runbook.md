@@ -7,7 +7,7 @@
 
 ## 0. 结论先行
 
-- **活着**看 `/health`：只证明进程与 HTTP 栈在，**不碰数据库**。
+- **活着**看 `/healthz`（兼容别名 `/health`）：只证明进程与 HTTP 栈在，**不碰数据库**。
 - **能接流量**看 `/readyz`（等价 `/api/readyz`）：池能 ping 通，且 `ai.*` 关键表在位；否则 503。
 - **生成链失败**先看 job 终态：`GET /api/copilot/generate/{job_id}` 的 `status` 与 `build_error`。
 - 全链路 fail-closed：不会返回空结果，也不会跳过失败步骤静默降级。
@@ -27,7 +27,7 @@ docker compose -f deploy/compose.yaml ps
 成功判据（三条都满足）：
 
 ```bash
-curl -fsS http://127.0.0.1:8086/health
+curl -fsS http://127.0.0.1:8086/healthz
 # {"service":"ai-service","status":"ok"}
 
 curl -fsS http://127.0.0.1:8086/readyz
@@ -80,15 +80,15 @@ docker compose -f deploy/compose.yaml down -v        # 连卷删除；下一轮�
 宿主机直跑时 `Ctrl-C`（SIGINT）或 SIGTERM，日志应出现
 `Shutdown signal received; beginning graceful drain`，随后进程退出。
 
-## 2. `/health` 与 `/readyz` 的语义差异
+## 2. `/healthz`（兼容 `/health`）与 `/readyz` 的语义差异
 
 | 探针 | 判据 | 失败时 | 用途 |
 |---|---|---|---|
-| `GET /health` | 进程与 HTTP 栈存活，**不访问 DB** | 进程不在 → 连接失败 | 存活探针 / compose healthcheck |
+| `GET /healthz`（兼容 `/health`） | 进程与 HTTP 栈存活，**不访问 DB** | 进程不在 → 连接失败 | 存活探针 / compose healthcheck |
 | `GET /readyz`、`GET /api/readyz` | 2s 预算内池 ping 通 **且** `ai.experiments` / `ai.factor_genes` / `ai.strategy_genes` / `ai.research_profile` 四张表在位 | 503 + `checks.database` 给具体错误 | 就绪探针；决定是否接流量 |
 
 - 两个路径都免鉴权、免限流（编排器不持有用户 token；429 会被读成「不 ready」）。
-- `readyz` 为 `not_ready` 时进程仍活着（`/health` 200），**不要靠重启掩盖 DB 问题**。
+- `readyz` 为 `not_ready` 时进程仍活着（`/healthz` 200），**不要靠重启掩盖 DB 问题**。
 
 ## 3. 失败排查（现象 → 先看什么 → 常见原因 → 日志 / 终态）
 
@@ -98,7 +98,7 @@ docker compose -f deploy/compose.yaml down -v        # 连卷删除；下一轮�
 
 - 启动即退出（compose 因 `restart: unless-stopped` 反复拉起），日志：
   `Failed to initialize ai store`，其下带 `aistore: connect: ...` 或 `aistore: migrate: ...`。
-- 已在运行、DB 中途挂掉：`/health` 仍 200，`/readyz` 503，`checks.database` 含
+- 已在运行、DB 中途挂掉：`/healthz` 仍 200，`/readyz` 503，`checks.database` 含
   `aistore: ping failed: ...`。
 
 **先看什么**
@@ -122,7 +122,7 @@ docker compose -f deploy/compose.yaml exec -T ai-service printenv DATABASE_HOST 
 
 ### 3.2 就绪 503：`ai.*` 迁移未执行 / 关键表缺失
 
-**现象**：进程活着（`/health` 200），`/readyz` 503，`checks.database` 为：
+**现象**：进程活着（`/healthz` 200），`/readyz` 503，`checks.database` 为：
 
 ```
 aistore: required relation ai.experiments is missing (startup migration did not run or was rolled back)
@@ -250,7 +250,7 @@ docker compose -f deploy/compose.yaml restart ai-service
 docker compose -f deploy/compose.yaml down -v
 
 # 探针
-curl -fsS http://127.0.0.1:8086/health
+curl -fsS http://127.0.0.1:8086/healthz
 curl -fsS http://127.0.0.1:8086/readyz
 
 # DB

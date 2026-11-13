@@ -36,8 +36,8 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 | GET | `/api/pipeline/calibration` | 校准误差 + holdout 命中率 |
 | GET | `/api/tools` · `/api/tools/{name}` | 工具注册表 |
 | POST | `/api/tools/{name}` | 执行工具 |
-| GET | `/health` · `/metrics` | 运维面（存活 / 指标） |
-| GET | `/readyz` · `/api/readyz` | 就绪面：DB ping + `ai.*` 迁移关键表；未就绪 503，`/health` 仍 200 |
+| GET | `/healthz` · `/health`（兼容别名） · `/metrics` | 运维面（存活 / 指标） |
+| GET | `/readyz` · `/api/readyz` | 就绪面：DB ping + `ai.*` 迁移关键表；未就绪 503，`/healthz` 仍 200 |
 
 > 这四族（copilot / pipeline / explore / tools）是对外全部；**没有第五族**。加族要先改 openapi 与本文。
 > 路径前缀：`explore` / `copilot` / `pipeline` 挂 `/api/*`；`tools` 同时接受 `/api/tools` 与 `/api/tools/`（尾斜杠变体）。
@@ -260,7 +260,7 @@ verified-by: 裁决 2026-11-11 —— 本文升级为四组端点的**唯一完�
 
 ### 1.5 运维面
 
-`GET /health`（存活，不碰库）/ `GET /metrics` / `GET /readyz` · `/api/readyz`（DB ping + `ai.*` 关键表；未就绪 503，`/health` 仍 200）。
+`GET /healthz`（存活，不碰库；`/health` 为兼容别名）/ `GET /metrics` / `GET /readyz` · `/api/readyz`（DB ping + `ai.*` 关键表；未就绪 503，`/healthz` 仍 200）。
 
 ## 2. 错误码与 fail-closed 语义
 

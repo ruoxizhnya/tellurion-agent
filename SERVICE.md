@@ -29,7 +29,7 @@ truth:
 
 status: evergreen
 last-verified: 2026-11-12
-verified-by: 2026-11-12 补 `docs/runbook.md`（起停、`/health` vs `/readyz`、DB 不可达、`ai.*` 迁移缺失、`AI not configured`、`chain sink not configured`、`sandbox_rejected` 分支），命令/端口/env 逐项对照代码、`Dockerfile`、`deploy/compose.yaml`；此前 2026-11-11 实读 README / AGENTS / ARCHITECTURE / api-schema / db-schema / dataflow / config/ai-service.yaml / deploy/compose.yaml / go.mod；端口与端点数量未写入
+verified-by: 2026-11-12 补 `docs/runbook.md`（起停、`/healthz`（兼容 `/health`）vs `/readyz`、DB 不可达、`ai.*` 迁移缺失、`AI not configured`、`chain sink not configured`、`sandbox_rejected` 分支），命令/端口/env 逐项对照代码、`Dockerfile`、`deploy/compose.yaml`；此前 2026-11-11 实读 README / AGENTS / ARCHITECTURE / api-schema / db-schema / dataflow / config/ai-service.yaml / deploy/compose.yaml / go.mod；端口与端点数量未写入
 ---
 
 # 服务卡：tellurion-agent
@@ -80,8 +80,8 @@ verified-by: 2026-11-12 补 `docs/runbook.md`（起停、`/health` vs `/readyz`�
 
 - **常驻进程**：`cmd/ai`（ai-service，唯一 HTTP 监听）；实验循环与 pipeline 在进程内异步执行。
 - **存活/就绪语义**：
-  - `GET /health`：进程存活，**不碰库**。
-  - `GET /readyz`（等价 `/api/readyz`）：DB ping 通过且 `ai.*` 迁移关键表存在；未就绪 503，`/health` 仍 200。
+  - `GET /healthz`（规范名；`/health` 为兼容别名，同 handler、同响应体）：进程存活，**不碰库**。
+  - `GET /readyz`（等价 `/api/readyz`）：DB ping 通过且 `ai.*` 迁移关键表存在；未就绪 503，`/healthz` 仍 200。
 - **部署真相**：`deploy/compose.yaml`、`Dockerfile`、`config/ai-service.yaml`。
 - **端口**：不在此卡；见上述部署真相。
 
@@ -99,7 +99,7 @@ verified-by: 2026-11-12 补 `docs/runbook.md`（起停、`/health` vs `/readyz`�
 
 - **影响面**：`degrading`——AI 四族路由不可用；core 的交易、回测与风控主链路不受影响。写不进留痕时生成任务 fail-closed，不会产出无法复查的代码。
 - **先确认（按顺序）**：
-  1. `GET /health` 是否 200；不是则看进程日志与启动配置。
+  1. `GET /healthz` 是否 200；不是则看进程日志与启动配置。
   2. `GET /readyz` 是否 200；503 时看 DB 连通与 `ai.*` 迁移是否执行。
   3. 生成 / 工具失败看 job 终态与 `build_error`：是否点名 `ai.generation_chain` / `chain sink not configured` / `AI not configured`。
 - **升级路径**：`owner` → 跨仓争议 → core `docs/TASKS.md`

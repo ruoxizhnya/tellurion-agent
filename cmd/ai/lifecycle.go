@@ -140,6 +140,7 @@ func newRateLimiter(rate int, window time.Duration) *rateLimiter {
 // 不豁免 —— 它们是口令爆破的第一道闸。逐字相等匹配，不做前缀匹配（前缀
 // 匹配会被 `..` 之类的写法绕过）。
 var rateLimitExemptPaths = []string{
+	"/healthz",
 	"/health",
 	"/readyz",
 	"/api/readyz",

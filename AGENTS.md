@@ -23,6 +23,12 @@ go test ./cmd/ai/... -race -count=1     # 端点/SSE 这类并发面必带 -race
 - 不要把 core 的实现抄进来"消除依赖"（那是把边界搞坏，不是修好）；
 - 需要 core 的数据 / 计算 → 走它已登记的 HTTP 粗粒度端点（见 `docs/dataflow.md`）。
 
+**CI 覆盖面**（`.github/workflows/ci.yml`，Go `1.26.11`）：`gofmt -l .`（非空即红，AGENT-CI-GATES）→ `go build ./...` → `go vet ./...` → `govulncheck@latest ./...` → **Migrate（`aistore.Migrate`，即 `TestMigrate_Integration`）** → `go test ./... -count=1 -p 1 -coverprofile=coverage.out` + **覆盖率门**（AGENT-CI-GATES）→ `go test -race ./... -count=1 -p 1` → `staticcheck@latest ./...`。
+
+- **CI 的 DB 腿（AGENT-CI-GATES，2026-11-13）**：Test job 起 `postgres:16` service（`pg_isready`）+ job 级注入 `TEST_DATABASE_DSN`（CI 内临时库 `tellurion_agent_test`，**绝不指向部署库**）。Test 前先跑 `go test ./pkg/aistore -run '^TestMigrate_Integration$' -count=1 -v` 应用迁移——入口就是服务启动同款 `aistore.Migrate`（`pkg/aistore/migrate.go` 是 `ai.*` schema 唯一建表真相），不另造 `.sql` 镜像、不复制 core 脚本。效果：库侧 **21 条**用例由 SKIP 转 PASS（带 DSN 1161 PASS / 9 SKIP〔analysis 联调、表达式对拍等设计性 skip〕，无 DSN 1140 PASS / 30 SKIP）；**本地不设 DSN 仍按设计 skip**。
+- **`-p 1` 是必须的**（实测）：真库腿共享同一个 `ai.*` schema，跨包并行会互相污染——并行跑时 `TestExperimentCount_PersistsAcrossRestart` 6≠7、`TestRun_RealPipelineAndRealDB` 行数 1≠5；串行后全绿。CI 的 Test 与 `-race` 两步都带 `-p 1`。
+- **覆盖率门（AGENT-CI-GATES）**：阈值 **60%**（语句加权，`go tool cover -func` 的 total），来源 = 2026-11-13 在隔离 PG 16 上真跑全套件实测 **65.6%**（7,202 条语句），取整 65 减 5（跨仓口径见 `tellurion:docs/TASKS.md` → `X-COVERAGE-FLOOR`）。低于阈值 `exit 1`。本仓测试面大，删单个测试文件最多掉 1.6 点（`pkg/ai/gene_pool/integration_test.go` ⇒ 64.0%），漏配 DSN 实测 **62.5% > 60%**——两项都**不**单独触红；门真正拦的是大块测试丢失（实测删 `pkg/ai/tools/builtin` + `pkg/ai/pipeline` 两包测试 ⇒ 46.8% 红），兼防累计漂移。删到破坏编译的用例则测试步 `EXIT=1`。
+
 ### 2.1 鉴权三态（硬约束）
 
 启动期 `decideAuthStartup`（`cmd/ai/lifecycle.go`）一次性定形态，**禁止**在运行期改判：

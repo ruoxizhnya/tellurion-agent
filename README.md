@@ -8,7 +8,7 @@ Quant Lab 的 **AI 实验员层**。从 monorepo `tellurion` 拆出（2026-10-09
 
 本仓含 **AI 实验员**领域的全部代码与文档。后端内核（回测引擎、策略运行时、表达式 DSL、
 数据供给）在 [`tellurion`](https://github.com/ruoxizhnya/tellurion)（core，
-本仓**单向依赖**它），前端在 [`tellurion-ui`](https://github.com/ruoxizhnya/tellurion-ui)，
+运行期通过 HTTP 单向依赖它，**无 Go 编译依赖**），前端在 [`tellurion-ui`](https://github.com/ruoxizhnya/tellurion-ui)，
 跨领域文档在 [`tellurion-docs`](https://github.com/ruoxizhnya/tellurion-docs)。
 
 切分判据是 **DDD**：「怎么算」= core（仪器）；「试什么 / 怎么试 / 试完怎么判」= AI（实验员）。
@@ -28,9 +28,16 @@ Quant Lab 的 **AI 实验员层**。从 monorepo `tellurion` 拆出（2026-10-09
 ## 依赖方向（结构性不变量）
 
 ```
-agent ──HTTP──► core（tellurion；运行期调用，零编译依赖 / 无 replace）
+agent ──HTTP──► core / data-service / strategy-asset（运行期调用，无 Go 编译依赖 / 无 replace）
 core ────────────► ✗ 永不反向依赖 agent
 ```
+
+运行期 URL 依赖（全部单向、只走 HTTP）：core 的 `POST /api/backtest`、
+`GET /api/backtest/{id}`、`POST /api/walkforward`、`POST /api/expression/validate`、
+`GET /api/expression/catalog`、`POST /api/risk/detect_regime`、`GET /api/strategies`；
+data-service 的 `POST /api/factor/compute`、`POST /api/factor/evaluate`；
+strategy-asset-service 的 `/api/strategies*` 写面（create / source / build / builds）。
+"零编译依赖"指 `go.mod` 不 require core、也没有 `replace`；不表示运行期不需要 core。
 
 core 仓的 `internal/repoguard` 有护栏钉住这个方向：core 里**不许出现 `pkg/ai` 目录**、
 生产代码不许 import `pkg/ai` 或 agent 模块。反向边 = 重新制造仓级环 = Go module 直接拒绝编译。
@@ -87,11 +94,11 @@ docker compose -f deploy/compose.yaml up --build
 `STRATEGY_ASSET_URL` 覆盖成服务名。启动期会逐项解析这些主机名
 （[cmd/ai/endpoints.go](file:///c:/Users/ruoxi/Workspace/tellurion-agent/cmd/ai/endpoints.go)）：
 宿主机上误留容器 DNS 会在启动时报错并点名该注入哪个 env，不会拖到第一次
-工具调用才 404。探针：`/health`（存活，不碰库）与 `/readyz`（就绪，校验
+工具调用才 404。探针：`/healthz`（存活，不碰库；`/health` 为兼容别名）与 `/readyz`（就绪，校验
 DB ping + `ai.*` 迁移关键表）。
 
 ```bash
-curl -sS http://127.0.0.1:8086/health
+curl -sS http://127.0.0.1:8086/healthz
 curl -sS http://127.0.0.1:8086/readyz
 ```
 

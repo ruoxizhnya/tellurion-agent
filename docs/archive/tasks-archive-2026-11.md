@@ -38,6 +38,9 @@
 | AGENT-EXPLORE-INTERVENTIONS | UI 子台账 B-06 的三条干预写面（G2 指方向 / G3 追问 / G4 标记）缺端点 | 2026-11-12 | `76c98ee`、`9b4e381`、`4d27919`、`2f4b8a1` | [施工记录](#AGENT-EXPLORE-INTERVENTIONS) |
 | AGENT-REVIEW-PENDING-SOURCE | core「待审阅 N」聚合面已定稿，agent 缺上游读面 `GET /api/explore/review/pending` | 2026-11-12 | 见本条 | [施工记录](#AGENT-REVIEW-PENDING-SOURCE) |
 | AGENT-ADOPTION-DECISION-JSON-TAGS | `AdoptionDecision` 缺 json tag，`calibration.entries[]` 实际输出 PascalCase，与 api-schema 不一致 | 2026-11-12 | 见本条 | [施工记录](#AGENT-ADOPTION-DECISION-JSON-TAGS) |
+| AGENT-PROBE-HEALTHZ | 增加 `/healthz` 并保留 `/health` 兼容别名 | 2026-11-13 | 见本条 | [原文与施工记录](#AGENT-PROBE-HEALTHZ) |
+| AGENT-README-DEPENDENCY-WORDING | README 依赖口径澄清（无 Go 编译依赖 vs 运行期 HTTP 单向依赖） | 2026-11-13 | 见本条 | [原文与施工记录](#AGENT-README-DEPENDENCY-WORDING) |
+| AGENT-CI-GATES | CI 起 PG + gofmt 门 + 覆盖率门（库侧 21 条 SKIP→PASS；实测 65.6% → 门 60%） | 2026-11-13 | 见本条 | [原文与施工记录](#AGENT-CI-GATES) |
 
 ---
 
@@ -931,3 +934,60 @@
 - **③ 实现**：给 `AdoptionDecision` 补 11 个 snake_case tag（`id / proposal_id / actor / intervention / adopted / claimed_confidence / is_holdout / outcome_hit / result_ref / created_at / resolved_at`），`outcome_hit`、`resolved_at` 不加 `omitempty` —— 未回填时显式 `null`，与既有「`is_holdout` 恒显式」一致。
 - **④ 验收**：新增 `pkg/ai/adoption/calibration_test.go:TestReport_EntriesJSONKeysAreSnakeCase`，对实际 `json.Marshal(Report)` 的 `entries[0]` 键集合做精确断言（排序后逐项相等，PascalCase 混入即红）。`go test ./pkg/aistore ./pkg/ai/adoption ./cmd/ai` 全绿。**破坏验证**：把 `proposal_id` 的 tag 改成 `proposalId` → 该用例红；还原复绿、无残留标记。
 - **⑤ 契约形状（不变，只是实际输出归位）**：`calibration.entries[]` 每条键名固定为上述 11 个 snake_case；`adoption` 201 回显字段不变。无 contracts 仓改动需求。
+
+---
+
+## 2026-11-13 收口
+
+<a id="AGENT-PROBE-HEALTHZ"></a>
+### AGENT-PROBE-HEALTHZ · 增加 `/healthz` 并保留 `/health` 兼容别名 [P2] ✅ 2026-11-13
+
+> 档 3（实现）· 来源：02-implementation P2-1 · 顺序 3-8 · 依赖：core 伞 `tellurion:docs/TASKS.md` → `X-PROBE-CANONICAL-HEALTHZ`
+
+- **① 目标**：agent 探针名与其他 11 仓统一为 `/healthz`，`/health` 在兼容期内保留。
+- **② 上下文**：`cmd/ai/main.go:128` 只注册 `GET /health`；`cmd/ai/lifecycle.go:143` 的免鉴权白名单写死 `/health`；`docker-compose.yml` 的 healthcheck 也按 `/health` 配置。
+- **③ 要求**：① 注册 `GET /healthz`（与 `/health` 同 handler、同响应体）；② `/health` 保留 deprecated 别名一个周期；③ 同步免鉴权白名单、rate-limit 豁免表、compose healthcheck、`SERVICE.md` 与测试；④ 删除别名时另立单。
+- **④ 约束与非目标**：不删 `/health`；不改 `/readyz` / `/api/readyz` 语义；不改鉴权策略。
+- **⑤ 验收**：`/healthz` 200 且与 `/health` 同构；白名单无遗漏（未鉴权访问 `/healthz` 200）；compose 健康检查绿；破坏验证 = 删 `/healthz` 注册 ⇒ 用例红。
+- **⑥ 边界**：agent server + lifecycle + compose + SERVICE.md。
+
+**施工记录（2026-11-13）**：
+- **落点**：`cmd/ai/main.go` 抽出 `registerHealthProbes`，同一 handler 同时注册 `GET /healthz`（规范名）与 `GET /health`（兼容别名，同响应体 `{"service":"ai-service","status":"ok"}`）；`aiPublicPaths` 与 `lifecycle.go` 的 `rateLimitExemptPaths` 两表都收 `/healthz`；`deploy/compose.yaml` healthcheck 改 `http://127.0.0.1:8086/healthz`；`SERVICE.md`、`docs/api-schema.md`、`docs/runbook.md`、`README.md` 统一写成「`/healthz` 规范名，`/health` 兼容别名」；`/readyz` / `/api/readyz` 语义未动。
+- **测试**：`cmd/ai/main_test.go` 新增两条——`TestHealthProbesCanonicalAndAlias`（两路 200 且响应体逐字节相同）与 `TestHealthProbesArePublicAndUnthrottled`（两张豁免表都含两路，漏 `/healthz` 即红）。
+- **破坏验证（真做真还原）**：删 `router.GET("/healthz", healthz)` 一行 ⇒ `TestHealthProbesCanonicalAndAlias` 红（404）；把 `/healthz` 从 `aiPublicPaths` 摘掉 ⇒ 用例红；均逐字节还原、`git diff` 为空后复绿。
+- **未改**：core 侧 compose 健康检查切换归 core（本仓不动 core）；`/health` 别名删除另立单。
+
+<a id="AGENT-README-DEPENDENCY-WORDING"></a>
+### AGENT-README-DEPENDENCY-WORDING · README 依赖口径澄清 [P3] ✅ 2026-11-13
+
+> 档 3（实现）· 来源：02-implementation P3-1 · 顺序 3-9 · 依赖：无
+
+- **① 目标**：README 不再让读者以为"单向依赖 core"与"零编译依赖"互相矛盾。
+- **② 上下文**：`README.md:9-11` 自述"单向依赖 core"，`:31` 又写"零编译依赖"，中间未说明前者是运行期 HTTP 依赖。
+- **③ 要求**：统一表述为"无 Go 编译依赖；运行期通过 HTTP 单向依赖 core 的 `POST /api/backtest` 等端点"，并列出现有 URL 依赖（backtest、explore、copilot 相关）。
+- **④ 约束与非目标**：只改 README 文案；不动代码、`AGENTS.md` 依赖表与架构描述。
+- **⑤ 验收**：两处口径一致；无"零依赖"这类绝对措辞；链接检查通过。
+- **⑥ 边界**：`tellurion-agent/README.md`。
+
+**施工记录（2026-11-13）**：`README.md` 开头改为「运行期通过 HTTP 单向依赖它，**无 Go 编译依赖**」；依赖方向代码块改为 `agent ──HTTP──► core / data-service / strategy-asset（运行期调用，无 Go 编译依赖 / 无 replace）`；新增一段列出全部运行期 URL 依赖——core 的 `POST /api/backtest`、`GET /api/backtest/{id}`、`POST /api/walkforward`、`POST /api/expression/validate`、`GET /api/expression/catalog`、`POST /api/risk/detect_regime`、`GET /api/strategies`，data-service 的 `POST /api/factor/compute`、`POST /api/factor/evaluate`，strategy-asset-service 的 `/api/strategies*` 写面，并明确「零编译依赖」只指 `go.mod` 不 require core、无 `replace`。只动 README，未改代码 / `AGENTS.md` / 架构描述。
+
+<a id="AGENT-CI-GATES"></a>
+### AGENT-CI-GATES · CI 起 PG + gofmt 门 + 覆盖率门（16 条 DB 用例不再 skip）[P2] ✅ 2026-11-13
+
+> 档 4（测试）· 来源：03-testing P1-3 / P2-2 / P3-1 · 顺序 4-8 · 依赖：core 伞 `X-COVERAGE-FLOOR` / `X-CI-BASELINE-PIN`
+
+- **① 目标**：CI 真跑 DB 腿（16 条按设计 skip 的用例）、补 gofmt 门与覆盖率门。
+- **② 上下文**：Test job 无 `services: postgres` / 无 DSN，库侧用例长期 skip；CI 无 `gofmt -l` 门；无覆盖率门槛。
+- **③ 要求**：① 加 `postgres:16` service + healthcheck；② 注入本仓测试 DSN（以测试代码为准确认变量名）；③ Test 前应用本仓迁移；④ 本地无 DSN 仍 skip；⑤ 加 `gofmt -l`（非空即红）；⑥ 覆盖率门 = 实测 - 5。
+- **④ 约束与非目标**：不改业务代码；不把 skip 改成假通过；不顺手改探索循环。
+- **⑤ 验收**：CI 中 DB 用例 PASS（数量 > 0）；故意留一处未格式化 ⇒ 红；删测试 ⇒ 覆盖率门红；本地无 DSN ⇒ skip 且原因可读。
+- **⑥ 边界**：本仓 CI + 测试夹具。
+
+**施工记录（2026-11-13）**：
+- **DSN / 迁移口径（实测取得）**：库侧用例统一读 `TEST_DATABASE_DSN`；迁移合法入口 = `pkg/aistore.Migrate`（`pkg/aistore/migrate.go` 是 `ai.*` schema 唯一建表真相），服务启动也调它。CI 迁移步复用现成的幂等用例 `TestMigrate_Integration`，不手写 SQL、不复制 core 脚本。
+- **CI 改动**：`.github/workflows/ci.yml` 的 Test job 起 `postgres:16` service（`pg_isready`，5s/5s/10 次）+ job 级注入 `TEST_DATABASE_DSN`（CI 内临时库 `tellurion_agent_test`，**绝不指向部署库**）；新增 `Gofmt` 门（非空 `exit 1`）与 `Migrate（aistore.Migrate）` 步；`Test` 步改 `go test ./... -count=1 -p 1 -coverprofile=coverage.out`；新增 `Coverage gate` 步（`go tool cover -func` 最后一行取 total，解析不到也 `exit 1`，低于 60 即红）；`-race` 步同步加 `-p 1`；`govulncheck` / `staticcheck` 不变。
+- **`-p 1` 是实测必需**：真库腿共享同一个 `ai.*` schema，跨包并行互相污染——并行跑时 `TestExperimentCount_PersistsAcrossRestart` 实测 6≠7、`TestRun_RealPipelineAndRealDB` 行数 1≠5；串行后全绿。
+- **实测（隔离 PG 16 容器 55432 / 库 `tellurion_agent_test`，未碰部署库 `tellurion`）**：带 DSN `1161 PASS / 9 SKIP`（analysis 联调、表达式对拍等设计性 skip）、覆盖率 `total: 65.6%`（7,202 条语句）；无 DSN `1140 PASS / 30 SKIP`、`62.5%`。单内标题的「16 条」是旧口径，**实测库侧 21 条**由 SKIP 转 PASS，已按实测改正（不改测试凑数）。门 = 65 取整 - 5 = **60%**。
+- **破坏 / 负向验证（真做真还原）**：① 删 `pkg/ai/gene_pool/integration_test.go` ⇒ **64.0%**（仍门内，单文件最大影响 1.6 点）；② 删 `pkg/ai/tools/builtin` + `pkg/ai/pipeline` 两包全部测试 ⇒ **46.8% < 60% 门红**，逐字节还原后 `git status` 为空；③ 删到破坏编译的用例 ⇒ 测试步 `EXIT=1`；④ **如实登记**：漏配 DSN 实测 `62.5% > 60%`，本仓这项**不**单独触红（测试面 7,202 条语句），门的定位是防累计漂移 + 拦大块测试丢失。
+- **文档**：`AGENTS.md` §2 补 CI 链（gofmt / 迁移 / 覆盖率门）、两条 bullet（DB 腿 21 条 SKIP→PASS、门 60% 的来源与边界）与 `-p 1` 必需说明；`docs/TASKS.md` 三单收口指针、frontmatter 记 `completed-2026-11-13`。
+- **门禁**：`gofmt -l .` 无输出；`go build ./...` / `go vet ./...` / `go test ./... -count=1 -p 1`（无 DSN，库侧按设计 skip）全绿；`python -c "import yaml;yaml.safe_load(open('.github/workflows/ci.yml'))"` 解析通过。

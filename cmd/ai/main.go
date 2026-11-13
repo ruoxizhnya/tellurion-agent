@@ -125,14 +125,11 @@ func main() {
 	router := buildRouter(authSvc, authMode, v, logger)
 
 	// 健康探针（local-stack netstat 断言 + compose healthcheck 消费）。
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"service": "ai-service",
-			"status":  "ok",
-		})
-	})
-	// 就绪探针：/health 只看进程活着，/readyz 还要看「库能连 + ai.* 启动迁移
-	// 到位」。库断开时这里 503、/health 仍 200 —— 编排器摘流量但不重启进程。
+	// 规范名 /healthz（X-PROBE-CANONICAL-HEALTHZ）；/health 是兼容别名，
+	// 保留一个周期，删除别名时另立单。
+	registerHealthProbes(router)
+	// 就绪探针：/healthz 只看进程活着，/readyz 还要看「库能连 + ai.* 启动迁移
+	// 到位」。库断开时这里 503、/healthz 仍 200 —— 编排器摘流量但不重启进程。
 	registerReadiness(router, aiStore, logger)
 	router.GET("/metrics", kitobservability.Handler(m))
 
@@ -165,6 +162,20 @@ func main() {
 	gracefulShutdown(srv, logger)
 }
 
+// registerHealthProbes 注册存活探针：/healthz 为规范名
+// （X-PROBE-CANONICAL-HEALTHZ，2026-11-13），/health 为兼容别名，两者同
+// handler、同响应体。别名保留一个周期，删除时另立单（不在本函数里悄悄删）。
+func registerHealthProbes(router *gin.Engine) {
+	healthz := func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"service": "ai-service",
+			"status":  "ok",
+		})
+	}
+	router.GET("/healthz", healthz)
+	router.GET("/health", healthz)
+}
+
 // analysisAPIURL 解析 core analysis-service 的基址
 // （ai_service.factor_api_url，缺省 :8085）。因子工具与 QT-67 的
 // 日历/上市窗口只读动作共用同一个服务；配置键名是历史沿用，不再只指因子。
@@ -179,15 +190,16 @@ func analysisAPIURL(v *viper.Viper) string {
 // 本进程并不注册 /api/auth/* 这些路由，但反代/探针可能把请求打到这里，
 // 401 与 404 的区别会影响前端的鉴权姿势判断，故保持同一张表。
 //
-// **不收 core 的 `/api/health`**：本进程只注册 `/health`（存活）与
-// `/readyz`、`/api/readyz`（就绪），没有 `/api/health`。多留一条不存在的
-// 路径，只会让误打过来的探针把 404 当成「路由在、但服务异常」，把配置错误
-// 藏起来（X-LOW-CLEANUP，2026-11-12）。
+// **不收 core 的 `/api/health`**：本进程只注册 `/healthz`（存活，规范名）、
+// `/health`（兼容别名）与 `/readyz`、`/api/readyz`（就绪），没有 `/api/health`。
+// 多留一条不存在的路径，只会让误打过来的探针把 404 当成「路由在、但服务异常」，
+// 把配置错误藏起来（X-LOW-CLEANUP，2026-11-12）。
 var aiPublicPaths = []string{
 	"/api/auth/login",
 	"/api/auth/refresh",
 	"/api/auth/status",
 	"/api/auth/bootstrap",
+	"/healthz",
 	"/health",
 	"/readyz",
 	"/api/readyz",

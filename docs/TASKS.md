@@ -1,7 +1,8 @@
 ---
 status: active
 last-verified: 2026-11-13
-verified-by: 2026-11-13 五角审查立单（只立单不施工）——档 2（产品设计）新立 `AGENT-S2-HYPOTHESIS-SOURCE` ⏸；档 3（实现）新立 `AGENT-PROBE-HEALTHZ` ⬜（随 core 伞 `X-PROBE-CANONICAL-HEALTHZ`）/ `AGENT-README-DEPENDENCY-WORDING` ⬜；档 4（测试）新立 `AGENT-CI-GATES` ⬜；`AGENT-COPILOT-WORKING-DIR` 维持 ⛔。此前：2026-11-12 `AGENT-ADOPTION-DECISION-JSON-TAGS` ✅ 完成（`AdoptionDecision` 补 snake_case json tag，`calibration.entries[]` 与 api-schema / 201 回显归位；新增精确键集合契约测试，破坏验证复红/复绿）；此前同日 `AGENT-REVIEW-PENDING-SOURCE` ✅ 完成（`GET /api/explore/review/pending` 上游读面，形状按 core 已定稿契约；施工记录与口径边界见归档）；此前同日 UI 子台账 B-06 批次——`AGENT-EXPLORE-INTERVENTIONS` ✅ 完成（三条干预写面 G2 指方向 / G3 追问 / G4 标记 + adoption/calibration 契约回显，4 个原子 commit `76c98ee`/`9b4e381`/`4d27919`/`2f4b8a1` 已推 `origin/main`）；再此前： 2026-11-12 台账卫生批次——8 条已完成项（`AGENT-FACTOR-TOOLS-UNAVAILABLE` / `AGENT-HERMES-DOCS-ADR041` / `AGENT-EXPERIMENT-COUNT-SURFACE` / `AGENT-INTERVENTION-ADOPTION-LEDGER` / `AGENT-HYPOTHESIS-FILTER` / `AGENT-LLM-BUDGET-GATE` / `AGENT-EXPLORE-STATE-REAP` / `AGENT-CAUSAL-PARSE-TESTS`）原文逐字移入归档并补索引行，活跃层仅剩 `AGENT-COPILOT-WORKING-DIR` ⛔。此前： 2026-11-12 挂起任务处置批次（主任指令）——`AGENT-RUNBOOK-GAP` ✅ 完成（新增 `docs/runbook.md`：起停、`/health` vs `/readyz`、DB 不可达、`ai.*` 迁移缺失、`AI not configured`、`chain sink not configured`、`sandbox_rejected` 分支；命令/端口/env 逐项对照代码、Dockerfile、compose；`SERVICE.md` 的 `truth.runbook` 已指向该文件）；`AGENT-COPILOT-WORKING-DIR` 复核维持 ⛔：Docker 29.9.3 实测可用，重开条件的环境半条已满足，剩主任投入决策（B/C/继续挂）；kit v0.5.0 行号施工时重核。此前： 2026-11-12 `X-LOW-CLEANUP` agent 腿——核 `/api/health` 豁免注册：本进程只注册 `/health` / `/readyz` / `/api/readyz` / `/metrics` / `/api/auth/*`，无 `/api/health`；`aiPublicPaths` 与 `rateLimitExemptPaths` 两表均删除该条并改写注释（不再宣称「与 core 逐字一致」）；同日 `X-DEP` 补 Dockerfile 工具链 `golang:1.26.11-alpine`（实建通过）；2026-11-12 `X-CI-RACE-STATICCHECK` 补 CI 的 `-race` 与 `staticcheck` 门（存量 23 条告警按裁决 A 修干净、无配置基线；SA4010/SA4006 各单独 commit；`-race` 用 Docker golang:1.26 全量跑通 EXIT=0）；2026-11-12 `X-AGENTS-DEPENDENCY-TABLE` `AGENTS.md` §4 依赖表按实际 `go.mod` 订正（contracts v0.10.0 / kit v0.5.0 / pgx v5.11.0）；2026-11-12 `X-DEP-BUMP-CONSUMERS` 本仓腿：kit `v0.2.0 → v0.5.0`、`go` 1.25.0 → 1.26.11、pgx 随 MVS 到 v5.11.0；CI 增 `govulncheck` 门；降版破坏验证复红/还原复绿；`build/vet/test` 全绿；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 7 条六字段单（`AGENT-HERMES-DOCS-ADR041` / `AGENT-EXPERIMENT-COUNT-SURFACE` / `AGENT-INTERVENTION-ADOPTION-LEDGER` / `AGENT-HYPOTHESIS-FILTER` / `AGENT-LLM-BUDGET-GATE` / `AGENT-EXPLORE-STATE-REAP` / `AGENT-CAUSAL-PARSE-TESTS`），证据坐标引 ODR-068/071（`tellurion-docs:docs/archive/odr/`）；`AGENT-COPILOT-WORKING-DIR` 经 W4 复核维持 ⛔（去重，不另立单）；本轮只立单不修复。此前 2026-11-11 `AGENT-COPILOT-WORKING-DIR` 取证与裁决：同进程「每作业临时目录」不满足四条底线（无命令白名单、`BuildExecutor` 无 env 导致 GOCACHE/HOME 落在沙箱根外、runner 无网络/FS 隔离），且运行镜像 `alpine:3.19` 无 Go 工具链；选定容器化构建沙箱，按指令只出方案与单（状态 ⛔，含 A/C 退出条件与重开条件）。此前 2026-11-10 补真库腿——`TestSaveFactorCandidates_Integration` 在独立 PG 实例（`127.0.0.1:5433`，库 `tellurion`）上真跑通过（此前记「无库 SKIP」已失效），`pkg/aistore` 全包绿。此前 QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pkg/ai/client` 新客户端（建定义 → 传源码 → 产物载体 build+轮询）、copilot 登记端口 fail-closed、`ai.generation_chain` 并列四列坐标（幂等 ALTER 兼容存量库）；4 条破坏验证改坏即红、还原复绿；真库 round-trip 通过；gofmt/build/vet 0，全仓仅两条 QT-17 ③ 前置既有红（本文件 :187）。此前 SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；本仓反向护栏翻面 + 停写腿兼容旧表不存在）。此前 2026-10-25 QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
+verified-by: 2026-11-13 `AGENT-PROBE-HEALTHZ` / `AGENT-README-DEPENDENCY-WORDING` / `AGENT-CI-GATES` 施工收口（`/healthz` 规范名 + `/health` 兼容别名；README 依赖口径统一；CI 起 `postgres:16` + gofmt 门 + 覆盖率门 60〔实测 65.6%〕；见 `completed-2026-11-13`）；此前：2026-11-13 五角审查立单（只立单不施工）——档 2（产品设计）新立 `AGENT-S2-HYPOTHESIS-SOURCE` ⏸；档 3（实现）新立 `AGENT-PROBE-HEALTHZ` ⬜（随 core 伞 `X-PROBE-CANONICAL-HEALTHZ`）/ `AGENT-README-DEPENDENCY-WORDING` ⬜；档 4（测试）新立 `AGENT-CI-GATES` ⬜；`AGENT-COPILOT-WORKING-DIR` 维持 ⛔。此前：2026-11-12 `AGENT-ADOPTION-DECISION-JSON-TAGS` ✅ 完成（`AdoptionDecision` 补 snake_case json tag，`calibration.entries[]` 与 api-schema / 201 回显归位；新增精确键集合契约测试，破坏验证复红/复绿）；此前同日 `AGENT-REVIEW-PENDING-SOURCE` ✅ 完成（`GET /api/explore/review/pending` 上游读面，形状按 core 已定稿契约；施工记录与口径边界见归档）；此前同日 UI 子台账 B-06 批次——`AGENT-EXPLORE-INTERVENTIONS` ✅ 完成（三条干预写面 G2 指方向 / G3 追问 / G4 标记 + adoption/calibration 契约回显，4 个原子 commit `76c98ee`/`9b4e381`/`4d27919`/`2f4b8a1` 已推 `origin/main`）；再此前： 2026-11-12 台账卫生批次——8 条已完成项（`AGENT-FACTOR-TOOLS-UNAVAILABLE` / `AGENT-HERMES-DOCS-ADR041` / `AGENT-EXPERIMENT-COUNT-SURFACE` / `AGENT-INTERVENTION-ADOPTION-LEDGER` / `AGENT-HYPOTHESIS-FILTER` / `AGENT-LLM-BUDGET-GATE` / `AGENT-EXPLORE-STATE-REAP` / `AGENT-CAUSAL-PARSE-TESTS`）原文逐字移入归档并补索引行，活跃层仅剩 `AGENT-COPILOT-WORKING-DIR` ⛔。此前： 2026-11-12 挂起任务处置批次（主任指令）——`AGENT-RUNBOOK-GAP` ✅ 完成（新增 `docs/runbook.md`：起停、`/health` vs `/readyz`、DB 不可达、`ai.*` 迁移缺失、`AI not configured`、`chain sink not configured`、`sandbox_rejected` 分支；命令/端口/env 逐项对照代码、Dockerfile、compose；`SERVICE.md` 的 `truth.runbook` 已指向该文件）；`AGENT-COPILOT-WORKING-DIR` 复核维持 ⛔：Docker 29.9.3 实测可用，重开条件的环境半条已满足，剩主任投入决策（B/C/继续挂）；kit v0.5.0 行号施工时重核。此前： 2026-11-12 `X-LOW-CLEANUP` agent 腿——核 `/api/health` 豁免注册：本进程只注册 `/health` / `/readyz` / `/api/readyz` / `/metrics` / `/api/auth/*`，无 `/api/health`；`aiPublicPaths` 与 `rateLimitExemptPaths` 两表均删除该条并改写注释（不再宣称「与 core 逐字一致」）；同日 `X-DEP` 补 Dockerfile 工具链 `golang:1.26.11-alpine`（实建通过）；2026-11-12 `X-CI-RACE-STATICCHECK` 补 CI 的 `-race` 与 `staticcheck` 门（存量 23 条告警按裁决 A 修干净、无配置基线；SA4010/SA4006 各单独 commit；`-race` 用 Docker golang:1.26 全量跑通 EXIT=0）；2026-11-12 `X-AGENTS-DEPENDENCY-TABLE` `AGENTS.md` §4 依赖表按实际 `go.mod` 订正（contracts v0.10.0 / kit v0.5.0 / pgx v5.11.0）；2026-11-12 `X-DEP-BUMP-CONSUMERS` 本仓腿：kit `v0.2.0 → v0.5.0`、`go` 1.25.0 → 1.26.11、pgx 随 MVS 到 v5.11.0；CI 增 `govulncheck` 门；降版破坏验证复红/还原复绿；`build/vet/test` 全绿；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 7 条六字段单（`AGENT-HERMES-DOCS-ADR041` / `AGENT-EXPERIMENT-COUNT-SURFACE` / `AGENT-INTERVENTION-ADOPTION-LEDGER` / `AGENT-HYPOTHESIS-FILTER` / `AGENT-LLM-BUDGET-GATE` / `AGENT-EXPLORE-STATE-REAP` / `AGENT-CAUSAL-PARSE-TESTS`），证据坐标引 ODR-068/071（`tellurion-docs:docs/archive/odr/`）；`AGENT-COPILOT-WORKING-DIR` 经 W4 复核维持 ⛔（去重，不另立单）；本轮只立单不修复。此前 2026-11-11 `AGENT-COPILOT-WORKING-DIR` 取证与裁决：同进程「每作业临时目录」不满足四条底线（无命令白名单、`BuildExecutor` 无 env 导致 GOCACHE/HOME 落在沙箱根外、runner 无网络/FS 隔离），且运行镜像 `alpine:3.19` 无 Go 工具链；选定容器化构建沙箱，按指令只出方案与单（状态 ⛔，含 A/C 退出条件与重开条件）。此前 2026-11-10 补真库腿——`TestSaveFactorCandidates_Integration` 在独立 PG 实例（`127.0.0.1:5433`，库 `tellurion`）上真跑通过（此前记「无库 SKIP」已失效），`pkg/aistore` 全包绿。此前 QT-32-B 收口（2026-11-10）—— 生成物接资产服务：`pkg/ai/client` 新客户端（建定义 → 传源码 → 产物载体 build+轮询）、copilot 登记端口 fail-closed、`ai.generation_chain` 并列四列坐标（幂等 ALTER 兼容存量库）；4 条破坏验证改坏即红、还原复绿；真库 round-trip 通过；gofmt/build/vet 0，全仓仅两条 QT-17 ③ 前置既有红（本文件 :187）。此前 SVC-CORE-AI-RETIRE 收口（core 七表 DDL/实现/seed 清零；本仓反向护栏翻面 + 停写腿兼容旧表不存在）。此前 2026-10-25 QT-32-A（G8 agent 腿）—— ai.generation_chain 留痕 + copilot 的 promote 闸门；8 条破坏验证改坏即红、还原 SHA 一致；门禁 build/vet/test 全 EXIT=0。此前 QT-17 ④ 停写复核（同日）
+completed-2026-11-13: `AGENT-PROBE-HEALTHZ` / `AGENT-README-DEPENDENCY-WORDING` / `AGENT-CI-GATES` ✅（提交见 `git log --grep AGENT-CI-GATES` 等；`/healthz` + `/health` 别名、README 口径、CI 库侧 21 条 SKIP→PASS + gofmt 门 + 覆盖率门 60〔实测 65.6%〕），原文与施工记录在 `docs/archive/tasks-archive-2026-11.md`
 ---
 
 # TASKS — tellurion-agent 未完成项
@@ -47,44 +48,11 @@ verified-by: 2026-11-13 五角审查立单（只立单不施工）——档 2（
 - **⑥ 边界**：agent 数据模型 + `docs/api-schema.md`；core 反代与 UI 展示届时另立单。
 - **重开条件**：`CORE-S1-EXIT-EVIDENCE` 达成，且主任明确启动 S2。
 
-#### 2026-11-13 五角审查 · 档 3（实现）
+#### 2026-11-13 五角审查 · 档 3 / 档 4（已收口）
 
-### AGENT-PROBE-HEALTHZ · 增加 `/healthz` 并保留 `/health` 兼容别名 [P2] ⬜
+> `AGENT-PROBE-HEALTHZ` / `AGENT-README-DEPENDENCY-WORDING` / `AGENT-CI-GATES` 均 ✅（2026-11-13），原文与施工记录在归档「2026-11-13 收口」节，索引见归档顶部检索表。
 
-> 档 3（实现）· 来源：02-implementation P2-1 · 顺序 3-8 · 依赖：core 伞 `tellurion:docs/TASKS.md` → `X-PROBE-CANONICAL-HEALTHZ`
-
-- **① 目标**：agent 探针名与其他 11 仓统一为 `/healthz`，`/health` 在兼容期内保留。
-- **② 上下文**：`cmd/ai/main.go:128` 只注册 `GET /health`；`cmd/ai/lifecycle.go:143` 的免鉴权白名单写死 `/health`；`docker-compose.yml` 的 healthcheck 也按 `/health` 配置。
-- **③ 要求**：① 注册 `GET /healthz`（与 `/health` 同 handler、同响应体）；② `/health` 保留 deprecated 别名一个周期；③ 同步免鉴权白名单、rate-limit 豁免表、compose healthcheck、`SERVICE.md` 与测试；④ 删除别名时另立单。
-- **④ 约束与非目标**：不删 `/health`；不改 `/readyz` / `/api/readyz` 语义；不改鉴权策略。
-- **⑤ 验收**：`/healthz` 200 且与 `/health` 同构；白名单无遗漏（未鉴权访问 `/healthz` 200）；compose 健康检查绿；破坏验证 = 删 `/healthz` 注册 ⇒ 用例红。
-- **⑥ 边界**：agent server + lifecycle + compose + SERVICE.md。
-
-### AGENT-README-DEPENDENCY-WORDING · README 依赖口径澄清 [P3] ⬜
-
-> 档 3（实现）· 来源：02-implementation P3-1 · 顺序 3-9 · 依赖：无
-
-- **① 目标**：README 不再让读者以为"单向依赖 core"与"零编译依赖"互相矛盾。
-- **② 上下文**：`README.md:9-11` 自述"单向依赖 core"，`:31` 又写"零编译依赖"，中间未说明前者是运行期 HTTP 依赖。
-- **③ 要求**：统一表述为"无 Go 编译依赖；运行期通过 HTTP 单向依赖 core 的 `POST /api/backtest` 等端点"，并列出现有 URL 依赖（backtest、explore、copilot 相关）。
-- **④ 约束与非目标**：只改 README 文案；不动代码、`AGENTS.md` 依赖表与架构描述。
-- **⑤ 验收**：两处口径一致；无"零依赖"这类绝对措辞；链接检查通过。
-- **⑥ 边界**：`tellurion-agent/README.md`。
-
-#### 2026-11-13 五角审查 · 档 4（测试）
-
-### AGENT-CI-GATES · CI 起 PG + gofmt 门 + 覆盖率门（16 条 DB 用例不再 skip）[P2] ⬜
-
-> 档 4（测试）· 来源：03-testing P1-3 / P2-2 / P3-1 · 顺序 4-8 · 依赖：core 伞 `X-COVERAGE-FLOOR` / `X-CI-BASELINE-PIN`
-
-- **① 目标**：CI 真跑 DB 腿（16 条按设计 skip 的用例）、补 gofmt 门与覆盖率门。
-- **② 上下文**：Test job 无 `services: postgres` / 无 DSN，库侧用例长期 skip；CI 无 `gofmt -l` 门；无覆盖率门槛。
-- **③ 要求**：① 加 `postgres:16` service + healthcheck；② 注入本仓测试 DSN（以测试代码为准确认变量名）；③ Test 前应用本仓迁移；④ 本地无 DSN 仍 skip；⑤ 加 `gofmt -l`（非空即红）；⑥ 覆盖率门 = 实测 - 5。
-- **④ 约束与非目标**：不改业务代码；不把 skip 改成假通过；不顺手改探索循环。
-- **⑤ 验收**：CI 中 DB 用例 PASS（数量 > 0）；故意留一处未格式化 ⇒ 红；删测试 ⇒ 覆盖率门红；本地无 DSN ⇒ skip 且原因可读。
-- **⑥ 边界**：本仓 CI + 测试夹具。
-
-**其余无未做 / 挂起 / 外部依赖项**（截至 2026-11-13；档 2 `AGENT-S2-HYPOTHESIS-SOURCE` 挂起，档 3 `AGENT-PROBE-HEALTHZ` / `AGENT-README-DEPENDENCY-WORDING`，档 4 `AGENT-CI-GATES`）。已收口单的正文、验收与施工记录全部在归档文件里；新增工作一律另立单，不得以「补充说明」形式挂在本节。
+**其余无未做 / 挂起 / 外部依赖项**（截至 2026-11-13；档 2 `AGENT-S2-HYPOTHESIS-SOURCE` ⏸ 待主任裁决，`AGENT-COPILOT-WORKING-DIR` ⛔ 维持）。已收口单的正文、验收与施工记录全部在归档文件里；新增工作一律另立单，不得以「补充说明」形式挂在本节。
 
 ## 二、跨仓指针（不在本仓，勿双写）
 
